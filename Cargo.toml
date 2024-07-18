@@ -20,5 +20,8 @@ proc-macro2 = { version = "1" }
 quote = "1.0"
 syn = "2"
 
+# temp external
+pnet_packet = "0.35"
+
 [profile.release]
 debug = 2

@@ -1,6 +1,7 @@
 #![no_std]
 
-use core::{convert::Infallible, pin::Pin};
+use core::convert::Infallible;
+use core::pin::Pin;
 
 use oxpacket_macros::parse;
 
@@ -9,16 +10,13 @@ use oxpacket_macros::parse;
 #[macro_use]
 extern crate alloc;
 
-#[cfg(feature = "alloc")]
-pub enum Layer<T, U> {
-    View(T),
-    Owned(U),
-}
-
-#[cfg(not(feature = "alloc"))]
-pub struct Layer<T>(T);
-
 // need a cursor type...
+
+// PLAN OF WORK:
+// - Get composition/parser gen reasonably working on &mut[u8] and predefined types.
+//   - for now, use libpnet types before we can set up our own.
+// - Work out storage of adjacent type (e.g., ptrs in)
+// - Get
 
 pub struct Cursor<T> {
     data: T,
@@ -36,85 +34,116 @@ pub type Data<'a> = &'a mut [u8];
 pub enum ParseError {
     Unspec,
     Unwanted,
+    NeedsHint,
 }
 
 impl From<Infallible> for ParseError {
-    fn from(value: Infallible) -> Self {
-        todo!()
+    fn from(_: Infallible) -> Self {
+        Self::Unspec
     }
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
-
-pub enum NextType<T, E> {
-    None,
-    Header(T),
-    Extension(E),
-}
-
-pub trait NextElement<'a, 'b, MyType> {
-    // type MyType;
-    const EXTENSION_IN_TYPE: bool = false;
-
-    fn parse_next(
-        &'a self,
-        data: Data<'b>,
-    ) -> ParseResult<NextType<MyType, ()>>;
-}
 
 pub trait Parse2<'b> {
     type MyExtension: 'static;
 
     fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
     where
+        Self: Sized,
+    {
+        Self::parse_hint(data, None)
+    }
+
+    fn parse_hint(
+        data: &mut Cursor<Data<'b>>,
+        hint: Option<usize>,
+    ) -> ParseResult<Self>
+    where
         Self: Sized;
 }
 
-#[derive(Copy, Clone)]
-pub enum NextType2<T: 'static, E: 'static>
-{
-    Header(for<'any, 'any2> fn(&'any mut Cursor<Data<'any2>>) -> ParseResult<T>),
-    Extension(for<'any, 'any2> fn(&'any mut Cursor<Data<'any2>>) -> ParseResult<E>),
+pub trait Parse3<'b> {
+    fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
+    where
+        Self: Sized;
 }
 
-pub trait NextLayer<'b, 'c, Target: 'static>: Parse2<'b> {
-    // type MyType;
-    const EXTENSION_IN_TYPE: bool = true;
+pub trait ParseChoice<'b> {
+    type Denom: Copy;
 
+    fn parse_choice(
+        data: &mut Cursor<Data<'b>>,
+        hint: Option<Self::Denom>,
+    ) -> ParseResult<Self>
+    where
+        Self: Sized;
+}
+
+pub enum ParseControl<Denom: Copy> {
+    Continue(Denom),
+    Reject,
+    Accept,
+}
+
+// I feel a bit iffy about this one, mainly in the case we want to do ip -> udp with the value check.
+// impl<'b, T: Parse3<'b>> ParseChoice<'b> for T {
+//     type Denom = ();
+
+//     fn parse_choice(data: &mut Cursor<Data<'b>>, _hint: Option<Self::Denom>) -> ParseResult<Self>
+//     where
+//         Self: Sized {
+//         Parse3::parse(data)
+//     }
+// }
+
+#[derive(Copy, Clone)]
+pub enum NextType2<T: 'static, E: 'static> {
+    Header(
+        for<'any, 'any2> fn(&'any mut Cursor<Data<'any2>>) -> ParseResult<T>,
+    ),
+    Extension(
+        for<'any, 'any2> fn(&'any mut Cursor<Data<'any2>>) -> ParseResult<E>,
+    ),
+}
+
+pub trait NextLayer<'b, Target: 'static>: Parse2<'b> {
     // This might be a pain to get:
-    fn next_layer(
-        &'c self,
-    ) -> ParseResult<NextType2<Target, Self::MyExtension>>;
+    fn next_layer(&self) -> ParseResult<NextType2<Target, Self::MyExtension>>;
+}
+
+pub trait NextLayer2<Target: 'static> {
+    type Denom: Copy;
+
+    fn next_layer2(&self) -> ParseResult<Self::Denom>;
 }
 
 struct A(u8);
 
-// note: this impl must be generated!
-impl<'a, 'b> NextElement<'a, 'b, BChoice> for A {
-    // type MyType = BChoice;
+// impl Parse2<'_> for A {
+//     type MyExtension = ();
 
-    fn parse_next(
-        &'a self,
-        data: Data<'b>,
-    ) -> ParseResult<NextType<BChoice, ()>> {
-        choose_a(self).map(NextType::Header)
-    }
-}
+//     // AUTOGENERATE ME
+//     fn parse_hint(data: &mut Cursor<Data<'_>>, _hint: Option<usize>) -> ParseResult<Self>
+//     where
+//         Self: Sized,
+//     {
+//         if data.remaining() < 1 {
+//             return Err(ParseError::Unspec);
+//         }
 
-impl<'a, 'b> NextElement<'a, 'b, BUnderlie> for A {
-    // type MyType = BUnderlie;
+//         data.pos += 1;
 
-    fn parse_next(
-        &'a self,
-        data: Data<'b>,
-    ) -> ParseResult<NextType<BUnderlie, ()>> {
-        choose_a_under(self).map(|v| NextType::Header(v()))
-    }
-}
+//         // Okay, extension handling *should* happen in here.
+//         // So should wacky extensions (VLAN, v6) tbh.
 
-impl Parse2<'_> for A {
-    type MyExtension = ();
+//         Ok(A(data.data[data.pos - 1]))
+//     }
 
+//     // We probably want a parse_raw that can emit the Good Code.
+// }
+
+impl Parse3<'_> for A {
     // AUTOGENERATE ME
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
@@ -126,15 +155,14 @@ impl Parse2<'_> for A {
 
         data.pos += 1;
 
+        // Okay, extension handling *should* happen in here.
+        // So should wacky extensions (VLAN, v6) tbh.
+
         Ok(A(data.data[data.pos - 1]))
     }
-
-    // We probably want a parse_raw that can emit the Good Code.
 }
 
-impl Parse2<'_> for B1 {
-    type MyExtension = ();
-
+impl Parse3<'_> for B1 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -143,9 +171,7 @@ impl Parse2<'_> for B1 {
     }
 }
 
-impl Parse2<'_> for B2 {
-    type MyExtension = ();
-
+impl Parse3<'_> for B2 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -154,9 +180,7 @@ impl Parse2<'_> for B2 {
     }
 }
 
-impl Parse2<'_> for B3 {
-    type MyExtension = ();
-
+impl Parse3<'_> for B3 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -165,9 +189,7 @@ impl Parse2<'_> for B3 {
     }
 }
 
-impl Parse2<'_> for B4 {
-    type MyExtension = ();
-
+impl Parse3<'_> for B4 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -176,28 +198,83 @@ impl Parse2<'_> for B4 {
     }
 }
 
-impl<'a> NextLayer<'_, 'a, BUnderlie> for A {
-    // fn next_layer(&self) -> ParseResult<fn() -> ParseResult<NextType<BUnderlie, Self::MyExtension>>> {
-    fn next_layer(
-        &'a self,
-    ) -> ParseResult<NextType2<BUnderlie, Self::MyExtension>> {
-        match self.0 {
-            v if v == B1_FROM_A => {
-                Ok(NextType2::Header(|data| B1::parse(data).map(BUnderlie::B1)))
-            }
-            v if v == B2_FROM_A => {
-                Ok(NextType2::Header(|data| B2::parse(data).map(BUnderlie::B2)))
-            }
-            v if v == B3_FROM_A => {
-                Ok(NextType2::Header(|data| B3::parse(data).map(BUnderlie::B3)))
-            }
-            v if v == B4_FROM_A => {
-                Ok(NextType2::Header(|data| B4::parse(data).map(BUnderlie::B4)))
-            }
+impl ParseChoice<'_> for BUnderlie {
+    type Denom = u8;
+
+    // autogenerate
+    fn parse_choice(
+        data: &mut Cursor<Data<'_>>,
+        hint: Option<Self::Denom>,
+    ) -> ParseResult<Self>
+    where
+        Self: Sized,
+    {
+        let Some(hint) = hint else {
+            return Err(ParseError::NeedsHint);
+        };
+
+        match hint {
+            v if v == B1_FROM_A => B1::parse(data).map(Self::B1),
+            v if v == B2_FROM_A => B2::parse(data).map(Self::B2),
+            v if v == B3_FROM_A => B3::parse(data).map(Self::B3),
+            v if v == B4_FROM_A => B4::parse(data).map(Self::B4),
             _ => Err(ParseError::Unspec),
         }
     }
 }
+
+impl ParseChoice<'_> for CChoice {
+    type Denom = u8;
+
+    // autogenerate
+    fn parse_choice(
+        data: &mut Cursor<Data<'_>>,
+        hint: Option<Self::Denom>,
+    ) -> ParseResult<Self>
+    where
+        Self: Sized,
+    {
+        let Some(hint) = hint else {
+            return Err(ParseError::NeedsHint);
+        };
+
+        match hint {
+            v if v == 1 => Ok(Self::C1(C1)),
+            v if v == 2 => Ok(Self::C2(C2)),
+            _ => Err(ParseError::Unspec),
+        }
+    }
+}
+
+// TODO: can refactor somehow.
+impl NextLayer2<BUnderlie> for A {
+    type Denom = u8;
+
+    fn next_layer2(&self) -> ParseResult<Self::Denom> {
+        Ok(self.0)
+    }
+}
+
+// I think the solution here is:
+//  - derive on choice types to select into
+
+impl NextLayer2<CChoice> for BUnderlie {
+    type Denom = u8;
+
+    fn next_layer2(&self) -> ParseResult<Self::Denom> {
+        Ok(1)
+    }
+}
+
+// impl NextLayer<'_, CChoice> for BUnderlie {
+//     // fn next_layer(&self) -> ParseResult<fn() -> ParseResult<NextType<BUnderlie, Self::MyExtension>>> {
+//     fn next_layer(
+//         &self,
+//     ) -> ParseResult<NextType2<CChoice, Self::MyExtension>> {
+//         // Ok(NextType2::Header(Ok(|data| Ok(CChoice::C1(C1)))))
+//         Ok(NextType2::Header(|_data| Ok(CChoice::C1(C1))))
+//     }
+// }
 
 // impl<'a, 'b, Base, Target, T> NextElement<'a, 'b, Target> for T
 //     where Target: TryFrom<Base>,
@@ -226,30 +303,6 @@ enum BUnderlie {
     B4(B4),
 }
 
-fn choose_a_under(a: &A) -> ParseResult<fn() -> BUnderlie> {
-    match a.0 {
-        v if v == B1_FROM_A => Ok(|| BUnderlie::B1(B1)),
-        v if v == B2_FROM_A => Ok(|| BUnderlie::B2(B2)),
-        v if v == B3_FROM_A => Ok(|| BUnderlie::B3(B3)),
-        v if v == B4_FROM_A => Ok(|| BUnderlie::B4(B4)),
-        _ => Err(ParseError::Unspec),
-    }
-}
-
-fn choose_a(a: &A) -> ParseResult<BChoice>
-where
-    BChoice: TryFrom<BUnderlie>,
-{
-    match a.0 {
-        v if v == B1_FROM_A => {}
-        v if v == B2_FROM_A => {}
-        v if v == B3_FROM_A => {}
-        _ => return Err(ParseError::Unspec),
-    }
-
-    choose_a_under(a).and_then(|v| BChoice::try_from(v()))
-}
-
 enum BChoice {
     B1(B1),
     B2(B2),
@@ -264,7 +317,30 @@ impl TryFrom<BUnderlie> for BChoice {
             BUnderlie::B1(B1) => Ok(BChoice::B1(B1)),
             BUnderlie::B2(B2) => Ok(BChoice::B2(B2)),
             BUnderlie::B3(B3) => Ok(BChoice::B3(B3)),
-            BUnderlie::B4(_) => Err(ParseError::Unspec),
+            BUnderlie::B4(_) => Err(ParseError::Unwanted),
+        }
+    }
+}
+
+// can automate for each element
+impl TryFrom<CChoice> for C1 {
+    type Error = ParseError;
+
+    fn try_from(value: CChoice) -> Result<Self, Self::Error> {
+        match value {
+            CChoice::C1(C1) => Ok(C1),
+            _ => Err(ParseError::Unwanted),
+        }
+    }
+}
+
+impl TryFrom<CChoice> for C2 {
+    type Error = ParseError;
+
+    fn try_from(value: CChoice) -> Result<Self, Self::Error> {
+        match value {
+            CChoice::C2(C2) => Ok(C2),
+            _ => Err(ParseError::Unwanted),
         }
     }
 }
@@ -358,8 +434,7 @@ pub struct Parsed<'a, Stack> {
     data: Cursor<Pin<&'a mut [u8]>>,
 }
 
-impl<'a> Parsed<'a, PacketChain>
-{
+impl<'a> Parsed<'a, PacketChain> {
     // (A, BChoice, C1)
     pub fn new(data: &'a mut [u8]) -> ParseResult<Self> {
         let mut cursor = Cursor { data, pos: 0 };
@@ -368,29 +443,53 @@ impl<'a> Parsed<'a, PacketChain>
 
         let root = A::parse(&mut cursor)?;
 
-        // next header: BChoice
         // TODO: allow override here.
-        let b: BChoice = if <A as NextLayer<'_, '_, _>>::EXTENSION_IN_TYPE {
-            let n = root.next_layer()?;
+        // let n = root.next_layer()?;
 
-            let NextType2::<_, _>::Header(gen_b) = n else { todo!() };
+        // this is maybe a bad design.
+        // we want to:
+        //  parse a layer
+        //  extract the next-layer hint
+        //   save the true next-layer hint for funny types (vlan, ethernet)
+        //  use the hint to extract the next layer.
 
-            // let mut cur2 = Cursor{ data: &mut [][..], pos: 0 };
+        // if <A as NextLayer<'_, '_, _>>::EXTENSION_IN_TYPE
 
-            // let succ = gen_b(&mut cur2)?;
-            let succ = gen_b(&mut cursor)?;
+        // next header: BChoice
+        // let (b, next_layer) = if <A as NextLayer<'_, '_, _>>::EXTENSION_IN_TYPE {
 
+        //     let NextType2::<_, _>::Header(gen_b) = n else {
+        //         panic!("faulty impl on BUnderlie returned ")
+        //     };
+        //     let succ = gen_b(&mut cursor)?;
 
-            let b = succ.try_into()?;
+        //     let next_layer = succ.next_layer()?;
 
-            b
-        } else {
-            // if extension, need to loop here.
-            todo!()
-        };
+        //     let b = succ.try_into()?;
+
+        //     (b, next_layer)
+        // } else {
+        //     // if extension, need to loop here.
+        //     todo!()
+        // };
+
+        // note: maybe go straight to BChoice?
+        let hint = root.next_layer2()?;
+        let b = BUnderlie::parse_choice(&mut cursor, Some(hint))?;
+        let hint = b.next_layer2()?;
+
+        let b: BChoice = b.try_into()?;
+
+        // how do we handle the next layer?
+        // We need BChoice / BUnderlie to give us a fn pointer and the next layer's extension behaviour.
+        // We can't do a match in here, obviously -- we don't know all variants, since we're delegating.
+
+        // let hint = b.next_layer2()?;
+        let c = CChoice::parse_choice(&mut cursor, Some(hint))?;
+        let c = c.try_into()?;
 
         Ok(Self {
-            stack: HeaderStack((root, b, C1)),
+            stack: HeaderStack((root, b, c)),
             data: Cursor { data: Pin::new(cursor.data), pos: cursor.pos },
         })
     }
@@ -434,12 +533,51 @@ impl<'a> Parsed<'a, PacketChain>
 //  The parse state holds many pointers into the guts of the `inner`.
 //  These pointers have a lifetime identical to the packet state.
 
+// ---------------------------
+//
+// Maybe need to rethink some stuff around chain construction.
+// - OPTE allows e.g. l2 only, to receive arp packets
+// - e.g., an outbound packet does not need *all* layers.
+// - an inbound packet does need all layers, though...
+//
+// What are the acceptable packet pathways?
+// - OUT -- ETH + unparsed(ARP)
+//       -- ETH + IPv4 + {TCP, UDP, ICMP}
+//       -- ETH + IPv6 + {TCP, UDP, ICMPv6} (OPTE does not enforce the ICMP match)
+// = (Ethernet, Option<Ip>, Option<Ulp>)
+//
+//          outer                         inner
+// - IN  -- [ETH + IPv6 + UDP + Geneve] + [ETH + IPv4 + {TCP, UDP, ICMP}]
+//       -- [ETH + IPv6 + UDP + Geneve] + [ETH + IPv6 + {TCP, UDP, ICMPv6}]
+// = ((Ethernet, Ipv6, Udp, Geneve), (Ethernet, Ip, Ulp))
+//   downgrade to
+//   ((Ethernet, Ipv6, Udp, Geneve), (Ethernet, Option<Ip>, Option<Ulp>))
+//
+// PacketMeta should then be derived from the In/Out formats, giving us
+// (Option<(Ethernet, Ipv6, Udp, Geneve)>, (Ethernet, Option<Ip>, Option<Ulp>))
+//
+// We need some ethertypes to be able to end parsing. This requires successor fields
+// to be nullable.
+// ...this is getting closer to P4, eh.
+//
+// Is there a way to represent these guys infallibly?
+// OPTE has them all optional, and actions which check those fields
+//
+// How does encap look in OPTE?
+// encap: This is one big HdrTransform, pushing all outer layers and modding InnerEther
+// decap: pop outer layers.
+//
+// These fall into the HeaderAction camp.
+// Mods are specifically field subsets.
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn it_works() {
+        // let a: Option<usize> = None;
+        // let b: Option<()> = a.into();
         todo!()
     }
 }

@@ -9,3 +9,4 @@ default = ["alloc"]
 
 [dependencies]
 oxpacket-macros.workspace = true
+pnet_packet.workspace = true
