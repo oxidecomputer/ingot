@@ -2,8 +2,7 @@
 
 use core::convert::Infallible;
 use core::pin::Pin;
-
-use oxpacket_macros::parse;
+use oxpacket_macros::Parse;
 
 #[cfg(feature = "alloc")]
 #[allow(unused)]
@@ -45,24 +44,6 @@ impl From<Infallible> for ParseError {
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
-pub trait Parse2<'b> {
-    type MyExtension: 'static;
-
-    fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        Self::parse_hint(data, None)
-    }
-
-    fn parse_hint(
-        data: &mut Cursor<Data<'b>>,
-        hint: Option<usize>,
-    ) -> ParseResult<Self>
-    where
-        Self: Sized;
-}
-
 pub trait Parse3<'b> {
     fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
     where
@@ -84,32 +65,6 @@ pub enum ParseControl<Denom: Copy> {
     Continue(Denom),
     Reject,
     Accept,
-}
-
-// I feel a bit iffy about this one, mainly in the case we want to do ip -> udp with the value check.
-// impl<'b, T: Parse3<'b>> ParseChoice<'b> for T {
-//     type Denom = ();
-
-//     fn parse_choice(data: &mut Cursor<Data<'b>>, _hint: Option<Self::Denom>) -> ParseResult<Self>
-//     where
-//         Self: Sized {
-//         Parse3::parse(data)
-//     }
-// }
-
-#[derive(Copy, Clone)]
-pub enum NextType2<T: 'static, E: 'static> {
-    Header(
-        for<'any, 'any2> fn(&'any mut Cursor<Data<'any2>>) -> ParseResult<T>,
-    ),
-    Extension(
-        for<'any, 'any2> fn(&'any mut Cursor<Data<'any2>>) -> ParseResult<E>,
-    ),
-}
-
-pub trait NextLayer<'b, Target: 'static>: Parse2<'b> {
-    // This might be a pain to get:
-    fn next_layer(&self) -> ParseResult<NextType2<Target, Self::MyExtension>>;
 }
 
 pub trait NextLayer2<Target: 'static> {
@@ -359,25 +314,27 @@ struct B5;
 struct C1;
 struct C2;
 
-trait Packet {}
-
-impl Packet for A {}
-
-impl Packet for B1 {}
-impl Packet for B2 {}
-impl Packet for B3 {}
-impl Packet for B4 {}
-impl Packet for B5 {}
-
-impl Packet for C1 {}
-impl Packet for C2 {}
-
 // type PacketChain = (A, BChoice, CChoice);
 
 // Figure out how to express 'field of A' ->
-#[parse]
 type PacketChain = (A, BChoice, C1);
 type InnerEncapChain = (A, B1, C1);
+
+#[derive(Parse)]
+struct PacketerChain(
+    A,
+    #[oxpopt(from=BUnderlie)] BChoice,
+    #[oxpopt(from=CChoice)] C1,
+);
+
+#[derive(Parse)]
+struct PacketestChain {
+    a: A,
+    #[oxpopt(from=BUnderlie)]
+    b: BChoice,
+    #[oxpopt(from=CChoice)]
+    c: C1,
+}
 
 // Now how do we do these? unsafe trait?
 
@@ -439,39 +396,7 @@ impl<'a> Parsed<'a, PacketChain> {
     pub fn new(data: &'a mut [u8]) -> ParseResult<Self> {
         let mut cursor = Cursor { data, pos: 0 };
 
-        // root header: A
-
         let root = A::parse(&mut cursor)?;
-
-        // TODO: allow override here.
-        // let n = root.next_layer()?;
-
-        // this is maybe a bad design.
-        // we want to:
-        //  parse a layer
-        //  extract the next-layer hint
-        //   save the true next-layer hint for funny types (vlan, ethernet)
-        //  use the hint to extract the next layer.
-
-        // if <A as NextLayer<'_, '_, _>>::EXTENSION_IN_TYPE
-
-        // next header: BChoice
-        // let (b, next_layer) = if <A as NextLayer<'_, '_, _>>::EXTENSION_IN_TYPE {
-
-        //     let NextType2::<_, _>::Header(gen_b) = n else {
-        //         panic!("faulty impl on BUnderlie returned ")
-        //     };
-        //     let succ = gen_b(&mut cursor)?;
-
-        //     let next_layer = succ.next_layer()?;
-
-        //     let b = succ.try_into()?;
-
-        //     (b, next_layer)
-        // } else {
-        //     // if extension, need to loop here.
-        //     todo!()
-        // };
 
         // note: maybe go straight to BChoice?
         let hint = root.next_layer2()?;
@@ -575,9 +500,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        // let a: Option<usize> = None;
-        // let b: Option<()> = a.into();
-        todo!()
+    fn dummy_stack() {
+        let mut a = [B1_FROM_A];
+        let Ok(v) = Parsed::<'_, PacketChain>::new(&mut a) else {
+            panic!("not ok!")
+        };
+
+        assert!(matches!(v.stack.0, (A(B1_FROM_A), BChoice::B1(B1), C1)));
+
+        let mut a = [B4_FROM_A];
+        assert!(matches!(
+            Parsed::<'_, PacketChain>::new(&mut a),
+            Err(ParseError::Unwanted)
+        ))
+    }
+
+    #[test]
+    fn genned_stack() {
+        let mut a = [B1_FROM_A];
+        let Ok(v) = Parsed::<'_, PacketerChain>::new(&mut a) else {
+            panic!("not ok!")
+        };
+
+        assert!(matches!(
+            v.stack.0,
+            PacketerChain(A(B1_FROM_A), BChoice::B1(B1), C1)
+        ));
+
+        let mut a = [B4_FROM_A];
+        assert!(matches!(
+            Parsed::<'_, PacketerChain>::new(&mut a),
+            Err(ParseError::Unwanted)
+        ))
     }
 }
