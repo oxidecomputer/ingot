@@ -44,7 +44,7 @@ impl From<Infallible> for ParseError {
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
-pub trait Parse3<'b> {
+pub trait Parse<'b> {
     fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
     where
         Self: Sized;
@@ -67,10 +67,10 @@ pub enum ParseControl<Denom: Copy> {
     Accept,
 }
 
-pub trait NextLayer2<Target: 'static> {
+pub trait NextLayer<Target: 'static> {
     type Denom: Copy;
 
-    fn next_layer2(&self) -> ParseResult<Self::Denom>;
+    fn next_layer(&self) -> ParseResult<Self::Denom>;
 }
 
 struct A(u8);
@@ -98,7 +98,7 @@ struct A(u8);
 //     // We probably want a parse_raw that can emit the Good Code.
 // }
 
-impl Parse3<'_> for A {
+impl Parse<'_> for A {
     // AUTOGENERATE ME
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
@@ -117,7 +117,7 @@ impl Parse3<'_> for A {
     }
 }
 
-impl Parse3<'_> for B1 {
+impl Parse<'_> for B1 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -126,7 +126,7 @@ impl Parse3<'_> for B1 {
     }
 }
 
-impl Parse3<'_> for B2 {
+impl Parse<'_> for B2 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -135,7 +135,7 @@ impl Parse3<'_> for B2 {
     }
 }
 
-impl Parse3<'_> for B3 {
+impl Parse<'_> for B3 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -144,7 +144,7 @@ impl Parse3<'_> for B3 {
     }
 }
 
-impl Parse3<'_> for B4 {
+impl Parse<'_> for B4 {
     fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
     where
         Self: Sized,
@@ -202,10 +202,10 @@ impl ParseChoice<'_> for CChoice {
 }
 
 // TODO: can refactor somehow.
-impl NextLayer2<BUnderlie> for A {
+impl NextLayer<BUnderlie> for A {
     type Denom = u8;
 
-    fn next_layer2(&self) -> ParseResult<Self::Denom> {
+    fn next_layer(&self) -> ParseResult<Self::Denom> {
         Ok(self.0)
     }
 }
@@ -213,10 +213,10 @@ impl NextLayer2<BUnderlie> for A {
 // I think the solution here is:
 //  - derive on choice types to select into
 
-impl NextLayer2<CChoice> for BUnderlie {
+impl NextLayer<CChoice> for BUnderlie {
     type Denom = u8;
 
-    fn next_layer2(&self) -> ParseResult<Self::Denom> {
+    fn next_layer(&self) -> ParseResult<Self::Denom> {
         Ok(1)
     }
 }
@@ -356,17 +356,18 @@ pub struct HeaderStack<T>(T);
 // Each layer is parse.
 // Each stack is parse.
 // Tuples of stacks are parse.
-pub trait Parse {
-    unsafe fn a() {}
-    fn b() {}
-}
 
-impl<T, U> Parse for (T, U)
-where
-    HeaderStack<T>: Parse,
-    HeaderStack<U>: Parse,
-{
-}
+// impl<T, U> Parse for (T, U)
+// where
+//     HeaderStack<T>: Parse,
+//     HeaderStack<U>: Parse,
+// {
+//     fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
+//     where
+//         Self: Sized {
+//         todo!()
+//     }
+// }
 
 impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
     type Error = ();
@@ -391,6 +392,15 @@ pub struct Parsed<'a, Stack> {
     data: Cursor<Pin<&'a mut [u8]>>,
 }
 
+// impl<'a, Stack, New: Sized> Parsed<'a, Stack> {
+//     pub fn prepend(self, n: New) -> Parsed<'a, (New, Stack)> {
+//         Parsed {
+//             stack: HeaderStack((n, self.stack.0)),
+//             data: self.data,
+//         }
+//     }
+// }
+
 impl<'a> Parsed<'a, PacketChain> {
     // (A, BChoice, C1)
     pub fn new(data: &'a mut [u8]) -> ParseResult<Self> {
@@ -399,9 +409,9 @@ impl<'a> Parsed<'a, PacketChain> {
         let root = A::parse(&mut cursor)?;
 
         // note: maybe go straight to BChoice?
-        let hint = root.next_layer2()?;
+        let hint = root.next_layer()?;
         let b = BUnderlie::parse_choice(&mut cursor, Some(hint))?;
-        let hint = b.next_layer2()?;
+        let hint = b.next_layer()?;
 
         let b: BChoice = b.try_into()?;
 

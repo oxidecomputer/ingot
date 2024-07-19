@@ -65,7 +65,7 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
         let hint_frag = if i != n_fields - 1 {
             quote! {
-                let hint = #fname.next_layer2()?;
+                let hint = #fname.next_layer()?;
             }
         } else {
             quote! {}
