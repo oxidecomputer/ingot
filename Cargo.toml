@@ -1,18 +1,19 @@
 [workspace]
 resolver = "2"
 members = [
-    "oxpacket",
-    "oxpacket-macros",
+    "ingot",
+    "ingot-macros",
+    "ingot-types",
 ]
 
 [workspace.package]
 edition = "2021"
-license = "MPL-2.0"
-repository = "https://github.com/oxidecomputer/opte"
+license = "MIT"
+repository = "https://github.com/oxidecomputer/ingot"
 
 [workspace.dependencies]
 # Internal
-oxpacket-macros = { path = "oxpacket-macros", default-features = false }
+ingot-macros = { path = "ingot-macros", default-features = false }
 
 # External
 darling = "0.20"
