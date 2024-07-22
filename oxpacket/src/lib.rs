@@ -1,8 +1,147 @@
 #![no_std]
 
+use alloc::vec::Vec;
 use core::convert::Infallible;
 use core::pin::Pin;
 use oxpacket_macros::Parse;
+
+use pnet_macros::packet;
+use pnet_macros_support::types::*;
+use pnet_packet::FromPacket;
+
+// this is libpnet
+// what this does is creates packet/packetmut TYPES
+// that handle operations on the view, and then an owned type
+//
+// what I need is sort of the opposite arrangement:
+// * a view type, and an owned type
+// * two *traits* for shared operations between these -- ref, and mut
+//
+// We also need to have no payload requirement (this is implicit), so
+// that we can safely split borrows in an adjacent struct.
+// and we need to think of a non-alloc way to repr variable width data in
+// the struct definition
+#[packet]
+pub struct Fragment {
+    pub next_header: u8,
+    pub reserved: u8,
+    pub fragment_offset: u13be,
+    pub res: u2,
+    pub more_frags: u1,
+    pub ident: u32be,
+
+    #[payload]
+    pub payload: Vec<u8>,
+}
+
+pub trait FragmentRef {
+    fn next_header(&self) -> u8;
+}
+
+pub trait FragmentMut {
+    fn set_next_header(&mut self, val: u8);
+}
+
+pub struct FragmentView<V> {
+    data: V,
+}
+
+impl<V: AsRef<[u8]>> FragmentView<V> {
+    pub fn new(buf: V) -> Option<Self> {
+        if FragmentPacket::new(buf.as_ref()).is_some() {
+            Some(Self { data: buf })
+        } else {
+            None
+        }
+    }
+}
+
+impl<V: AsRef<[u8]>> FragmentRef for FragmentView<V> {
+    fn next_header(&self) -> u8 {
+        let pkt = FragmentPacket::new(self.data.as_ref()).unwrap();
+        pkt.get_next_header()
+    }
+}
+
+impl<V: AsMut<[u8]>> FragmentMut for FragmentView<V> {
+    fn set_next_header(&mut self, val: u8) {
+        let mut pkt = MutableFragmentPacket::new(self.data.as_mut()).unwrap();
+        pkt.set_next_header(val);
+    }
+}
+
+// impls on libpnet types.
+impl<'p> FragmentRef for FragmentPacket<'p> {
+    fn next_header(&self) -> u8 {
+        self.get_next_header()
+    }
+}
+
+impl<'p> FragmentMut for MutableFragmentPacket<'p> {
+    fn set_next_header(&mut self, val: u8) {
+        self.set_next_header(val)
+    }
+}
+
+impl FragmentRef for Fragment {
+    fn next_header(&self) -> u8 {
+        self.next_header
+    }
+}
+
+impl FragmentMut for Fragment {
+    fn set_next_header(&mut self, val: u8) {
+        self.next_header = val;
+    }
+}
+
+// Temp name while I'm still fighting libpnet for namespace.
+pub enum KyPacket<O, B> {
+    Repr(O),
+    Raw(B),
+}
+
+impl<O, B> FragmentRef for KyPacket<O, B>
+where
+    O: FragmentRef,
+    B: FragmentRef,
+{
+    fn next_header(&self) -> u8 {
+        match self {
+            KyPacket::Repr(o) => o.next_header(),
+            KyPacket::Raw(b) => b.next_header(),
+        }
+    }
+}
+
+impl<O, B> FragmentMut for KyPacket<O, B>
+where
+    O: FragmentMut,
+    B: FragmentMut,
+{
+    fn set_next_header(&mut self, val: u8) {
+        match self {
+            KyPacket::Repr(o) => o.set_next_header(val),
+            KyPacket::Raw(b) => b.set_next_header(val),
+        };
+    }
+}
+
+type Frag<T> = KyPacket<Fragment, FragmentView<T>>;
+
+// Urgh, have to gen all of these due to no specialisation.
+// (or user-defined auto traits).
+impl<O, T> From<FragmentView<T>> for KyPacket<O, FragmentView<T>> {
+    fn from(value: FragmentView<T>) -> Self {
+        KyPacket::Raw(value)
+    }
+}
+
+impl<B> From<Fragment> for KyPacket<Fragment, B> {
+    fn from(value: Fragment) -> Self {
+        KyPacket::Repr(value)
+    }
+}
 
 #[cfg(feature = "alloc")]
 #[allow(unused)]
@@ -542,5 +681,23 @@ mod tests {
             Parsed::<'_, PacketerChain>::new(&mut a),
             Err(ParseError::Unwanted)
         ))
+    }
+
+    #[test]
+    fn are_my_fragment_traits_sane() {
+        let mut buf = [0u8; FragmentPacket::minimum_packet_size()];
+
+        let mut frag = FragmentView::new(buf).unwrap();
+        frag.set_next_header(1);
+        assert_eq!(frag.next_header(), 1);
+
+        let mut frag = FragmentView::new(&mut buf).unwrap();
+        assert_eq!(frag.next_header(), 0);
+        frag.set_next_header(1);
+        assert_eq!(frag.next_header(), 1);
+
+        let mut wrapped: Frag<_> = frag.into();
+        wrapped.set_next_header(2);
+        assert_eq!(wrapped.next_header(), 2);
     }
 }

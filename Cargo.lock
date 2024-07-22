@@ -81,6 +81,8 @@ name = "oxpacket"
 version = "0.1.0"
 dependencies = [
  "oxpacket-macros",
+ "pnet_macros",
+ "pnet_macros_support",
  "pnet_packet",
 ]
 

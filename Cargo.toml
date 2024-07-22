@@ -22,6 +22,8 @@ syn = "2"
 
 # temp external
 pnet_packet = "0.35"
+pnet_macros = "0.35"
+pnet_macros_support = "0.35"
 
 [profile.release]
 debug = 2
