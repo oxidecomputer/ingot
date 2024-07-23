@@ -17,12 +17,14 @@ ingot-macros = { path = "ingot-macros", default-features = false }
 ingot-types = { path = "ingot-types", default-features = false }
 
 # External
+bitflags = "2"
 darling = "0.20"
 macaddr = "1"
 proc-macro2 = { version = "1" }
 quote = "1.0"
 regex = "1"
 syn = "2"
+zerocopy = "0.8.0-alpha.16"
 
 # temp external
 pnet_packet = "0.35"

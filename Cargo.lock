@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitflags"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
+
+[[package]]
 name = "darling"
 version = "0.20.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -68,6 +74,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 name = "ingot"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "ingot-macros",
  "ingot-types",
  "macaddr",
@@ -92,6 +99,7 @@ name = "ingot-types"
 version = "0.1.0"
 dependencies = [
  "pnet_macros_support",
+ "zerocopy",
 ]
 
 [[package]]
@@ -223,3 +231,23 @@ name = "unicode-ident"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
+
+[[package]]
+name = "zerocopy"
+version = "0.8.0-alpha.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a5fe242a39bc4f8b8d808be6314c0f0e5e499a902c44e704f3c86a89f7a7c64"
+dependencies = [
+ "zerocopy-derive",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.0-alpha.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76fc519c421ad48c6c8ba02cee449398d54276c839887f9f3562d1862b43b91c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]

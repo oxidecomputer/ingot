@@ -247,6 +247,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let field_data = data.take_struct().unwrap();
 
+    let mut t_bits = 0;
     for field in field_data.fields {
         let underlying_ty =
             if let Some(ty) = &field.is { ty } else { &field.ty };
@@ -257,9 +258,18 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             Err(v) => return v.into_compile_error().into(),
         };
 
-        let marker = format!("my offset is {n_bits} bits");
+        let marker = format!("my offset is {t_bits}+={n_bits} bits");
 
         let ident = field.ident.unwrap();
+
+        fields.push(ValidField {
+            repr: underlying_ty.clone(),
+            ident: ident.clone(),
+            first_bit: t_bits,
+            n_bits,
+        });
+
+        t_bits += n_bits;
 
         trait_defs.push(quote! {
             fn #ident(&self) -> #user_ty;
@@ -309,6 +319,15 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         });
     }
 
+    if t_bits % 8 != 0 {
+        return Error::new(
+            fields.last().unwrap().repr.span(),
+            format!("fields are not byte-aligned -- total {t_bits}b"),
+        )
+        .into_compile_error()
+        .into();
+    }
+
     let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
 
     let ref_ident = Ident::new(&format!("{ident}Ref"), ident.span());
@@ -316,6 +335,24 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     quote! {
         pub struct #validated_ident<V>(V);
+
+        impl<V> ::ingot_types::Header for #validated_ident<V> {
+            const MINIMUM_LENGTH: usize = (#t_bits / 8);
+
+            fn packet_length(&self) -> usize {
+                // TODO: varwidth types.
+                Self::MINIMUM_LENGTH
+            }
+        }
+
+        impl ::ingot_types::Header for #ident {
+            const MINIMUM_LENGTH: usize = (#t_bits / 8);
+
+            fn packet_length(&self) -> usize {
+                // TODO: varwidth types.
+                Self::MINIMUM_LENGTH
+            }
+        }
 
         pub trait #ref_ident {
             #( #trait_defs )*

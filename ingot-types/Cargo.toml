@@ -7,3 +7,4 @@ repository.workspace = true
 
 [dependencies]
 pnet_macros_support.workspace = true
+zerocopy.workspace = true

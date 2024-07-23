@@ -8,6 +8,7 @@ alloc = []
 default = ["alloc"]
 
 [dependencies]
+bitflags.workspace = true
 ingot-macros.workspace = true
 ingot-types.workspace = true
 macaddr.workspace = true

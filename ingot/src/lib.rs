@@ -7,6 +7,10 @@ use core::net::Ipv6Addr;
 use core::pin::Pin;
 use ingot_macros::Ingot;
 use ingot_macros::Parse;
+use ingot_types::Chunk;
+use ingot_types::HasBuf;
+use ingot_types::Header;
+use ingot_types::HeaderParse;
 use ingot_types::Packet as KyPacket;
 use macaddr::MacAddr6;
 use pnet_macros::packet as lpacket;
@@ -57,7 +61,8 @@ pub struct Ethernet {
 pub struct Ipv6 {
     pub version: u4,
     pub dscp: u6,
-    pub ecn: u2,
+    #[ingot(is = "u2")]
+    pub ecn: Ecn,
     pub flow_label: u20be,
     #[ingot(is = "[u8; 16]")]
     pub source: Ipv6Addr,
@@ -66,6 +71,29 @@ pub struct Ipv6 {
     pub ethertype: u16be,
     // #[ingot(extension)]
     // pub vlans: ???
+}
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum Ecn {
+    NotCapable = 0,
+    Capable0,
+    Capable1,
+    CongestionExperienced,
+}
+
+impl TryFrom<u2> for Ecn {
+    type Error = ParseError;
+
+    fn try_from(value: u2) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Ecn::NotCapable),
+            1 => Ok(Ecn::Capable0),
+            2 => Ok(Ecn::Capable1),
+            3 => Ok(Ecn::Capable0),
+            _ => Err(ParseError::Unspec),
+        }
+    }
 }
 
 pub trait FragmentRef {
@@ -199,6 +227,7 @@ impl Cursor<Data<'_>> {
 
 pub type Data<'a> = &'a mut [u8];
 
+#[derive(Clone, Copy, Debug)]
 pub enum ParseError {
     Unspec,
     Unwanted,
@@ -599,6 +628,21 @@ impl<'a> Parsed<'a, PacketChain> {
     }
 }
 
+impl<V: Chunk> HasBuf for ValidEthernet<V> {
+    type BufType = V;
+}
+
+impl<V: Chunk> HeaderParse for ValidEthernet<V> {
+    fn parse(from: V) -> Result<(Self, V), ()> {
+        if from.as_ref().len() < Ethernet::MINIMUM_LENGTH {
+            Err(())
+        } else {
+            let (l, r) = from.split(Ethernet::MINIMUM_LENGTH);
+            Ok((ValidEthernet(l), r))
+        }
+    }
+}
+
 // REALLY NEED TO THINK ABOUT HOW/WHEN TO COMBINE PARSEDs
 // - should always be possible to combine dyn with anything that can be expanded.
 //
@@ -677,6 +721,7 @@ impl<'a> Parsed<'a, PacketChain> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // use ingot_types::PacketParse;
 
     #[test]
     fn dummy_stack() {
@@ -729,5 +774,17 @@ mod tests {
         let mut wrapped: Frag<_> = frag.into();
         wrapped.set_next_header(2);
         assert_eq!(wrapped.next_header(), 2);
+
+        // Now test out my genned views.
+
+        let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH];
+        // let mut eth = EthernetView::
+        let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
+        assert_eq!(rest.len(), 0);
+        assert_eq!(eth.source(), MacAddr6::nil());
+        eth.set_source(MacAddr6::broadcast());
+        assert_eq!(eth.source(), MacAddr6::broadcast());
+
+        Ecn::try_from(1u8).unwrap();
     }
 }
