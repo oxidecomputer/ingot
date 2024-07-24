@@ -1,21 +1,82 @@
 #![no_std]
 
 use alloc::vec::Vec;
-use core::convert::Infallible;
+use bitflags::bitflags;
+use core::marker::PhantomPinned;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
 use core::pin::Pin;
 use ingot_macros::Ingot;
 use ingot_macros::Parse;
+use ingot_macros::Parse2;
 use ingot_types::Chunk;
 use ingot_types::HasBuf;
-use ingot_types::Header;
 use ingot_types::HeaderParse;
-use ingot_types::Packet as KyPacket;
+use ingot_types::NextLayer;
+use ingot_types::Packet;
+use ingot_types::ParseChoice2;
+use ingot_types::ParseError;
+use ingot_types::ParseResult;
+use ingot_types::Read;
 use macaddr::MacAddr6;
-use pnet_macros::packet as lpacket;
 use pnet_macros_support::types::*;
-use pnet_packet::FromPacket;
+
+#[cfg(feature = "alloc")]
+#[allow(unused)]
+#[macro_use]
+extern crate alloc;
+
+// types we want to use in packet bodies.
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum Ecn {
+    NotCapable = 0,
+    Capable0,
+    Capable1,
+    CongestionExperienced,
+}
+
+bitflags! {
+#[derive(Clone, Copy)]
+pub struct Ipv4Flags: u3 {
+    const RESERVED       = 0b100;
+    const DONT_FRAGMENT  = 0b010;
+    const MORE_FRAGMENTS = 0b001;
+}
+
+#[derive(Clone, Copy)]
+pub struct TcpFlags: u8 {
+    const FIN = 0b0000_0001;
+    const SYN = 0b0000_0010;
+    const RST = 0b0000_0100;
+    const PSH = 0b0000_1000;
+    const ACK = 0b0001_0000;
+    const URG = 0b0010_0000;
+    const ECE = 0b0100_0000;
+    const CWR = 0b1000_0000;
+}
+
+#[derive(Clone, Copy)]
+pub struct GeneveFlags: u8 {
+    const CONTROL_PACKET = 0b1000_0000;
+    const CRITICAL_OPTS  = 0b0100_0000;
+}
+}
+
+impl TryFrom<u2> for Ecn {
+    type Error = ParseError;
+
+    fn try_from(value: u2) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Ecn::NotCapable),
+            1 => Ok(Ecn::Capable0),
+            2 => Ok(Ecn::Capable1),
+            3 => Ok(Ecn::Capable0),
+            _ => Err(ParseError::Unspec),
+        }
+    }
+}
 
 // this is libpnet
 // what this does is creates packet/packetmut TYPES
@@ -34,177 +95,182 @@ use pnet_packet::FromPacket;
 // - computed fields, where possible.
 // -
 
-#[lpacket]
-pub struct Fragment {
-    pub next_header: u8,
-    pub reserved: u8,
-    pub fragment_offset: u13be,
-    pub res: u2,
-    pub more_frags: u1,
-    pub ident: u32be,
-    #[payload]
-    pub payload: Vec<u8>,
-}
-
 #[derive(Ingot)]
 pub struct Ethernet {
     #[ingot(is = "[u8; 6]")]
     pub destination: MacAddr6,
     #[ingot(is = "[u8; 6]")]
     pub source: MacAddr6,
-    pub ethertype: u16be,
+    #[ingot(is = "u16be", next_layer())]
+    // #[ingot(is = "u16be", next_layer(or_extension))]
+    pub ethertype: u16,
     // #[ingot(extension)]
     // pub vlans: ???
 }
 
 #[derive(Ingot)]
+pub struct VlanBody {
+    pub priority: u3,
+    pub dei: u1,
+    pub vid: u12be,
+    #[ingot(is = "u16be", next_layer())]
+    pub ethertype: u16,
+    // #[ingot(extension)]
+    // pub vlans: ???
+}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(u16)]
+pub enum Ethertype2 {
+    Ipv4 = 0x0800,
+    Arp = 0x0806,
+    Ethernet = 0x6558,
+    Vlan = 0x8100,
+    Ipv6 = 0x86dd,
+    Lldp = 0x88cc,
+    QinQ = 0x9100,
+}
+
+// TODO: uncork later.
+
+#[derive(Ingot)]
+pub struct Ipv4 {
+    // #[ingot(valid = "version = 4")]
+    pub version: u4,
+    // #[ingot(valid = "ihl >= 5")]
+    pub ihl: u4,
+    pub dscp: u6,
+    #[ingot(is = "u2")]
+    pub ecn: Ecn,
+    // #[ingot(payload_len() + packet_len())]
+    pub total_len: u16be,
+
+    pub identification: u16be,
+    #[ingot(is = "u3")]
+    pub flags: Ipv4Flags,
+    pub fragment_offset: u13be,
+
+    // #[ingot(default = 128)]
+    pub hop_limit: u8,
+    // #[ingot(is = "u8")]
+    pub protocol: u8, // should be a type.
+    pub checksum: u16be,
+
+    #[ingot(is = "[u8; 4]")]
+    pub source: Ipv4Addr,
+    #[ingot(is = "[u8; 4]")]
+    pub destination: Ipv4Addr,
+    // #[ingot(extension(len = "self.ihl * 4 - 20"))]
+    // pub v4ext: ???
+}
+
+#[derive(Ingot)]
 pub struct Ipv6 {
+    // #[ingot(valid = 6)]
     pub version: u4,
     pub dscp: u6,
     #[ingot(is = "u2")]
     pub ecn: Ecn,
     pub flow_label: u20be,
+
+    // #[ingot(payload_len)]
+    pub payload_len: u16be,
+    // #[ingot(is = "u8")]
+    pub next_header: u8, // should be a type.
+    // #[ingot(default = 128)]
+    pub hop_limit: u8,
+
     #[ingot(is = "[u8; 16]")]
     pub source: Ipv6Addr,
     #[ingot(is = "[u8; 16]")]
     pub destination: Ipv6Addr,
-    pub ethertype: u16be,
     // #[ingot(extension)]
-    // pub vlans: ???
+    // pub v6ext: ???
 }
 
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum Ecn {
-    NotCapable = 0,
-    Capable0,
-    Capable1,
-    CongestionExperienced,
+// 0x2c
+#[derive(Ingot)]
+pub struct IpV6ExtFragment {
+    pub next_header: u8,
+    pub reserved: u8,
+    pub fragment_offset: u13be,
+    pub res: u2,
+    pub more_frags: u1,
+    pub ident: u32be,
 }
 
-impl TryFrom<u2> for Ecn {
-    type Error = ParseError;
-
-    fn try_from(value: u2) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Ecn::NotCapable),
-            1 => Ok(Ecn::Capable0),
-            2 => Ok(Ecn::Capable1),
-            3 => Ok(Ecn::Capable0),
-            _ => Err(ParseError::Unspec),
-        }
-    }
+// 0x00, 0x2b, 0x3c, custom(0xfe)
+#[derive(Ingot)]
+pub struct IpV6Ext6564 {
+    pub next_header: u8,
+    pub ext_len: u8,
+    // #[ingot(something)]
+    // pub data: ???
 }
 
-pub trait FragmentRef {
-    fn next_header(&self) -> u8;
-}
+// #[derive(Ingot)]
+// pub struct Tcp {
+//     pub source: u16be,
+//     pub destination: u16be,
 
-pub trait FragmentMut {
-    fn set_next_header(&mut self, val: u8);
-}
+//     pub sequence: u32be,
+//     pub acknowledgement: u32be,
 
-pub struct FragmentView<V> {
-    data: V,
-}
+//     // #[ingot(valid = "data_offset >= 5")]
+//     pub data_offset: u4,
+//     // #[ingot(valid = 0)]
+//     pub reserved: u4,
+//     #[ingot(is = "u8")]
+//     pub flags: TcpFlags,
+//     pub window_size: u16be,
+//     // #[ingot(payload_len() + 8)]
+//     pub length: u16be,
+//     pub urgent_ptr: u16be,
 
-impl<V: AsRef<[u8]>> FragmentView<V> {
-    pub fn new(buf: V) -> Option<Self> {
-        if FragmentPacket::new(buf.as_ref()).is_some() {
-            Some(Self { data: buf })
-        } else {
-            None
-        }
-    }
-}
+//     // #[ingot(extension)]
+//     // pub tcp_opts: ???
+// }
 
-impl<V: AsRef<[u8]>> FragmentRef for FragmentView<V> {
-    fn next_header(&self) -> u8 {
-        let pkt = FragmentPacket::new(self.data.as_ref()).unwrap();
-        pkt.get_next_header()
-    }
-}
+// #[derive(Ingot)]
+// pub struct Udp {
+//     pub source: u16be,
+//     pub destination: u16be,
+//     // #[ingot(payload_len() + 8)]
+//     pub length: u16be,
+//     pub checksum: u16be,
+// }
 
-impl<V: AsMut<[u8]>> FragmentMut for FragmentView<V> {
-    fn set_next_header(&mut self, val: u8) {
-        let mut pkt = MutableFragmentPacket::new(self.data.as_mut()).unwrap();
-        pkt.set_next_header(val);
-    }
-}
+// #[derive(Ingot)]
+// pub struct Geneve {
+//     // #[ingot(valid = 0)]
+//     pub version: u2,
+//     pub opt_len: u6,
+//     #[ingot(is = "u8")]
+//     pub flags: GeneveFlags,
+//     pub protocol_type: u16be,
 
-// impls on libpnet types.
-impl<'p> FragmentRef for FragmentPacket<'p> {
-    fn next_header(&self) -> u8 {
-        self.get_next_header()
-    }
-}
+//     pub vni: u24be,
+//     // #[ingot(valid = 0)]
+//     pub reserved: u8,
 
-impl<'p> FragmentMut for MutableFragmentPacket<'p> {
-    fn set_next_header(&mut self, val: u8) {
-        self.set_next_header(val)
-    }
-}
+//     // #[ingot(extension)]
+//     // pub tunnel_opts: ???
+// }
 
-impl FragmentRef for Fragment {
-    fn next_header(&self) -> u8 {
-        self.next_header
-    }
-}
+// #[derive(Ingot)]
+// pub struct GeneveOpt {
+//     pub class: u16be,
+//     // NOTE: MSB is the 'critical' flag.
+//     pub ty: u8,
+//     #[ingot(is = "u8")]
+//     pub flags: GeneveFlags,
+//     pub reserved: u3,
+//     pub length: u5,
+//     // #[ingot(var)]
+//     // pub data: ???
+// }
 
-impl FragmentMut for Fragment {
-    fn set_next_header(&mut self, val: u8) {
-        self.next_header = val;
-    }
-}
-
-// Temp name while I'm still fighting libpnet for namespace.
-
-impl<O, B> FragmentRef for KyPacket<O, B>
-where
-    O: FragmentRef,
-    B: FragmentRef,
-{
-    fn next_header(&self) -> u8 {
-        match self {
-            KyPacket::Repr(o) => o.next_header(),
-            KyPacket::Raw(b) => b.next_header(),
-        }
-    }
-}
-
-impl<O, B> FragmentMut for KyPacket<O, B>
-where
-    O: FragmentMut,
-    B: FragmentMut,
-{
-    fn set_next_header(&mut self, val: u8) {
-        match self {
-            KyPacket::Repr(o) => o.set_next_header(val),
-            KyPacket::Raw(b) => b.set_next_header(val),
-        };
-    }
-}
-
-type Frag<T> = KyPacket<Fragment, FragmentView<T>>;
-
-// Urgh, have to gen all of these due to no specialisation.
-// (or user-defined auto traits).
-impl<O, T> From<FragmentView<T>> for KyPacket<O, FragmentView<T>> {
-    fn from(value: FragmentView<T>) -> Self {
-        KyPacket::Raw(value)
-    }
-}
-
-impl<B> From<Fragment> for KyPacket<Fragment, B> {
-    fn from(value: Fragment) -> Self {
-        KyPacket::Repr(value)
-    }
-}
-
-#[cfg(feature = "alloc")]
-#[allow(unused)]
-#[macro_use]
-extern crate alloc;
+// TODO: uncork above.
 
 // need a cursor type...
 
@@ -227,21 +293,6 @@ impl Cursor<Data<'_>> {
 
 pub type Data<'a> = &'a mut [u8];
 
-#[derive(Clone, Copy, Debug)]
-pub enum ParseError {
-    Unspec,
-    Unwanted,
-    NeedsHint,
-}
-
-impl From<Infallible> for ParseError {
-    fn from(_: Infallible) -> Self {
-        Self::Unspec
-    }
-}
-
-pub type ParseResult<T> = Result<T, ParseError>;
-
 pub trait Parse<'b> {
     fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
     where
@@ -263,12 +314,6 @@ pub enum ParseControl<Denom: Copy> {
     Continue(Denom),
     Reject,
     Accept,
-}
-
-pub trait NextLayer<Target: 'static> {
-    type Denom: Copy;
-
-    fn next_layer(&self) -> ParseResult<Self::Denom>;
 }
 
 struct A(u8);
@@ -400,7 +445,7 @@ impl ParseChoice<'_> for CChoice {
 }
 
 // TODO: can refactor somehow.
-impl NextLayer<BUnderlie> for A {
+impl NextLayer for A {
     type Denom = u8;
 
     fn next_layer(&self) -> ParseResult<Self::Denom> {
@@ -411,7 +456,7 @@ impl NextLayer<BUnderlie> for A {
 // I think the solution here is:
 //  - derive on choice types to select into
 
-impl NextLayer<CChoice> for BUnderlie {
+impl NextLayer for BUnderlie {
     type Denom = u8;
 
     fn next_layer(&self) -> ParseResult<Self::Denom> {
@@ -534,6 +579,106 @@ struct PacketestChain {
     c: C1,
 }
 
+// Here are our branching types...
+
+pub enum L3 {
+    Ipv4(Ipv4),
+    Ipv6(Ipv6),
+}
+
+pub enum ValidL3<V> {
+    Ipv4(ValidIpv4<V>),
+    Ipv6(ValidIpv6<V>),
+}
+
+impl<V: HasBuf> HasBuf for ValidL3<V> {
+    type BufType = V::BufType;
+}
+
+pub enum L3Expand<V> {
+    Ipv4(Packet<Ipv4, ValidIpv4<V>>),
+    Ipv6(Packet<Ipv6, ValidIpv6<V>>),
+}
+
+impl<V> From<ValidL3<V>> for L3Expand<V> {
+    fn from(value: ValidL3<V>) -> Self {
+        match value {
+            ValidL3::Ipv4(v) => L3Expand::Ipv4(Packet::Raw(v)),
+            ValidL3::Ipv6(v) => L3Expand::Ipv6(Packet::Raw(v)),
+        }
+    }
+}
+
+struct UltimateChain<V> {
+    eth: Packet<Ethernet, ValidEthernet<V>>,
+    l3: L3Expand<V>,
+}
+
+// How do we want to generate the above?
+// choice!();
+
+fn test() {
+    let mut buf = [0u8; 1024];
+    let a: Option<UltimateChain<&mut [u8]>> = None;
+    let b: Option<UltimateChain<&[u8]>> = None;
+    let b: Option<UltimateChain<Vec<u8>>> = None;
+}
+
+impl<V: Chunk> ingot_types::ParseChoice2<V> for ValidL3<V> {
+    type Denom = u16;
+
+    fn parse_choice(data: V, hint: Self::Denom) -> ParseResult<(Self, V)> {
+        match hint {
+            a if a == pnet_packet::ethernet::EtherTypes::Ipv4.0 => {
+                ValidIpv4::parse(data)
+                    .map(|(pkt, rest)| (ValidL3::Ipv4(pkt), rest))
+            }
+            a if a == pnet_packet::ethernet::EtherTypes::Ipv6.0 => {
+                ValidIpv6::parse(data)
+                    .map(|(pkt, rest)| (ValidL3::Ipv6(pkt), rest))
+            }
+            _ => Err(ParseError::Unwanted),
+        }
+    }
+}
+
+// #[derive(Parse2)]
+struct ChainChain {
+    a: Ethernet,
+    b: L3,
+}
+
+// test to see what gens nicely.
+impl<Q: Read> Parsed2<UltimateChain<Q::Chunk>, Q> {
+    // (A, BChoice, C1)
+    pub fn new(mut data: Q) -> ParseResult<Self> {
+        let slice = data.next_chunk()?;
+
+        let (eth, remainder) = ValidEthernet::parse(slice)?;
+        let hint = eth.next_layer()?;
+
+        let slice = if remainder.as_ref().is_empty() {
+            data.next_chunk()?
+        } else {
+            remainder
+        };
+
+        let (l3, remainder) = ValidL3::parse_choice(slice, hint)?;
+        // XXX: do we want to return remainder to the Q so that it knows
+        //      where the body begins?
+
+        let eth = Packet::Raw(eth);
+        let l3 = l3.into();
+
+        Ok(Self {
+            stack: HeaderStack(UltimateChain { eth, l3 }),
+            data,
+            _self_referential: PhantomPinned,
+        })
+    }
+}
+// hmm.
+
 // Now how do we do these? unsafe trait?
 
 // note: this is not parsable but it IS constructable.
@@ -588,6 +733,24 @@ pub struct Parsed<'a, Stack> {
     // what is right emit API?
     // need to wrap in a cursor, kinda.
     data: Cursor<Pin<&'a mut [u8]>>,
+
+    _self_referential: PhantomPinned,
+}
+
+pub struct Parsed2<Stack, RawPkt: ingot_types::Read> {
+    // this needs to be a struct with all the right names.
+    stack: HeaderStack<Stack>,
+    // want generic data type here:
+    // can be:
+    //  ref or owned
+    //  contig or chunked
+    //  can be optional iff the proto stack is all dynamic!
+    // what is right emit API?
+    // need to wrap in a cursor, kinda.
+    data: RawPkt,
+
+    // Not yet, but soon.
+    _self_referential: PhantomPinned,
 }
 
 // impl<'a, Stack, New: Sized> Parsed<'a, Stack> {
@@ -624,22 +787,8 @@ impl<'a> Parsed<'a, PacketChain> {
         Ok(Self {
             stack: HeaderStack((root, b, c)),
             data: Cursor { data: Pin::new(cursor.data), pos: cursor.pos },
+            _self_referential: PhantomPinned,
         })
-    }
-}
-
-impl<V: Chunk> HasBuf for ValidEthernet<V> {
-    type BufType = V;
-}
-
-impl<V: Chunk> HeaderParse for ValidEthernet<V> {
-    fn parse(from: V) -> Result<(Self, V), ()> {
-        if from.as_ref().len() < Ethernet::MINIMUM_LENGTH {
-            Err(())
-        } else {
-            let (l, r) = from.split(Ethernet::MINIMUM_LENGTH);
-            Ok((ValidEthernet(l), r))
-        }
     }
 }
 
@@ -720,6 +869,10 @@ impl<V: Chunk> HeaderParse for ValidEthernet<V> {
 
 #[cfg(test)]
 mod tests {
+    use ingot_types::Header;
+    use ingot_types::HeaderParse;
+    use ingot_types::OneChunk;
+
     use super::*;
     // use ingot_types::PacketParse;
 
@@ -760,31 +913,25 @@ mod tests {
 
     #[test]
     fn are_my_fragment_traits_sane() {
-        let mut buf = [0u8; FragmentPacket::minimum_packet_size()];
-
-        let mut frag = FragmentView::new(buf).unwrap();
-        frag.set_next_header(1);
-        assert_eq!(frag.next_header(), 1);
-
-        let mut frag = FragmentView::new(&mut buf).unwrap();
-        assert_eq!(frag.next_header(), 0);
-        frag.set_next_header(1);
-        assert_eq!(frag.next_header(), 1);
-
-        let mut wrapped: Frag<_> = frag.into();
-        wrapped.set_next_header(2);
-        assert_eq!(wrapped.next_header(), 2);
-
-        // Now test out my genned views.
-
-        let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH];
+        let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
         // let mut eth = EthernetView::
         let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
+        let (mut v6, rest) = ValidIpv6::parse(&mut rest[..]).unwrap();
         assert_eq!(rest.len(), 0);
         assert_eq!(eth.source(), MacAddr6::nil());
         eth.set_source(MacAddr6::broadcast());
         assert_eq!(eth.source(), MacAddr6::broadcast());
 
+        v6.set_source(Ipv6Addr::LOCALHOST);
+        assert_eq!(v6.source(), Ipv6Addr::LOCALHOST);
+
         Ecn::try_from(1u8).unwrap();
+    }
+
+    #[test]
+    fn does_this_chain_stuff_compile() {
+        let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
+        let mystack = Parsed2::new(OneChunk::from(&mut buf2[..])).unwrap();
+        let mystack = Parsed2::new(OneChunk::from(&buf2[..])).unwrap();
     }
 }

@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+alloc = []
+default = ["alloc"]
+
 [dependencies]
 pnet_macros_support.workspace = true
 zerocopy.workspace = true

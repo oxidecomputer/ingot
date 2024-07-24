@@ -1,6 +1,7 @@
 use darling::ast;
 use darling::FromDeriveInput;
 use darling::FromField;
+use darling::FromMeta;
 use proc_macro2::Ident;
 use proc_macro2::TokenStream;
 use quote::format_ident;
@@ -13,14 +14,9 @@ use syn::DeriveInput;
 use syn::Error;
 use syn::Expr;
 use syn::ExprLit;
-use syn::Field;
-use syn::Fields;
-use syn::ItemStruct;
 use syn::Lit;
-use syn::PatLit;
 use syn::Type;
 use syn::TypeArray;
-use syn::TypePath;
 
 #[derive(FromDeriveInput)]
 #[darling(attributes(oxp), supports(struct_named, struct_tuple))]
@@ -134,6 +130,117 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                         data: Pin::new(cursor.data),
                         pos: cursor.pos,
                     },
+                    _self_referential: PhantomPinned,
+                })
+            }
+        }
+    }
+    .into()
+}
+
+#[proc_macro_derive(Parse2, attributes(oxp, oxpopt))]
+pub fn derive_parse2(
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let d_input = parse_macro_input!(input);
+
+    let parsed_args = match ParserArgs::from_derive_input(&d_input) {
+        Ok(o) => o,
+        Err(e) => return e.write_errors().into(),
+    };
+
+    let DeriveInput { ref ident, ref data, .. } = d_input;
+
+    let Data::Struct(data) = data else {
+        return Error::new(
+            d_input.span(),
+            "packet parsing must be derived on a struct",
+        )
+        .into_compile_error()
+        .into();
+    };
+
+    let mut parse_points: Vec<TokenStream> = vec![];
+    let mut fnames: Vec<Ident> = vec![];
+
+    let n_fields = data.fields.len();
+    for (i, field) in data.fields.iter().enumerate() {
+        let args = match LayerArgs::from_field(field) {
+            Ok(o) => o,
+            Err(e) => return e.write_errors().into(),
+        };
+
+        let Type::Path(ref ty) = field.ty else { panic!() };
+
+        let fname = if let Some(ref v) = field.ident {
+            v.clone()
+        } else {
+            format_ident!("f_{i}")
+        };
+
+        let hint_frag = if i != n_fields - 1 {
+            quote! {
+                let hint = #fname.next_layer()?;
+            }
+        } else {
+            quote! {}
+        };
+
+        let (first_ty, conv_frag) = if let Some(a) = args.from {
+            (
+                quote! {#a},
+                quote! {
+                    let #fname: #ty = #fname.try_into()?;
+                },
+            )
+        } else {
+            (quote! {#ty}, quote! {})
+        };
+
+        let contents = if i == 0 {
+            quote! {
+                let #fname = #first_ty::parse(&mut cursor)?;
+                #hint_frag
+                #conv_frag
+            }
+        } else {
+            quote! {
+                let #fname = #first_ty::parse_choice(&mut cursor, Some(hint))?;
+                #hint_frag
+                #conv_frag
+            }
+        };
+
+        parse_points.push(contents);
+        fnames.push(fname);
+    }
+
+    let ctor = match data.fields {
+        syn::Fields::Named(_) => quote! { #ident{ #( #fnames ),* } },
+        syn::Fields::Unnamed(_) => quote! { #ident( #( #fnames ),* ) },
+        syn::Fields::Unit => {
+            return Error::new(
+                d_input.span(),
+                "packet parsing must be derived on a non-unit struct",
+            )
+            .into_compile_error()
+            .into();
+        }
+    };
+
+    quote! {
+        impl<Q> Parsed2<#ident, Q: ::ingot_types::Read> {
+            pub fn new(data: Q) -> ParseResult<Self> {
+
+                #( #parse_points )*
+
+                Ok(Self {
+                    stack: HeaderStack(#ctor),
+                    data: Cursor {
+                        data: Pin::new(cursor.data),
+                        pos: cursor.pos,
+                    },
+                    _self_referential: PhantomPinned,
                 })
             }
         }
@@ -150,10 +257,18 @@ struct IngotArgs {
     data: ast::Data<(), FieldArgs>,
 }
 
+#[derive(FromMeta, Default)]
+#[darling(default)]
+struct NextLayerSpec {
+    #[darling(default)]
+    or_extension: bool,
+}
+
 #[derive(FromField)]
 #[darling(attributes(ingot, is))]
 struct FieldArgs {
     is: Option<Type>,
+    next_layer: Option<NextLayerSpec>,
 
     ident: Option<syn::Ident>,
     ty: Type,
@@ -231,6 +346,10 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let IngotArgs { ident, data } = parsed_args;
 
+    let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
+    let ref_ident = Ident::new(&format!("{ident}Ref"), ident.span());
+    let mut_ident = Ident::new(&format!("{ident}Mut"), ident.span());
+
     let mut fields: Vec<ValidField> = vec![];
 
     let mut trait_defs: Vec<TokenStream> = vec![];
@@ -248,6 +367,8 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let field_data = data.take_struct().unwrap();
 
     let mut t_bits = 0;
+    let mut next_layer: Option<TokenStream> = None;
+
     for field in field_data.fields {
         let underlying_ty =
             if let Some(ty) = &field.is { ty } else { &field.ty };
@@ -317,6 +438,32 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 };
             }
         });
+
+        if let Some(nl) = field.next_layer {
+            if next_layer.is_some() {
+                return Error::new(
+                    ident.span(),
+                    "only one field can be nominated as a next-header hint",
+                )
+                .into_compile_error()
+                .into();
+            }
+
+            if nl.or_extension {
+                todo!("integrated extension parsing not yet ready")
+            }
+
+            next_layer = Some(quote! {
+                impl<V: AsRef<[u8]>> ::ingot_types::NextLayer for #validated_ident<V> {
+                    type Denom = #user_ty;
+
+                    #[inline]
+                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                        Ok(self.#ident())
+                    }
+                }
+            });
+        }
     }
 
     if t_bits % 8 != 0 {
@@ -327,11 +474,6 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         .into_compile_error()
         .into();
     }
-
-    let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
-
-    let ref_ident = Ident::new(&format!("{ident}Ref"), ident.span());
-    let mut_ident = Ident::new(&format!("{ident}Mut"), ident.span());
 
     quote! {
         pub struct #validated_ident<V>(V);
@@ -393,6 +535,25 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         {
             #( #packet_mut_impls )*
         }
+
+        impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #validated_ident<V> {
+            type BufType = V;
+        }
+
+        impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #validated_ident<V> {
+            fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
+                use ::ingot_types::Header;
+
+                if from.as_ref().len() < #ident::MINIMUM_LENGTH {
+                    Err(::ingot_types::ParseError::TooSmall)
+                } else {
+                    let (l, r) = from.split(#ident::MINIMUM_LENGTH);
+                    Ok((#validated_ident(l), r))
+                }
+            }
+        }
+
+        #next_layer
     }
     .into()
 }
