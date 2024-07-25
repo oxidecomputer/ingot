@@ -6,6 +6,7 @@ use core::marker::PhantomPinned;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
 use core::pin::Pin;
+use ingot_macros::choice;
 use ingot_macros::Ingot;
 use ingot_macros::Parse;
 use ingot_macros::Parse2;
@@ -13,6 +14,7 @@ use ingot_types::Chunk;
 use ingot_types::HasBuf;
 use ingot_types::HeaderParse;
 use ingot_types::NextLayer;
+use ingot_types::OneChunk;
 use ingot_types::Packet;
 use ingot_types::ParseChoice2;
 use ingot_types::ParseError;
@@ -360,262 +362,40 @@ impl Parse<'_> for A {
     }
 }
 
-impl Parse<'_> for B1 {
-    fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        Ok(B1)
-    }
-}
-
-impl Parse<'_> for B2 {
-    fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        Ok(B2)
-    }
-}
-
-impl Parse<'_> for B3 {
-    fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        Ok(B3)
-    }
-}
-
-impl Parse<'_> for B4 {
-    fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        Ok(B4)
-    }
-}
-
-impl ParseChoice<'_> for BUnderlie {
-    type Denom = u8;
-
-    // autogenerate
-    fn parse_choice(
-        data: &mut Cursor<Data<'_>>,
-        hint: Option<Self::Denom>,
-    ) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        let Some(hint) = hint else {
-            return Err(ParseError::NeedsHint);
-        };
-
-        match hint {
-            v if v == B1_FROM_A => B1::parse(data).map(Self::B1),
-            v if v == B2_FROM_A => B2::parse(data).map(Self::B2),
-            v if v == B3_FROM_A => B3::parse(data).map(Self::B3),
-            v if v == B4_FROM_A => B4::parse(data).map(Self::B4),
-            _ => Err(ParseError::Unspec),
-        }
-    }
-}
-
-impl ParseChoice<'_> for CChoice {
-    type Denom = u8;
-
-    // autogenerate
-    fn parse_choice(
-        data: &mut Cursor<Data<'_>>,
-        hint: Option<Self::Denom>,
-    ) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        let Some(hint) = hint else {
-            return Err(ParseError::NeedsHint);
-        };
-
-        match hint {
-            v if v == 1 => Ok(Self::C1(C1)),
-            v if v == 2 => Ok(Self::C2(C2)),
-            _ => Err(ParseError::Unspec),
-        }
-    }
-}
-
-// TODO: can refactor somehow.
-impl NextLayer for A {
-    type Denom = u8;
-
-    fn next_layer(&self) -> ParseResult<Self::Denom> {
-        Ok(self.0)
-    }
-}
-
-// I think the solution here is:
-//  - derive on choice types to select into
-
-impl NextLayer for BUnderlie {
-    type Denom = u8;
-
-    fn next_layer(&self) -> ParseResult<Self::Denom> {
-        Ok(1)
-    }
-}
-
-// impl NextLayer<'_, CChoice> for BUnderlie {
-//     // fn next_layer(&self) -> ParseResult<fn() -> ParseResult<NextType<BUnderlie, Self::MyExtension>>> {
-//     fn next_layer(
-//         &self,
-//     ) -> ParseResult<NextType2<CChoice, Self::MyExtension>> {
-//         // Ok(NextType2::Header(Ok(|data| Ok(CChoice::C1(C1)))))
-//         Ok(NextType2::Header(|_data| Ok(CChoice::C1(C1))))
-//     }
-// }
-
-// impl<'a, 'b, Base, Target, T> NextElement<'a, 'b, Target> for T
-//     where Target: TryFrom<Base>,
-//         T: NextElement<'a, 'b, Base>,
-// {
-//     // type MyType = BUnderlie;
-
-//     fn parse_next(&'a self, data: Data<'b>) -> ParseResult<NextType<Target, ()>> where Target: TryFrom<Base> {
-//         choose_a_under(self).map(|v| NextType::Header(v()))
-//     }
-// }
-
-// some arbitrary choices
-const B1_FROM_A: u8 = 24;
-const B2_FROM_A: u8 = 32;
-const B3_FROM_A: u8 = 129;
-// here's one we might have a known type for but don't want to parse
-const B4_FROM_A: u8 = 130;
-// here's one we know is a valid choice but we haven't expressed a type
-const B5_FROM_A: u8 = 131;
-
-enum BUnderlie {
-    B1(B1),
-    B2(B2),
-    B3(B3),
-    B4(B4),
-}
-
-enum BChoice {
-    B1(B1),
-    B2(B2),
-    B3(B3),
-}
-
-impl TryFrom<BUnderlie> for BChoice {
-    type Error = ParseError;
-
-    fn try_from(value: BUnderlie) -> Result<Self, Self::Error> {
-        match value {
-            BUnderlie::B1(B1) => Ok(BChoice::B1(B1)),
-            BUnderlie::B2(B2) => Ok(BChoice::B2(B2)),
-            BUnderlie::B3(B3) => Ok(BChoice::B3(B3)),
-            BUnderlie::B4(_) => Err(ParseError::Unwanted),
-        }
-    }
-}
-
-// can automate for each element
-impl TryFrom<CChoice> for C1 {
-    type Error = ParseError;
-
-    fn try_from(value: CChoice) -> Result<Self, Self::Error> {
-        match value {
-            CChoice::C1(C1) => Ok(C1),
-            _ => Err(ParseError::Unwanted),
-        }
-    }
-}
-
-impl TryFrom<CChoice> for C2 {
-    type Error = ParseError;
-
-    fn try_from(value: CChoice) -> Result<Self, Self::Error> {
-        match value {
-            CChoice::C2(C2) => Ok(C2),
-            _ => Err(ParseError::Unwanted),
-        }
-    }
-}
-
-enum CChoice {
-    C1(C1),
-    C2(C2),
-}
-
-struct B1;
-struct B2;
-struct B3;
-struct B4;
-struct B5;
-
-struct C1;
-struct C2;
-
 // type PacketChain = (A, BChoice, CChoice);
 
 // Figure out how to express 'field of A' ->
-type PacketChain = (A, BChoice, C1);
-type InnerEncapChain = (A, B1, C1);
+// type PacketChain = (A, BChoice, C1);
+// type InnerEncapChain = (A, B1, C1);
 
-#[derive(Parse)]
-struct PacketerChain(
-    A,
-    #[oxpopt(from=BUnderlie)] BChoice,
-    #[oxpopt(from=CChoice)] C1,
-);
+// #[derive(Parse)]
+// struct PacketerChain(
+//     A,
+//     #[oxpopt(from=BUnderlie)] BChoice,
+//     #[oxpopt(from=CChoice)] C1,
+// );
 
-#[derive(Parse)]
-struct PacketestChain {
-    a: A,
-    #[oxpopt(from=BUnderlie)]
-    b: BChoice,
-    #[oxpopt(from=CChoice)]
-    c: C1,
-}
+// #[derive(Parse)]
+// struct PacketestChain {
+//     a: A,
+//     #[oxpopt(from=BUnderlie)]
+//     b: BChoice,
+//     #[oxpopt(from=CChoice)]
+//     c: C1,
+// }
 
-// Here are our branching types...
-
+#[choice(on = u16be)]
 pub enum L3 {
-    Ipv4(Ipv4),
-    Ipv6(Ipv6),
-}
-
-pub enum ValidL3<V> {
-    Ipv4(ValidIpv4<V>),
-    Ipv6(ValidIpv6<V>),
-}
-
-impl<V: HasBuf> HasBuf for ValidL3<V> {
-    type BufType = V::BufType;
-}
-
-pub enum L3Expand<V> {
-    Ipv4(Packet<Ipv4, ValidIpv4<V>>),
-    Ipv6(Packet<Ipv6, ValidIpv6<V>>),
-}
-
-impl<V> From<ValidL3<V>> for L3Expand<V> {
-    fn from(value: ValidL3<V>) -> Self {
-        match value {
-            ValidL3::Ipv4(v) => L3Expand::Ipv4(Packet::Raw(v)),
-            ValidL3::Ipv6(v) => L3Expand::Ipv6(Packet::Raw(v)),
-        }
-    }
+    Ipv4 = 0x0800,
+    Ipv6 = 0x86dd,
 }
 
 struct UltimateChain<V> {
     eth: Packet<Ethernet, ValidEthernet<V>>,
-    l3: L3Expand<V>,
+    l3: L3<V>,
 }
 
-// How do we want to generate the above?
-// choice!();
+/* Above guy needs to come from Parse derive */
 
 fn test() {
     let mut buf = [0u8; 1024];
@@ -624,29 +404,11 @@ fn test() {
     let b: Option<UltimateChain<Vec<u8>>> = None;
 }
 
-impl<V: Chunk> ingot_types::ParseChoice2<V> for ValidL3<V> {
-    type Denom = u16;
-
-    fn parse_choice(data: V, hint: Self::Denom) -> ParseResult<(Self, V)> {
-        match hint {
-            a if a == pnet_packet::ethernet::EtherTypes::Ipv4.0 => {
-                ValidIpv4::parse(data)
-                    .map(|(pkt, rest)| (ValidL3::Ipv4(pkt), rest))
-            }
-            a if a == pnet_packet::ethernet::EtherTypes::Ipv6.0 => {
-                ValidIpv6::parse(data)
-                    .map(|(pkt, rest)| (ValidL3::Ipv6(pkt), rest))
-            }
-            _ => Err(ParseError::Unwanted),
-        }
-    }
-}
-
 // #[derive(Parse2)]
-struct ChainChain {
-    a: Ethernet,
-    b: L3,
-}
+// struct ChainChain {
+//     a: Ethernet,
+//     b: L3<V>,
+// }
 
 // test to see what gens nicely.
 impl<Q: Read> Parsed2<UltimateChain<Q::Chunk>, Q> {
@@ -679,15 +441,21 @@ impl<Q: Read> Parsed2<UltimateChain<Q::Chunk>, Q> {
 }
 // hmm.
 
+pub fn parse_q<'a>(
+    a: &'a [u8],
+) -> Parsed2<UltimateChain<&'a [u8]>, OneChunk<&'a [u8]>> {
+    Parsed2::new(OneChunk::from(a)).unwrap()
+}
+
 // Now how do we do these? unsafe trait?
 
 // note: this is not parsable but it IS constructable.
 
 // can construct but not parse
-type ProcessChain = (Option<InnerEncapChain>, PacketChain);
+// type ProcessChain = (Option<InnerEncapChain>, PacketChain);
 
 // can parse and construct
-type EncapChain = (InnerEncapChain, PacketChain);
+// type EncapChain = (InnerEncapChain, PacketChain);
 // equiv:
 // type EncapChain = (InnerEncapChain, (A, BChoice, C1));
 
@@ -751,45 +519,6 @@ pub struct Parsed2<Stack, RawPkt: ingot_types::Read> {
 
     // Not yet, but soon.
     _self_referential: PhantomPinned,
-}
-
-// impl<'a, Stack, New: Sized> Parsed<'a, Stack> {
-//     pub fn prepend(self, n: New) -> Parsed<'a, (New, Stack)> {
-//         Parsed {
-//             stack: HeaderStack((n, self.stack.0)),
-//             data: self.data,
-//         }
-//     }
-// }
-
-impl<'a> Parsed<'a, PacketChain> {
-    // (A, BChoice, C1)
-    pub fn new(data: &'a mut [u8]) -> ParseResult<Self> {
-        let mut cursor = Cursor { data, pos: 0 };
-
-        let root = A::parse(&mut cursor)?;
-
-        // note: maybe go straight to BChoice?
-        let hint = root.next_layer()?;
-        let b = BUnderlie::parse_choice(&mut cursor, Some(hint))?;
-        let hint = b.next_layer()?;
-
-        let b: BChoice = b.try_into()?;
-
-        // how do we handle the next layer?
-        // We need BChoice / BUnderlie to give us a fn pointer and the next layer's extension behaviour.
-        // We can't do a match in here, obviously -- we don't know all variants, since we're delegating.
-
-        // let hint = b.next_layer2()?;
-        let c = CChoice::parse_choice(&mut cursor, Some(hint))?;
-        let c = c.try_into()?;
-
-        Ok(Self {
-            stack: HeaderStack((root, b, c)),
-            data: Cursor { data: Pin::new(cursor.data), pos: cursor.pos },
-            _self_referential: PhantomPinned,
-        })
-    }
 }
 
 // REALLY NEED TO THINK ABOUT HOW/WHEN TO COMBINE PARSEDs
@@ -877,41 +606,6 @@ mod tests {
     // use ingot_types::PacketParse;
 
     #[test]
-    fn dummy_stack() {
-        let mut a = [B1_FROM_A];
-        let Ok(v) = Parsed::<'_, PacketChain>::new(&mut a) else {
-            panic!("not ok!")
-        };
-
-        assert!(matches!(v.stack.0, (A(B1_FROM_A), BChoice::B1(B1), C1)));
-
-        let mut a = [B4_FROM_A];
-        assert!(matches!(
-            Parsed::<'_, PacketChain>::new(&mut a),
-            Err(ParseError::Unwanted)
-        ))
-    }
-
-    #[test]
-    fn genned_stack() {
-        let mut a = [B1_FROM_A];
-        let Ok(v) = Parsed::<'_, PacketerChain>::new(&mut a) else {
-            panic!("not ok!")
-        };
-
-        assert!(matches!(
-            v.stack.0,
-            PacketerChain(A(B1_FROM_A), BChoice::B1(B1), C1)
-        ));
-
-        let mut a = [B4_FROM_A];
-        assert!(matches!(
-            Parsed::<'_, PacketerChain>::new(&mut a),
-            Err(ParseError::Unwanted)
-        ))
-    }
-
-    #[test]
     fn are_my_fragment_traits_sane() {
         let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
         // let mut eth = EthernetView::
@@ -933,5 +627,10 @@ mod tests {
         let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
         let mystack = Parsed2::new(OneChunk::from(&mut buf2[..])).unwrap();
         let mystack = Parsed2::new(OneChunk::from(&buf2[..])).unwrap();
+
+        match mystack.stack.0.l3 {
+            L3::Ipv4(v) => v.hop_limit(),
+            L3::Ipv6(v) => v.hop_limit(),
+        };
     }
 }

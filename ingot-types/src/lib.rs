@@ -10,6 +10,7 @@ extern crate alloc;
 
 pub mod primitives {
     pub use pnet_macros_support::types::*;
+    pub use zerocopy;
 }
 
 pub enum Packet<O, B> {

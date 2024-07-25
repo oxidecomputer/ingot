@@ -1,4 +1,6 @@
 use darling::ast;
+use darling::ast::NestedMeta;
+use darling::Error as DarlingError;
 use darling::FromDeriveInput;
 use darling::FromField;
 use darling::FromMeta;
@@ -14,7 +16,9 @@ use syn::DeriveInput;
 use syn::Error;
 use syn::Expr;
 use syn::ExprLit;
+use syn::ItemEnum;
 use syn::Lit;
+use syn::Path;
 use syn::Type;
 use syn::TypeArray;
 
@@ -567,3 +571,149 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 //         #structdef
 //     }.into()
 // }
+
+// #[proc_macro]
+// pub fn choice(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+//     // println!("attr: \"{attr}\"");
+//     panic!("item: \"{item}\"");
+//     item
+// }
+
+#[derive(FromMeta)]
+struct ChoiceArgs {
+    on: Path,
+}
+
+#[proc_macro_attribute]
+pub fn choice(
+    attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let attr_args = match NestedMeta::parse_meta_list(attr.into()) {
+        Ok(v) => v,
+        Err(e) => {
+            return DarlingError::from(e).write_errors().into();
+        }
+    };
+    let item = syn::parse_macro_input!(item as ItemEnum);
+
+    let ChoiceArgs { on } = match ChoiceArgs::from_list(&attr_args) {
+        Ok(v) => v,
+        Err(e) => {
+            return e.write_errors().into();
+        }
+    };
+
+    let ident = item.ident;
+
+    let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
+    let repr_ident = Ident::new(&format!("{ident}Repr"), ident.span());
+
+    let mut top_vars: Vec<TokenStream> = vec![];
+    let mut validated_vars: Vec<TokenStream> = vec![];
+    let mut repr_vars: Vec<TokenStream> = vec![];
+
+    let mut match_arms: Vec<TokenStream> = vec![];
+    let mut parse_match_arms: Vec<TokenStream> = vec![];
+    let mut repr_match_arms: Vec<TokenStream> = vec![];
+
+    let mut unpacks: Vec<TokenStream> = vec![];
+
+    for var in item.variants {
+        let Some((_, disc)) = var.discriminant else {
+            return Error::new(
+                var.span(),
+                "variant must have a valid discriminant",
+            )
+            .into_compile_error()
+            .into();
+        };
+
+        let field_ident = var.ident;
+        let valid_field_ident =
+            Ident::new(&format!("Valid{field_ident}"), ident.span());
+
+        top_vars.push(quote!{
+            #field_ident(::ingot_types::Packet<#field_ident, #valid_field_ident<V>>)
+        });
+
+        validated_vars.push(quote! {
+            #field_ident(#valid_field_ident<V>)
+        });
+
+        repr_vars.push(quote! {
+            #field_ident(#field_ident)
+        });
+
+        match_arms.push(quote! {
+            v if v == #disc => {
+                #valid_field_ident::parse(data)
+                    .map(|(pkt, rest)| (#validated_ident::#field_ident(pkt), rest))
+            }
+        });
+
+        parse_match_arms.push(quote! {
+            #validated_ident::#field_ident(v) => #ident::#field_ident(::ingot_types::Packet::Raw(v))
+        });
+
+        repr_match_arms.push(quote! {
+            #repr_ident::#field_ident(v) => #ident::#field_ident(::ingot_types::Packet::Repr(v))
+        });
+
+        unpacks.push(quote! {
+            impl<V> ::core::convert::TryFrom<#ident<V>> for ::ingot_types::Packet<#field_ident, #valid_field_ident<V>> {
+                type Error = ::ingot_types::ParseError;
+
+                fn try_from(value: #ident<V>) -> Result<Self, Self::Error> {
+                    match value {
+                        #ident::#field_ident(v) => Ok(v),
+                        _ => Err(ParseError::Unwanted),
+                    }
+                }
+            }
+        });
+    }
+
+    quote!{
+        pub enum #ident<V> {
+            #( #top_vars ),*
+        }
+
+        pub enum #validated_ident<V> {
+            #( #validated_vars ),*
+        }
+
+        pub enum #repr_ident {
+            #( #repr_vars ),*
+        }
+
+        impl<V: ::ingot_types::Chunk> ::ingot_types::ParseChoice2<V> for #validated_ident<V> {
+            type Denom = #on;
+
+            fn parse_choice(data: V, hint: Self::Denom) -> ::ingot_types::ParseResult<(Self, V)> {
+                match hint {
+                    #( #match_arms ),*
+                    _ => Err(::ingot_types::ParseError::Unwanted)
+                }
+            }
+        }
+
+        impl<V> ::core::convert::From<#validated_ident<V>> for #ident<V> {
+            fn from(value: #validated_ident<V>) -> Self {
+                match value {
+                    #( #parse_match_arms ),*
+                }
+            }
+        }
+
+        impl<V> ::core::convert::From<#repr_ident> for #ident<V> {
+            fn from(value: #repr_ident) -> Self {
+                match value {
+                    #( #repr_match_arms ),*
+                }
+            }
+        }
+
+        #( #unpacks )*
+    }.into()
+}
