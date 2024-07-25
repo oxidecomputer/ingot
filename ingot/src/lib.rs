@@ -5,18 +5,13 @@ use bitflags::bitflags;
 use core::marker::PhantomPinned;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
-use core::pin::Pin;
 use ingot_macros::choice;
 use ingot_macros::Ingot;
-use ingot_macros::Parse;
-use ingot_macros::Parse2;
-use ingot_types::Chunk;
-use ingot_types::HasBuf;
 use ingot_types::HeaderParse;
 use ingot_types::NextLayer;
 use ingot_types::OneChunk;
 use ingot_types::Packet;
-use ingot_types::ParseChoice2;
+use ingot_types::ParseChoice;
 use ingot_types::ParseError;
 use ingot_types::ParseResult;
 use ingot_types::Read;
@@ -282,86 +277,6 @@ pub struct IpV6Ext6564 {
 // - Work out storage of adjacent type (e.g., ptrs in)
 // - Get
 
-pub struct Cursor<T> {
-    data: T,
-    pos: usize,
-}
-
-impl Cursor<Data<'_>> {
-    fn remaining(&self) -> usize {
-        self.data.len() - self.pos
-    }
-}
-
-pub type Data<'a> = &'a mut [u8];
-
-pub trait Parse<'b> {
-    fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
-    where
-        Self: Sized;
-}
-
-pub trait ParseChoice<'b> {
-    type Denom: Copy;
-
-    fn parse_choice(
-        data: &mut Cursor<Data<'b>>,
-        hint: Option<Self::Denom>,
-    ) -> ParseResult<Self>
-    where
-        Self: Sized;
-}
-
-pub enum ParseControl<Denom: Copy> {
-    Continue(Denom),
-    Reject,
-    Accept,
-}
-
-struct A(u8);
-
-// impl Parse2<'_> for A {
-//     type MyExtension = ();
-
-//     // AUTOGENERATE ME
-//     fn parse_hint(data: &mut Cursor<Data<'_>>, _hint: Option<usize>) -> ParseResult<Self>
-//     where
-//         Self: Sized,
-//     {
-//         if data.remaining() < 1 {
-//             return Err(ParseError::Unspec);
-//         }
-
-//         data.pos += 1;
-
-//         // Okay, extension handling *should* happen in here.
-//         // So should wacky extensions (VLAN, v6) tbh.
-
-//         Ok(A(data.data[data.pos - 1]))
-//     }
-
-//     // We probably want a parse_raw that can emit the Good Code.
-// }
-
-impl Parse<'_> for A {
-    // AUTOGENERATE ME
-    fn parse(data: &mut Cursor<Data<'_>>) -> ParseResult<Self>
-    where
-        Self: Sized,
-    {
-        if data.remaining() < 1 {
-            return Err(ParseError::Unspec);
-        }
-
-        data.pos += 1;
-
-        // Okay, extension handling *should* happen in here.
-        // So should wacky extensions (VLAN, v6) tbh.
-
-        Ok(A(data.data[data.pos - 1]))
-    }
-}
-
 // type PacketChain = (A, BChoice, CChoice);
 
 // Figure out how to express 'field of A' ->
@@ -488,21 +403,6 @@ impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
     ) -> Result<Self, Self::Error> {
         todo!()
     }
-}
-
-pub struct Parsed<'a, Stack> {
-    // this needs to be a struct with all the right names.
-    stack: HeaderStack<Stack>,
-    // want generic data type here:
-    // can be:
-    //  ref or owned
-    //  contig or chunked
-    //  can be optional iff the proto stack is all dynamic!
-    // what is right emit API?
-    // need to wrap in a cursor, kinda.
-    data: Cursor<Pin<&'a mut [u8]>>,
-
-    _self_referential: PhantomPinned,
 }
 
 pub struct Parsed2<Stack, RawPkt: ingot_types::Read> {

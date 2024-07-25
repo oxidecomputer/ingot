@@ -687,7 +687,7 @@ pub fn choice(
             #( #repr_vars ),*
         }
 
-        impl<V: ::ingot_types::Chunk> ::ingot_types::ParseChoice2<V> for #validated_ident<V> {
+        impl<V: ::ingot_types::Chunk> ::ingot_types::ParseChoice<V> for #validated_ident<V> {
             type Denom = #on;
 
             fn parse_choice(data: V, hint: Self::Denom) -> ::ingot_types::ParseResult<(Self, V)> {

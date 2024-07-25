@@ -131,7 +131,7 @@ impl From<Infallible> for ParseError {
     }
 }
 
-pub trait ParseChoice2<V: Chunk>: Sized {
+pub trait ParseChoice<V: Chunk>: Sized {
     type Denom: Copy;
 
     fn parse_choice(data: V, hint: Self::Denom) -> ParseResult<(Self, V)>;
