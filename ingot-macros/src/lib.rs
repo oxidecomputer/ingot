@@ -27,7 +27,7 @@ use syn::TypeArray;
 struct ParserArgs {}
 
 #[derive(FromField)]
-#[darling(attributes(oxpopt))]
+#[darling(attributes(oxpopt, ingot))]
 struct LayerArgs {
     from: Option<syn::Path>,
 }
@@ -142,18 +142,18 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     .into()
 }
 
-#[proc_macro_derive(Parse2, attributes(oxp, oxpopt))]
+#[proc_macro_derive(Parse2, attributes(oxp, oxpopt, ingot))]
 pub fn derive_parse2(
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let d_input = parse_macro_input!(input);
 
-    let parsed_args = match ParserArgs::from_derive_input(&d_input) {
+    let _parsed_args = match ParserArgs::from_derive_input(&d_input) {
         Ok(o) => o,
         Err(e) => return e.write_errors().into(),
     };
 
-    let DeriveInput { ref ident, ref data, .. } = d_input;
+    let DeriveInput { ref ident, ref data, ref generics, .. } = d_input;
 
     let Data::Struct(data) = data else {
         return Error::new(
@@ -201,6 +201,8 @@ pub fn derive_parse2(
             (quote! {#ty}, quote! {})
         };
 
+        // panic!("{first_ty}, {conv_frag}");
+
         let contents = if i == 0 {
             quote! {
                 let #fname = #first_ty::parse(&mut cursor)?;
@@ -233,17 +235,15 @@ pub fn derive_parse2(
     };
 
     quote! {
-        impl<Q> Parsed2<#ident, Q: ::ingot_types::Read> {
-            pub fn new(data: Q) -> ParseResult<Self> {
+        impl<Q> Parsed2<#ident #generics, Q: ::ingot_types::Read> {
+            pub fn new(mut data: Q) -> ParseResult<Self> {
+                let slice = data.next_chunk()?;
 
                 #( #parse_points )*
 
                 Ok(Self {
                     stack: HeaderStack(#ctor),
-                    data: Cursor {
-                        data: Pin::new(cursor.data),
-                        pos: cursor.pos,
-                    },
+                    data,
                     _self_referential: PhantomPinned,
                 })
             }
@@ -343,16 +343,16 @@ fn bits_in_type(ty: &Type) -> Result<usize, syn::Error> {
 pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let d_input = parse_macro_input!(input);
 
-    let mut parsed_args = match IngotArgs::from_derive_input(&d_input) {
+    let IngotArgs { ident, data } = match IngotArgs::from_derive_input(&d_input)
+    {
         Ok(o) => o,
         Err(e) => return e.write_errors().into(),
     };
 
-    let IngotArgs { ident, data } = parsed_args;
-
     let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
     let ref_ident = Ident::new(&format!("{ident}Ref"), ident.span());
     let mut_ident = Ident::new(&format!("{ident}Mut"), ident.span());
+    let pkt_ident = Ident::new(&format!("{ident}Packet"), ident.span());
 
     let mut fields: Vec<ValidField> = vec![];
 
@@ -385,11 +385,11 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
         let marker = format!("my offset is {t_bits}+={n_bits} bits");
 
-        let ident = field.ident.unwrap();
+        let field_ident = field.ident.unwrap();
 
         fields.push(ValidField {
             repr: underlying_ty.clone(),
-            ident: ident.clone(),
+            ident: field_ident.clone(),
             first_bit: t_bits,
             n_bits,
         });
@@ -397,44 +397,52 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         t_bits += n_bits;
 
         trait_defs.push(quote! {
-            fn #ident(&self) -> #user_ty;
+            fn #field_ident(&self) -> #user_ty;
         });
         trait_impls.push(quote! {
-            fn #ident(&self) -> #user_ty {
+            #[inline]
+            fn #field_ident(&self) -> #user_ty {
                 let a = #marker;
-                todo!()
+                // todo!()
+                ::core::hint::black_box(Default::default())
             }
         });
         direct_trait_impls.push(quote! {
-            fn #ident(&self) -> #user_ty {
-                self.#ident
+            #[inline]
+            fn #field_ident(&self) -> #user_ty {
+                self.#field_ident
             }
         });
 
-        let mut_name = Ident::new(&format!("set_{ident}"), ident.span());
+        let mut_name =
+            Ident::new(&format!("set_{field_ident}"), field_ident.span());
         trait_mut_defs.push(quote! {
             fn #mut_name(&mut self, val: #user_ty);
         });
         trait_mut_impls.push(quote! {
+            #[inline]
             fn #mut_name(&mut self, val: #user_ty) {
                 todo!()
             }
         });
         direct_trait_mut_impls.push(quote! {
+            #[inline]
             fn #mut_name(&mut self, val: #user_ty) {
-                self.#ident = val;
+                self.#field_ident = val;
             }
         });
 
         packet_impls.push(quote! {
-            fn #ident(&self) -> #user_ty {
+            #[inline]
+            fn #field_ident(&self) -> #user_ty {
                 match self {
-                    ::ingot_types::Packet::Repr(o) => o.#ident(),
-                    ::ingot_types::Packet::Raw(b) => b.#ident(),
+                    ::ingot_types::Packet::Repr(o) => o.#field_ident(),
+                    ::ingot_types::Packet::Raw(b) => b.#field_ident(),
                 }
             }
         });
         packet_mut_impls.push(quote! {
+            #[inline]
             fn #mut_name(&mut self, val: #user_ty) {
                 match self {
                     ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
@@ -446,7 +454,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         if let Some(nl) = field.next_layer {
             if next_layer.is_some() {
                 return Error::new(
-                    ident.span(),
+                    field_ident.span(),
                     "only one field can be nominated as a next-header hint",
                 )
                 .into_compile_error()
@@ -463,12 +471,41 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
                     #[inline]
                     fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                        Ok(self.#ident())
+                        Ok(self.#field_ident())
+                    }
+                }
+
+                impl ::ingot_types::NextLayer for #ident {
+                    type Denom = #user_ty;
+
+                    #[inline]
+                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                        Ok(self.#field_ident)
                     }
                 }
             });
         }
     }
+
+    let next_layer = next_layer.unwrap_or_else(|| quote! {
+        impl<V: AsRef<[u8]>> ::ingot_types::NextLayer for #validated_ident<V> {
+            type Denom = ();
+
+            #[inline]
+            fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                Err(::ingot_types::ParseError::NoHint)
+            }
+        }
+
+        impl ::ingot_types::NextLayer for #ident {
+            type Denom = ();
+
+            #[inline]
+            fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                Err(::ingot_types::ParseError::NoHint)
+            }
+        }
+    });
 
     if t_bits % 8 != 0 {
         return Error::new(
@@ -545,9 +582,11 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }
 
         impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #validated_ident<V> {
+            type Target = Self;
             fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
                 use ::ingot_types::Header;
 
+                // TODO!
                 if from.as_ref().len() < #ident::MINIMUM_LENGTH {
                     Err(::ingot_types::ParseError::TooSmall)
                 } else {
@@ -556,6 +595,28 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 }
             }
         }
+
+        impl<V, T> ::core::convert::From<#validated_ident<V>> for ::ingot_types::Packet<T, #validated_ident<V>> {
+            fn from(value: #validated_ident<V>) -> Self {
+                ::ingot_types::Packet::Raw(value)
+            }
+        }
+
+        impl<T> ::core::convert::From<#ident> for ::ingot_types::Packet<#ident, T> {
+            fn from(value: #ident) -> Self {
+                ::ingot_types::Packet::Repr(value)
+            }
+        }
+
+        pub type #pkt_ident<V> = ::ingot_types::Packet<#ident, #validated_ident<V>>;
+
+        impl<V> ::ingot_types::HasRepr for #validated_ident<V> {
+            type ReprType = #ident;
+        }
+
+        // impl<V> ::ingot_types::HasView for #pkt_ident<V> {
+        //     type ViewType = #validated_ident<V>;
+        // }
 
         #next_layer
     }
@@ -617,6 +678,9 @@ pub fn choice(
     let mut parse_match_arms: Vec<TokenStream> = vec![];
     let mut repr_match_arms: Vec<TokenStream> = vec![];
 
+    let mut next_layer_wheres: Vec<TokenStream> = vec![];
+    let mut next_layer_match_arms: Vec<TokenStream> = vec![];
+
     let mut unpacks: Vec<TokenStream> = vec![];
 
     for var in item.variants {
@@ -658,6 +722,14 @@ pub fn choice(
 
         repr_match_arms.push(quote! {
             #repr_ident::#field_ident(v) => #ident::#field_ident(::ingot_types::Packet::Repr(v))
+        });
+
+        next_layer_wheres.push(quote! {
+            #valid_field_ident<V>: ::ingot_types::NextLayer<Denom=T>
+        });
+
+        next_layer_match_arms.push(quote! {
+            #validated_ident::#field_ident(v) => v.next_layer()
         });
 
         unpacks.push(quote! {
@@ -710,6 +782,19 @@ pub fn choice(
             fn from(value: #repr_ident) -> Self {
                 match value {
                     #( #repr_match_arms ),*
+                }
+            }
+        }
+
+        impl<V: AsRef<[u8]>, T: Copy> ::ingot_types::NextLayer for #validated_ident<V>
+        where #( #next_layer_wheres ),*
+        {
+            type Denom = T;
+
+            #[inline]
+            fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                match self {
+                    #( #next_layer_match_arms ),*
                 }
             }
         }

@@ -7,6 +7,7 @@ use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
 use ingot_macros::choice;
 use ingot_macros::Ingot;
+use ingot_macros::Parse2;
 use ingot_types::HeaderParse;
 use ingot_types::NextLayer;
 use ingot_types::OneChunk;
@@ -25,9 +26,10 @@ extern crate alloc;
 
 // types we want to use in packet bodies.
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(u8)]
 pub enum Ecn {
+    #[default]
     NotCapable = 0,
     Capable0,
     Capable1,
@@ -35,14 +37,14 @@ pub enum Ecn {
 }
 
 bitflags! {
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Ipv4Flags: u3 {
     const RESERVED       = 0b100;
     const DONT_FRAGMENT  = 0b010;
     const MORE_FRAGMENTS = 0b001;
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct TcpFlags: u8 {
     const FIN = 0b0000_0001;
     const SYN = 0b0000_0010;
@@ -54,7 +56,7 @@ pub struct TcpFlags: u8 {
     const CWR = 0b1000_0000;
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct GeneveFlags: u8 {
     const CONTROL_PACKET = 0b1000_0000;
     const CRITICAL_OPTS  = 0b0100_0000;
@@ -149,14 +151,16 @@ pub struct Ipv4 {
 
     // #[ingot(default = 128)]
     pub hop_limit: u8,
-    // #[ingot(is = "u8")]
+    #[ingot(is = "u8", next_layer())]
     pub protocol: u8, // should be a type.
     pub checksum: u16be,
 
     #[ingot(is = "[u8; 4]")]
-    pub source: Ipv4Addr,
+    // pub source: Ipv4Addr,
+    pub source: u32,
     #[ingot(is = "[u8; 4]")]
-    pub destination: Ipv4Addr,
+    // pub destination: Ipv4Addr,
+    pub destination: u32,
     // #[ingot(extension(len = "self.ihl * 4 - 20"))]
     // pub v4ext: ???
 }
@@ -172,70 +176,71 @@ pub struct Ipv6 {
 
     // #[ingot(payload_len)]
     pub payload_len: u16be,
-    // #[ingot(is = "u8")]
+    #[ingot(is = "u8", next_layer())]
     pub next_header: u8, // should be a type.
     // #[ingot(default = 128)]
     pub hop_limit: u8,
 
     #[ingot(is = "[u8; 16]")]
-    pub source: Ipv6Addr,
+    // pub source: Ipv6Addr,
+    pub source: [u8; 16],
     #[ingot(is = "[u8; 16]")]
-    pub destination: Ipv6Addr,
+    // pub destination: Ipv6Addr,
+    pub destination: [u8; 16],
     // #[ingot(extension)]
     // pub v6ext: ???
 }
 
 // 0x2c
-#[derive(Ingot)]
-pub struct IpV6ExtFragment {
-    pub next_header: u8,
-    pub reserved: u8,
-    pub fragment_offset: u13be,
-    pub res: u2,
-    pub more_frags: u1,
-    pub ident: u32be,
-}
-
-// 0x00, 0x2b, 0x3c, custom(0xfe)
-#[derive(Ingot)]
-pub struct IpV6Ext6564 {
-    pub next_header: u8,
-    pub ext_len: u8,
-    // #[ingot(something)]
-    // pub data: ???
-}
-
 // #[derive(Ingot)]
-// pub struct Tcp {
-//     pub source: u16be,
-//     pub destination: u16be,
-
-//     pub sequence: u32be,
-//     pub acknowledgement: u32be,
-
-//     // #[ingot(valid = "data_offset >= 5")]
-//     pub data_offset: u4,
-//     // #[ingot(valid = 0)]
-//     pub reserved: u4,
-//     #[ingot(is = "u8")]
-//     pub flags: TcpFlags,
-//     pub window_size: u16be,
-//     // #[ingot(payload_len() + 8)]
-//     pub length: u16be,
-//     pub urgent_ptr: u16be,
-
-//     // #[ingot(extension)]
-//     // pub tcp_opts: ???
+// pub struct IpV6ExtFragment {
+//     pub next_header: u8,
+//     pub reserved: u8,
+//     pub fragment_offset: u13be,
+//     pub res: u2,
+//     pub more_frags: u1,
+//     pub ident: u32be,
 // }
 
+// // 0x00, 0x2b, 0x3c, custom(0xfe)
 // #[derive(Ingot)]
-// pub struct Udp {
-//     pub source: u16be,
-//     pub destination: u16be,
-//     // #[ingot(payload_len() + 8)]
-//     pub length: u16be,
-//     pub checksum: u16be,
+// pub struct IpV6Ext6564 {
+//     pub next_header: u8,
+//     pub ext_len: u8,
+//     // #[ingot(something)]
+//     // pub data: ???
 // }
+
+#[derive(Ingot)]
+pub struct Tcp {
+    pub source: u16be,
+    pub destination: u16be,
+
+    pub sequence: u32be,
+    pub acknowledgement: u32be,
+
+    // #[ingot(valid = "data_offset >= 5")]
+    pub data_offset: u4,
+    // #[ingot(valid = 0)]
+    pub reserved: u4,
+    #[ingot(is = "u8")]
+    pub flags: TcpFlags,
+    pub window_size: u16be,
+    // #[ingot(payload_len() + 8)]
+    pub length: u16be,
+    pub urgent_ptr: u16be,
+    // #[ingot(extension)]
+    // pub tcp_opts: ???
+}
+
+#[derive(Ingot)]
+pub struct Udp {
+    pub source: u16be,
+    pub destination: u16be,
+    // #[ingot(payload_len() + 8)]
+    pub length: u16be,
+    pub checksum: u16be,
+}
 
 // #[derive(Ingot)]
 // pub struct Geneve {
@@ -305,9 +310,19 @@ pub enum L3 {
     Ipv6 = 0x86dd,
 }
 
-struct UltimateChain<V> {
-    eth: Packet<Ethernet, ValidEthernet<V>>,
-    l3: L3<V>,
+#[choice(on = u8)]
+pub enum L4 {
+    Tcp = 0x06,
+    Udp = 0x11,
+}
+
+// #[derive(Parse2)]
+pub struct UltimateChain<Q> {
+    eth: EthernetPacket<Q>,
+    l3: L3<Q>,
+    l4: L4<Q>,
+    // #[oxpopt(from=L4)]
+    // l4: Packet<Udp, ValidUdp<V>>,
 }
 
 /* Above guy needs to come from Parse derive */
@@ -317,6 +332,9 @@ fn test() {
     let a: Option<UltimateChain<&mut [u8]>> = None;
     let b: Option<UltimateChain<&[u8]>> = None;
     let b: Option<UltimateChain<Vec<u8>>> = None;
+
+    struct A(u8, u8, u8, u8);
+    A { 0: 1, 1: 2, 3: 3, 2: 2 };
 }
 
 // #[derive(Parse2)]
@@ -331,7 +349,12 @@ impl<Q: Read> Parsed2<UltimateChain<Q::Chunk>, Q> {
     pub fn new(mut data: Q) -> ParseResult<Self> {
         let slice = data.next_chunk()?;
 
-        let (eth, remainder) = ValidEthernet::parse(slice)?;
+        // layer
+
+        // let a: Packet < Ethernet, ValidEthernet < Q > > = <Packet <Ethernet, ValidEthernet < Q > >>::parse(slice);
+
+        // let (eth, remainder) = ValidEthernet::parse(slice)?;
+        let (eth, remainder) = EthernetPacket::parse(slice)?;
         let hint = eth.next_layer()?;
 
         let slice = if remainder.as_ref().is_empty() {
@@ -339,16 +362,31 @@ impl<Q: Read> Parsed2<UltimateChain<Q::Chunk>, Q> {
         } else {
             remainder
         };
+        let eth = eth.try_into()?;
+
+        // layer
 
         let (l3, remainder) = ValidL3::parse_choice(slice, hint)?;
+        let hint = l3.next_layer()?;
+
+        let slice = if remainder.as_ref().is_empty() {
+            data.next_chunk()?
+        } else {
+            remainder
+        };
+        let l3 = l3.try_into()?;
+
+        // layer
+
+        let (l4, remainder) = ValidL4::parse_choice(slice, hint)?;
+        let l4 = l4.try_into()?;
         // XXX: do we want to return remainder to the Q so that it knows
         //      where the body begins?
 
-        let eth = Packet::Raw(eth);
-        let l3 = l3.into();
+        // done
 
         Ok(Self {
-            stack: HeaderStack(UltimateChain { eth, l3 }),
+            stack: HeaderStack(UltimateChain { eth, l3, l4 }),
             data,
             _self_referential: PhantomPinned,
         })

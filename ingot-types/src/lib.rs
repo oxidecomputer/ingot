@@ -1,9 +1,8 @@
 #![no_std]
 
+use core::convert::Infallible;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-use core::convert::Infallible;
-use core::hint::unreachable_unchecked;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -26,12 +25,44 @@ pub trait Header {
     fn packet_length(&self) -> usize;
 }
 
+pub trait HasView {
+    type ViewType;
+}
+
+pub trait HasRepr {
+    type ReprType;
+}
+
 pub trait HasBuf: Sized {
     type BufType: Chunk;
 }
 
-pub trait HeaderParse: HasBuf {
-    fn parse(from: Self::BufType) -> ParseResult<(Self, Self::BufType)>;
+pub trait HeaderParse {
+    type Target: HasBuf;
+
+    fn parse(from: <Self::Target as HasBuf>::BufType) -> ParseResult<(Self::Target, <Self::Target as HasBuf>::BufType)>;
+}
+
+impl<B: HeaderParse<Target = B> + HasBuf + HasRepr + Into<Self>>  Packet<B::ReprType, B> {
+    #[inline]
+    pub fn parse(from: B::BufType) -> ParseResult<(Self, B::BufType)> {
+        <B as HeaderParse>::parse(from)
+            .map(|(header, buf)| (header.into(), buf))
+    }
+}
+
+impl<O: NextLayer, B> NextLayer for Packet<O, B>
+where B: NextLayer<Denom = O::Denom>
+{
+    type Denom = O::Denom;
+
+    #[inline]
+    fn next_layer(&self) -> ParseResult<Self::Denom> {
+        match self {
+            Packet::Repr(v) => v.next_layer(),
+            Packet::Raw(v) => v.next_layer(),
+        }
+    }
 }
 
 // impl<O, B> PacketParse for Packet<O, B>
@@ -60,19 +91,22 @@ pub trait Chunk: Sized + AsRef<[u8]> {
 }
 
 impl Chunk for &[u8] {
+    #[inline]
     fn split(self, index: usize) -> (Self, Self) {
         self.split_at(index)
     }
 }
 
 impl Chunk for &mut [u8] {
+    #[inline]
     fn split(self, index: usize) -> (Self, Self) {
         self.split_at_mut(index)
     }
 }
 
-#[cfg(feature = "alloc")]
+#[cfg(feature="alloc")]
 impl Chunk for Vec<u8> {
+    #[inline]
     fn split(mut self, index: usize) -> (Self, Self) {
         let new = self.split_off(index);
 
@@ -121,20 +155,26 @@ pub enum ParseError {
     Unspec,
     Unwanted,
     NeedsHint,
+    NoHint,
     TooSmall,
 }
 
 impl From<Infallible> for ParseError {
     fn from(_: Infallible) -> Self {
         // XXX: benchmark this one.
-        unsafe { unreachable_unchecked() }
+        //      `cargo asm` suggests the compiler is smart enough.
+        // unsafe { core::hint::unreachable_unchecked() }
+        unreachable!()
     }
 }
 
 pub trait ParseChoice<V: Chunk>: Sized {
     type Denom: Copy;
 
-    fn parse_choice(data: V, hint: Self::Denom) -> ParseResult<(Self, V)>;
+    fn parse_choice(
+        data: V,
+        hint: Self::Denom,
+    ) -> ParseResult<(Self, V)>;
 }
 
 pub enum ParseControl<Denom: Copy> {

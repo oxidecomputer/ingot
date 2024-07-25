@@ -31,5 +31,8 @@ pnet_packet = "0.35"
 pnet_macros = "0.35"
 pnet_macros_support = "0.35"
 
+# External repo.
+criterion = "0.5"
+
 [profile.release]
 debug = 2
