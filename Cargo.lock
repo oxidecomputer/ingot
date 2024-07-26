@@ -81,6 +81,7 @@ dependencies = [
  "pnet_macros",
  "pnet_macros_support",
  "pnet_packet",
+ "zerocopy",
 ]
 
 [[package]]
@@ -98,6 +99,7 @@ dependencies = [
 name = "ingot-types"
 version = "0.1.0"
 dependencies = [
+ "macaddr",
  "pnet_macros_support",
  "zerocopy",
 ]

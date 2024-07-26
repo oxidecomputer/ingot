@@ -10,5 +10,6 @@ alloc = []
 default = ["alloc"]
 
 [dependencies]
+macaddr.workspace = true
 pnet_macros_support.workspace = true
 zerocopy.workspace = true

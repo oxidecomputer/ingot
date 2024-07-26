@@ -9,6 +9,7 @@ use proc_macro2::TokenStream;
 use quote::format_ident;
 use quote::quote;
 use regex::Regex;
+use syn::parse;
 use syn::parse_macro_input;
 use syn::spanned::Spanned;
 use syn::Data;
@@ -214,16 +215,160 @@ struct FieldArgs {
 struct ValidField {
     repr: Type,
     ident: Ident,
+    user_ty: Type,
 
     first_bit: usize,
-    n_bits: usize,
+    analysis: Analysed,
+
+    /// indicates child field of the
+    sub_ref_idx: usize,
+    hybrid: Option<HybridFieldState>,
 }
+
+impl ValidField {
+    fn getter_name(&self) -> &Ident {
+        &self.ident
+    }
+
+    fn ref_name(&self) -> Ident {
+        Ident::new(&format!("{}_ref", self.ident), self.ident.span())
+    }
+
+    fn mut_name(&self) -> Ident {
+        Ident::new(&format!("{}_mut", self.ident), self.ident.span())
+    }
+
+    fn setter_name(&self) -> Ident {
+        Ident::new(&format!("set_{}", self.ident), self.ident.span())
+    }
+
+    fn is_primitive(&self) -> bool {
+        matches!(self.analysis.ty, ReprType::Primitive { .. })
+    }
+}
+
+struct HybridFieldState {}
 
 // struct TyData {
 //     n_bits:
 // }
 
-fn bits_in_primitive(ident: &Ident) -> Result<usize, syn::Error> {
+#[derive(Copy, Clone)]
+enum Endianness {
+    Big,
+    Little,
+    Host,
+}
+
+enum ReprType {
+    Array { child: Box<Analysed>, length: usize },
+    Tuple { children: Vec<Analysed> },
+    Primitive { base_ident: Ident, bits: usize, endian: Option<Endianness> },
+}
+
+impl ReprType {
+    fn is_aggregate(&self) -> bool {
+        !matches!(self, ReprType::Primitive { .. })
+    }
+}
+
+struct Analysed {
+    cached_bits: usize,
+    ty: ReprType,
+}
+
+impl Analysed {
+    fn from_ty(ty: &Type) -> Result<Self, syn::Error> {
+        match ty {
+            Type::Array(TypeArray{ elem, len: Expr::Lit(ExprLit{lit: Lit::Int(l), ..}), .. })  => {
+                let analysed = Self::from_ty(elem)?;
+                let length = l.base10_parse::<usize>()?;
+
+                Ok(Analysed { cached_bits: analysed.cached_bits * length, ty: ReprType::Array { child: analysed.into(), length } })
+            },
+            e @ Type::Array(TypeArray{ .. })  => {
+                Err(Error::new(e.span(), "array length must be an integer literal"))
+            }
+            Type::Tuple(a) => {
+                let mut n_bits = 0;
+                let mut children = vec![];
+                for elem in &a.elems {
+                    let analysed = Self::from_ty(elem)?;
+                    n_bits += analysed.cached_bits;
+                    children.push(analysed);
+                }
+
+                // Ok(n_bits)
+                Ok(Analysed { cached_bits: n_bits, ty: ReprType::Tuple { children } })
+            },
+            Type::Path(a) => {
+                let b = a.path.require_ident()?;
+                bits_in_primitive(b)
+            },
+
+            Type::Paren(a) => Analysed::from_ty(&a.elem),
+
+            e => Err(Error::new(e.span(), "field must be constructed from a literal, tuple, or array of integral types")),
+        }
+    }
+}
+
+impl Analysed {
+    fn to_zerocopy_type(&self) -> Option<Type> {
+        // TODO: figure out hybrid types in here, too.
+        match &self.ty {
+            ReprType::Array { child, length } => {
+                let child_repr = child.to_zerocopy_type();
+                Some(
+                    syn::parse(quote! {[#child_repr; #length]}.into()).unwrap(),
+                )
+            }
+            ReprType::Tuple { children } => {
+                let mut child_types = vec![];
+                for child in children {
+                    child_types.push(child.to_zerocopy_type());
+                }
+
+                Some(syn::parse(quote! {(#( #child_types ),*)}.into()).unwrap())
+            }
+            ReprType::Primitive { base_ident, bits, endian } => {
+                if *bits == 8 {
+                    return Some(
+                        syn::parse(quote! {#base_ident}.into()).unwrap(),
+                    );
+                }
+                endian.and_then(|end| {
+                    if !bits.is_power_of_two() || *bits > 128 || *bits < 16 {
+                        return None;
+                    }
+
+                    let tail =
+                        Ident::new(&format!("U{}", bits), base_ident.span());
+
+                    Some(
+                        syn::parse(
+                            match end {
+                                Endianness::Big => {
+                                    quote! {::zerocopy::big_endian::#tail}
+                                }
+                                Endianness::Little => {
+                                    quote! {::zerocopy::little_endian::#tail}
+                                }
+                                Endianness::Host => {
+                                    quote! {::zerocopy::native_endian::#tail}
+                                }
+                            }
+                            .into(),
+                        )
+                        .unwrap(),
+                    )
+                })
+            }
+        }
+    }
+}
+
+fn bits_in_primitive(ident: &Ident) -> Result<Analysed, syn::Error> {
     let name = ident.to_string();
 
     // validation rules:
@@ -238,38 +383,32 @@ fn bits_in_primitive(ident: &Ident) -> Result<usize, syn::Error> {
         ));
     };
 
-    let n_spec: usize = fields.get(1).unwrap().as_str().parse().unwrap();
+    let bits: usize = fields.get(1).unwrap().as_str().parse().unwrap();
 
-    // TODO: apply endianness here or figure out wtf users want.
-    let end_spec = fields.get(2).map(|v| v.as_str());
-
-    Ok(n_spec)
-}
-
-fn bits_in_type(ty: &Type) -> Result<usize, syn::Error> {
-    match ty {
-        Type::Array(TypeArray{ elem, len: Expr::Lit(ExprLit{lit: Lit::Int(l), ..}), .. })  => {
-            Ok(bits_in_type(elem)? * l.base10_parse::<usize>()?)
-        },
-        e @ Type::Array(TypeArray{ .. })  => {
-            Err(Error::new(e.span(), "array length must be an integer literal"))
+    let endian = match fields.get(2).map(|v| v.as_str()) {
+        _ if bits <= 8 => None,
+        Some("be") => Some(Endianness::Big),
+        Some("le") => Some(Endianness::Little),
+        Some("he") => Some(Endianness::Host),
+        None => {
+            return Err(Error::new(
+                ident.span(),
+                "types > 8 bits require explicit endianness",
+            ))
         }
-        Type::Tuple(a) => {
-            let mut n_bits = 0;
-            for elem in &a.elems {
-                n_bits += bits_in_type(elem)?;
-            }
-            Ok(n_bits)
-        },
-        Type::Path(a) => {
-            let b = a.path.require_ident()?;
-            bits_in_primitive(b)
-        },
+        _ => {
+            return Err(Error::new(
+                ident.span(),
+                "illegal endianness specifier",
+            ))
+        }
+    };
 
-        Type::Paren(a) => bits_in_type(&a.elem),
+    let base_ident = ident.clone();
 
-        e => Err(Error::new(e.span(), "field must be constructed from a literal, tuple, or array of integral types")),
-    }
+    let ty = ReprType::Primitive { base_ident, bits, endian };
+
+    Ok(Analysed { cached_bits: bits, ty })
 }
 
 #[proc_macro_derive(Ingot, attributes(ingot, is))]
@@ -286,6 +425,8 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let ref_ident = Ident::new(&format!("{ident}Ref"), ident.span());
     let mut_ident = Ident::new(&format!("{ident}Mut"), ident.span());
     let pkt_ident = Ident::new(&format!("{ident}Packet"), ident.span());
+    let private_mod_ident =
+        Ident::new(&format!("_{ident}_ingot_impl"), ident.span());
 
     let mut fields: Vec<ValidField> = vec![];
 
@@ -311,78 +452,37 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             if let Some(ty) = &field.is { ty } else { &field.ty };
         let user_ty = &field.ty;
 
-        let n_bits = match bits_in_type(&underlying_ty) {
+        let analysis = match Analysed::from_ty(&underlying_ty) {
             Ok(v) => v,
             Err(v) => return v.into_compile_error().into(),
         };
 
+        let n_bits = analysis.cached_bits;
+
+        if analysis.ty.is_aggregate() && (t_bits % 8 != 0 || n_bits % 8 != 0) {
+            return Error::new(
+                underlying_ty.span(),
+                "aggregate types must be byte-aligned at their start and end",
+            )
+            .into_compile_error()
+            .into();
+        }
+
         let marker = format!("my offset is {t_bits}+={n_bits} bits");
 
         let field_ident = field.ident.unwrap();
-
-        fields.push(ValidField {
+        let valid_field = ValidField {
             repr: underlying_ty.clone(),
             ident: field_ident.clone(),
             first_bit: t_bits,
-            n_bits,
-        });
+            analysis,
+            hybrid: None,
+            user_ty: user_ty.clone(),
+            // TODO: increment as we pass by varwidth fields
+            sub_ref_idx: 0,
+        };
 
         t_bits += n_bits;
-
-        trait_defs.push(quote! {
-            fn #field_ident(&self) -> #user_ty;
-        });
-        trait_impls.push(quote! {
-            #[inline]
-            fn #field_ident(&self) -> #user_ty {
-                let a = #marker;
-                // todo!()
-                ::core::hint::black_box(Default::default())
-            }
-        });
-        direct_trait_impls.push(quote! {
-            #[inline]
-            fn #field_ident(&self) -> #user_ty {
-                self.#field_ident
-            }
-        });
-
-        let mut_name =
-            Ident::new(&format!("set_{field_ident}"), field_ident.span());
-        trait_mut_defs.push(quote! {
-            fn #mut_name(&mut self, val: #user_ty);
-        });
-        trait_mut_impls.push(quote! {
-            #[inline]
-            fn #mut_name(&mut self, val: #user_ty) {
-                todo!()
-            }
-        });
-        direct_trait_mut_impls.push(quote! {
-            #[inline]
-            fn #mut_name(&mut self, val: #user_ty) {
-                self.#field_ident = val;
-            }
-        });
-
-        packet_impls.push(quote! {
-            #[inline]
-            fn #field_ident(&self) -> #user_ty {
-                match self {
-                    ::ingot_types::Packet::Repr(o) => o.#field_ident(),
-                    ::ingot_types::Packet::Raw(b) => b.#field_ident(),
-                }
-            }
-        });
-        packet_mut_impls.push(quote! {
-            #[inline]
-            fn #mut_name(&mut self, val: #user_ty) {
-                match self {
-                    ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
-                    ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
-                };
-            }
-        });
 
         if let Some(nl) = field.next_layer {
             if next_layer.is_some() {
@@ -399,7 +499,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
 
             next_layer = Some(quote! {
-                impl<V: AsRef<[u8]>> ::ingot_types::NextLayer for #validated_ident<V> {
+                impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
                     type Denom = #user_ty;
 
                     #[inline]
@@ -418,10 +518,12 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 }
             });
         }
+
+        fields.push(valid_field);
     }
 
     let next_layer = next_layer.unwrap_or_else(|| quote! {
-        impl<V: AsRef<[u8]>> ::ingot_types::NextLayer for #validated_ident<V> {
+        impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
             type Denom = ();
 
             #[inline]
@@ -449,8 +551,287 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         .into();
     }
 
+    // Zerocopy type construction.
+
+    // TODO: partition based on var-width fields.
+    let mut zc_impls: Vec<TokenStream> = vec![];
+    let mut zc_fields: Vec<TokenStream> = vec![];
+    let mut hybrid_field: Option<usize> = None;
+    let mut zc_ty_names: Vec<Ident> = vec![];
+
+    let mut hybrid_count = 0;
+    for field in &mut fields {
+        if hybrid_field.is_none()
+            && field.first_bit % 8 == 0
+            && field.analysis.cached_bits % 8 == 0
+        {
+            let ident = &field.ident;
+            let ty = field.analysis.to_zerocopy_type();
+            zc_fields.push(quote! {
+                #ident: #ty
+            })
+        } else {
+            let hybrid_len =
+                hybrid_field.unwrap_or_default() + field.analysis.cached_bits;
+            let ty_ident =
+                Ident::new(&format!("hybrid{}", hybrid_count), ident.span());
+
+            field.hybrid = Some(HybridFieldState {});
+
+            if hybrid_len % 8 == 0 {
+                // push field out
+                let n_bytes = hybrid_len / 8;
+                zc_fields.push(quote! {
+                    #ty_ident: [u8; #n_bytes]
+                });
+                hybrid_field = None;
+            } else {
+                if hybrid_field.is_none() {
+                    hybrid_count += 1;
+                }
+                hybrid_field = Some(hybrid_len);
+            }
+        }
+    }
+    if !zc_fields.is_empty() {
+        let ty_ident =
+            Ident::new(&format!("Zc{}", zc_impls.len()), ident.span());
+        zc_impls.push(quote! {
+            #[derive(zerocopy::IntoBytes, Clone, Debug, zerocopy::FromBytes, zerocopy::Unaligned, zerocopy::Immutable, zerocopy::KnownLayout)]
+            #[repr(C, packed)]
+            pub struct #ty_ident {
+                #( #zc_fields ),*
+            }
+        });
+
+        zc_ty_names.push(ty_ident)
+    }
+
+    for field in &fields {
+        let field_ident = &field.ident;
+        let user_ty = &field.user_ty;
+        let get_name = field.getter_name();
+        let mut_name = field.setter_name();
+
+        let field_ref = Ident::new(&format!("{field_ident}_ref"), ident.span());
+        let field_mut = Ident::new(&format!("{field_ident}_mut"), ident.span());
+
+        // trait_defs.push(quote! {
+        //     fn #field_ident(&self) -> #user_ty;
+        //     fn #field_ref(&self) -> &#user_ty;
+        // });
+        // direct_trait_impls.push(quote! {
+        //     #[inline]
+        //     fn #field_ident(&self) -> #user_ty {
+        //         self.#field_ident
+        //     }
+        // });
+
+        // let mut_name =
+        //     field.setter_name();
+        // trait_mut_defs.push(quote! {
+        //     fn #mut_name(&mut self, val: #user_ty);
+        //     fn #field_mut(&self) -> &#user_ty;
+        // });
+        // direct_trait_mut_impls.push(quote! {
+        //     #[inline]
+        //     fn #mut_name(&mut self, val: #user_ty) {
+        //         self.#field_ident = val;
+        //     }
+        // });
+
+        // packet_impls.push(quote! {
+        //     #[inline]
+        //     fn #field_ident(&self) -> #user_ty {
+        //         match self {
+        //             ::ingot_types::Packet::Repr(o) => o.#field_ident(),
+        //             ::ingot_types::Packet::Raw(b) => b.#field_ident(),
+        //         }
+        //     }
+        // });
+        // packet_mut_impls.push(quote! {
+        //     #[inline]
+        //     fn #mut_name(&mut self, val: #user_ty) {
+        //         match self {
+        //             ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
+        //             ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
+        //         };
+        //     }
+        // });
+
+        // NOTE: need to do a custom get/set for primitives.
+
+        if let Some(hybrid) = &field.hybrid {
+            // Can't have refs/muts if hybrid.
+            trait_defs.push(quote! {
+                fn #field_ident(&self) -> #user_ty;
+            });
+            direct_trait_impls.push(quote! {
+                #[inline]
+                fn #get_name(&self) -> #user_ty {
+                    self.#field_ident
+                }
+            });
+            trait_impls.push(quote! {
+                #[inline]
+                fn #get_name(&self) -> #user_ty {
+                    todo!("getters on subtypes not yet done")
+                }
+            });
+
+            let mut_name = field.setter_name();
+            trait_mut_defs.push(quote! {
+                fn #mut_name(&mut self, val: #user_ty);
+            });
+            direct_trait_mut_impls.push(quote! {
+                #[inline]
+                fn #mut_name(&mut self, val: #user_ty) {
+                    self.#field_ident = val;
+                }
+            });
+            trait_mut_impls.push(quote! {
+                #[inline]
+                fn #mut_name(&mut self, val: #user_ty) {
+                    todo!("setters on subtypes not yet done");
+                }
+            });
+
+            packet_impls.push(quote! {
+                #[inline]
+                fn #get_name(&self) -> #user_ty {
+                    match self {
+                        ::ingot_types::Packet::Repr(o) => o.#field_ident(),
+                        ::ingot_types::Packet::Raw(b) => b.#field_ident(),
+                    }
+                }
+            });
+            packet_mut_impls.push(quote! {
+                #[inline]
+                fn #mut_name(&mut self, val: #user_ty) {
+                    match self {
+                        ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
+                        ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
+                    };
+                }
+            });
+        } else {
+            // normal types!
+            trait_defs.push(quote! {
+                fn #get_name(&self) -> #user_ty;
+                fn #field_ref(&self) -> &#user_ty;
+            });
+            direct_trait_impls.push(quote! {
+                #[inline]
+                fn #get_name(&self) -> #user_ty {
+                    self.#field_ident
+                }
+                #[inline]
+                fn #field_ref(&self) -> &#user_ty {
+                    &self.#field_ident
+                }
+            });
+
+            if field.user_ty != field.repr {
+                trait_impls.push(quote! {
+                    #[inline]
+                    fn #get_name(&self) -> #user_ty {
+                        ::ingot_types::NetworkRepr::from_network(self.0.#field_ident)
+                    }
+                    #[inline]
+                    fn #field_ref(&self) -> &#user_ty {
+                        todo!()
+                    }
+                });
+                trait_mut_impls.push(quote! {
+                    #[inline]
+                    fn #mut_name(&mut self, val: #user_ty) {
+                        self.0.#field_ident = ::ingot_types::NetworkRepr::to_network(val);
+                    }
+                    #[inline]
+                    fn #field_mut(&mut self) -> &mut #user_ty {
+                        todo!()
+                    }
+                });
+            } else {
+                trait_impls.push(quote! {
+                    #[inline]
+                    fn #get_name(&self) -> #user_ty {
+                        self.0.#field_ident.into()
+                    }
+                    #[inline]
+                    fn #field_ref(&self) -> &#user_ty {
+                        todo!()
+                    }
+                });
+                trait_mut_impls.push(quote! {
+                    #[inline]
+                    fn #mut_name(&mut self, val: #user_ty) {
+                        self.0.#field_ident = val.into();
+                    }
+                    #[inline]
+                    fn #field_mut(&mut self) -> &mut #user_ty {
+                        todo!()
+                    }
+                });
+            }
+
+            let mut_name = field.setter_name();
+            trait_mut_defs.push(quote! {
+                fn #mut_name(&mut self, val: #user_ty);
+                fn #field_mut(&mut self) -> &mut #user_ty;
+            });
+            direct_trait_mut_impls.push(quote! {
+                #[inline]
+                fn #mut_name(&mut self, val: #user_ty) {
+                    self.#field_ident = val;
+                }
+                #[inline]
+                fn #field_mut(&mut self) -> &mut #user_ty {
+                    &mut self.#field_ident
+                }
+            });
+
+            packet_impls.push(quote! {
+                #[inline]
+                fn #field_ident(&self) -> #user_ty {
+                    match self {
+                        ::ingot_types::Packet::Repr(o) => o.#field_ident(),
+                        ::ingot_types::Packet::Raw(b) => b.#field_ident(),
+                    }
+                }
+                #[inline]
+                fn #field_ref(&self) -> &#user_ty {
+                    match self {
+                        ::ingot_types::Packet::Repr(o) => o.#field_ref(),
+                        ::ingot_types::Packet::Raw(b) => b.#field_ref(),
+                    }
+                }
+            });
+            packet_mut_impls.push(quote! {
+                #[inline]
+                fn #mut_name(&mut self, val: #user_ty) {
+                    match self {
+                        ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
+                        ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
+                    };
+                }
+                #[inline]
+                fn #field_mut(&mut self) -> &mut #user_ty {
+                    match self {
+                        ::ingot_types::Packet::Repr(o) => o.#field_mut(),
+                        ::ingot_types::Packet::Raw(b) => b.#field_mut(),
+                    }
+                }
+            });
+        }
+    }
+
+    // let valid_body = todo!();
+
     quote! {
-        pub struct #validated_ident<V>(V);
+        // pub struct #validated_ident<V>(V);
+
+        pub struct #validated_ident<V>(#( ::zerocopy::Ref<V, #private_mod_ident::#zc_ty_names> ),*);
 
         impl<V> ::ingot_types::Header for #validated_ident<V> {
             const MINIMUM_LENGTH: usize = (#t_bits / 8);
@@ -474,24 +855,31 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             #( #trait_defs )*
         }
 
-        impl<V: AsRef<[u8]>> #ref_ident for #validated_ident<V> {
-            #( #trait_impls )*
-        }
-
-        impl #ref_ident for #ident {
-            #( #direct_trait_impls )*
-        }
-
         pub trait #mut_ident {
             #( #trait_mut_defs )*
         }
 
-        impl<V: AsMut<[u8]>> #mut_ident for #validated_ident<V> {
-            #( #trait_mut_impls )*
-        }
+        #[allow(non_snake_case)]
+        mod #private_mod_ident {
+            use super::*;
 
-        impl #mut_ident for #ident {
-            #( #direct_trait_mut_impls )*
+            #( #zc_impls )*
+
+            impl<V: ::zerocopy::ByteSlice> #ref_ident for #validated_ident<V> {
+                #( #trait_impls )*
+            }
+
+            impl #ref_ident for #ident {
+                #( #direct_trait_impls )*
+            }
+
+            impl<V: ::zerocopy::ByteSliceMut> #mut_ident for #validated_ident<V> {
+                #( #trait_mut_impls )*
+            }
+
+            impl #mut_ident for #ident {
+                #( #direct_trait_mut_impls )*
+            }
         }
 
         impl<O, B> #ref_ident for ::ingot_types::Packet<O, B>
@@ -523,8 +911,13 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 if from.as_ref().len() < #ident::MINIMUM_LENGTH {
                     ::core::result::Result::Err(::ingot_types::ParseError::TooSmall)
                 } else {
-                    let (l, r) = from.split(#ident::MINIMUM_LENGTH);
-                    ::core::result::Result::Ok((#validated_ident(l), r))
+                    let (l, r) = from.split_at(#ident::MINIMUM_LENGTH);
+                    let v0 = ::zerocopy::Ref::from_bytes(l)
+                        .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
+                    ::core::result::Result::Ok((
+                        #validated_ident(v0),
+                        r,
+                    ))
                 }
             }
         }
@@ -729,7 +1122,7 @@ pub fn choice(
             }
         }
 
-        impl<V: AsRef<[u8]>, T: Copy> ::ingot_types::NextLayer for #validated_ident<V>
+        impl<V: ::zerocopy::ByteSlice, T: Copy> ::ingot_types::NextLayer for #validated_ident<V>
         where #( #next_layer_wheres ),*
         {
             type Denom = T;

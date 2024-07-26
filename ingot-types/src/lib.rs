@@ -3,13 +3,14 @@
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::convert::Infallible;
+use core::net::Ipv4Addr;
+use core::net::Ipv6Addr;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
 pub mod primitives {
     pub use pnet_macros_support::types::*;
-    pub use zerocopy;
 }
 
 pub enum Packet<O, B> {
@@ -78,54 +79,13 @@ where
     }
 }
 
-// impl<O, B> PacketParse for Packet<O, B>
-// where
-//     O: PacketParse,
-//     B: PacketParse,
-// {
-
-// }
-
-// base operations needed on a storage type.
-//
-
-// the model we're working on is still the same: a packet must not
-// straddle slice boundaries.
-// Packet parse needs to be able to return remainder.
-
 /// Takes contiguous byte slices from a packet.
 pub trait Read {
     type Chunk: Chunk;
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk>;
 }
 
-pub trait Chunk: Sized + AsRef<[u8]> {
-    fn split(self, index: usize) -> (Self, Self);
-}
-
-impl Chunk for &[u8] {
-    #[inline]
-    fn split(self, index: usize) -> (Self, Self) {
-        self.split_at(index)
-    }
-}
-
-impl Chunk for &mut [u8] {
-    #[inline]
-    fn split(self, index: usize) -> (Self, Self) {
-        self.split_at_mut(index)
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl Chunk for Vec<u8> {
-    #[inline]
-    fn split(mut self, index: usize) -> (Self, Self) {
-        let new = self.split_off(index);
-
-        (self, new)
-    }
-}
+pub use zerocopy::SplitByteSlice as Chunk;
 
 pub struct OneChunk<V>(Option<V>);
 
@@ -191,4 +151,45 @@ pub enum ParseControl<Denom: Copy> {
     Continue(Denom),
     Reject,
     Accept,
+}
+
+pub trait NetworkRepr<U: Copy> {
+    fn to_network(self) -> U;
+    fn from_network(val: U) -> Self;
+}
+
+impl NetworkRepr<[u8; 4]> for Ipv4Addr {
+    #[inline]
+    fn to_network(self) -> [u8; 4] {
+        self.octets()
+    }
+
+    #[inline]
+    fn from_network(val: [u8; 4]) -> Self {
+        Ipv4Addr::from(val)
+    }
+}
+
+impl NetworkRepr<[u8; 16]> for Ipv6Addr {
+    #[inline]
+    fn to_network(self) -> [u8; 16] {
+        self.octets()
+    }
+
+    #[inline]
+    fn from_network(val: [u8; 16]) -> Self {
+        Ipv6Addr::from(val)
+    }
+}
+
+impl NetworkRepr<[u8; 6]> for macaddr::MacAddr6 {
+    #[inline]
+    fn to_network(self) -> [u8; 6] {
+        self.into_array()
+    }
+
+    #[inline]
+    fn from_network(val: [u8; 6]) -> Self {
+        macaddr::MacAddr6::from(val)
+    }
 }
