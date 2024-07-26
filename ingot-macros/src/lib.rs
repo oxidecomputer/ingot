@@ -16,11 +16,16 @@ use syn::DeriveInput;
 use syn::Error;
 use syn::Expr;
 use syn::ExprLit;
+use syn::GenericArgument;
 use syn::ItemEnum;
 use syn::Lit;
 use syn::Path;
+use syn::PathArguments;
+use syn::Token;
 use syn::Type;
 use syn::TypeArray;
+use syn::TypeInfer;
+use syn::TypePath;
 
 #[derive(FromDeriveInput)]
 #[darling(attributes(oxp), supports(struct_named, struct_tuple))]
@@ -32,120 +37,8 @@ struct LayerArgs {
     from: Option<syn::Path>,
 }
 
-#[proc_macro_derive(Parse, attributes(oxp, oxpopt))]
+#[proc_macro_derive(Parse, attributes(oxp, oxpopt, ingot))]
 pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let d_input = parse_macro_input!(input);
-
-    let parsed_args = match ParserArgs::from_derive_input(&d_input) {
-        Ok(o) => o,
-        Err(e) => return e.write_errors().into(),
-    };
-
-    let DeriveInput { ref ident, ref data, .. } = d_input;
-
-    let Data::Struct(data) = data else {
-        return Error::new(
-            d_input.span(),
-            "packet parsing must be derived on a struct",
-        )
-        .into_compile_error()
-        .into();
-    };
-
-    let mut parse_points: Vec<TokenStream> = vec![];
-    let mut fnames: Vec<Ident> = vec![];
-
-    let n_fields = data.fields.len();
-    for (i, field) in data.fields.iter().enumerate() {
-        let args = match LayerArgs::from_field(field) {
-            Ok(o) => o,
-            Err(e) => return e.write_errors().into(),
-        };
-
-        let Type::Path(ref ty) = field.ty else { panic!() };
-
-        let fname = if let Some(ref v) = field.ident {
-            v.clone()
-        } else {
-            format_ident!("f_{i}")
-        };
-
-        let hint_frag = if i != n_fields - 1 {
-            quote! {
-                let hint = #fname.next_layer()?;
-            }
-        } else {
-            quote! {}
-        };
-
-        let (first_ty, conv_frag) = if let Some(a) = args.from {
-            (
-                quote! {#a},
-                quote! {
-                    let #fname: #ty = #fname.try_into()?;
-                },
-            )
-        } else {
-            (quote! {#ty}, quote! {})
-        };
-
-        let contents = if i == 0 {
-            quote! {
-                let #fname = #first_ty::parse(&mut cursor)?;
-                #hint_frag
-                #conv_frag
-            }
-        } else {
-            quote! {
-                let #fname = #first_ty::parse_choice(&mut cursor, Some(hint))?;
-                #hint_frag
-                #conv_frag
-            }
-        };
-
-        parse_points.push(contents);
-        fnames.push(fname);
-    }
-
-    let ctor = match data.fields {
-        syn::Fields::Named(_) => quote! { #ident{ #( #fnames ),* } },
-        syn::Fields::Unnamed(_) => quote! { #ident( #( #fnames ),* ) },
-        syn::Fields::Unit => {
-            return Error::new(
-                d_input.span(),
-                "packet parsing must be derived on a non-unit struct",
-            )
-            .into_compile_error()
-            .into();
-        }
-    };
-
-    quote! {
-        impl<'a> Parsed<'a, #ident> {
-            pub fn new(data: &'a mut [u8]) -> ParseResult<Self> {
-                // todo: hygiene
-                let mut cursor = Cursor { data, pos: 0 };
-
-                #( #parse_points )*
-
-                Ok(Self {
-                    stack: HeaderStack(#ctor),
-                    data: Cursor {
-                        data: Pin::new(cursor.data),
-                        pos: cursor.pos,
-                    },
-                    _self_referential: PhantomPinned,
-                })
-            }
-        }
-    }
-    .into()
-}
-
-#[proc_macro_derive(Parse2, attributes(oxp, oxpopt, ingot))]
-pub fn derive_parse2(
-    input: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
     let d_input = parse_macro_input!(input);
 
     let _parsed_args = match ParserArgs::from_derive_input(&d_input) {
@@ -190,29 +83,69 @@ pub fn derive_parse2(
             quote! {}
         };
 
-        let (first_ty, conv_frag) = if let Some(a) = args.from {
-            (
-                quote! {#a},
-                quote! {
-                    let #fname: #ty = #fname.try_into()?;
-                },
-            )
+        let first_ty = if let Some(a) = args.from {
+            &TypePath { qself: None, path: a }
         } else {
-            (quote! {#ty}, quote! {})
+            ty
+        };
+
+        let conv_frag = quote! {
+            let #fname = #fname.try_into()?;
         };
 
         // panic!("{first_ty}, {conv_frag}");
 
-        let contents = if i == 0 {
+        let slice_frag = if i == n_fields - 1 {
+            quote! {}
+        } else {
             quote! {
-                let #fname = #first_ty::parse(&mut cursor)?;
+                let slice = if remainder.as_ref().is_empty() {
+                    data.next_chunk()?
+                } else {
+                    remainder
+                };
+            }
+        };
+
+        let contents = if i == 0 {
+            // Hacky generic handling.
+            let mut local_ty = first_ty.clone();
+            local_ty.qself = None;
+            if let Some(el) = local_ty.path.segments.last_mut() {
+                el.arguments = PathArguments::None;
+            }
+
+            quote! {
+                let (#fname, remainder) = #local_ty::parse(slice)?;
                 #hint_frag
+                #slice_frag
                 #conv_frag
             }
         } else {
+            // Hackier generic handling.
+            let mut local_ty = first_ty.clone();
+            local_ty.qself = None;
+            if let Some(el) = local_ty.path.segments.last_mut() {
+                // replace all generic args with inferred.
+                match &mut el.arguments {
+                    PathArguments::AngleBracketed(args) => {
+                        for arg in args.args.iter_mut() {
+                            if let GenericArgument::Type(t) = arg {
+                                *t = Type::Infer(TypeInfer {
+                                    underscore_token: Token![_](t.span()),
+                                })
+                            }
+                        }
+                    }
+                    PathArguments::None => todo!(),
+                    PathArguments::Parenthesized(_) => todo!(),
+                }
+            }
+
             quote! {
-                let #fname = #first_ty::parse_choice(&mut cursor, Some(hint))?;
+                let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
                 #hint_frag
+                #slice_frag
                 #conv_frag
             }
         };
@@ -235,13 +168,13 @@ pub fn derive_parse2(
     };
 
     quote! {
-        impl<Q> Parsed2<#ident #generics, Q: ::ingot_types::Read> {
-            pub fn new(mut data: Q) -> ParseResult<Self> {
+        impl<Q: ::ingot_types::Read> Parsed2<#ident<Q::Chunk>, Q> {
+            pub fn newy(mut data: Q) -> ::ingot_types::ParseResult<Self> {
                 let slice = data.next_chunk()?;
 
                 #( #parse_points )*
 
-                Ok(Self {
+                ::core::result::Result::Ok(Self {
                     stack: HeaderStack(#ctor),
                     data,
                     _self_referential: PhantomPinned,
@@ -471,7 +404,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
                     #[inline]
                     fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                        Ok(self.#field_ident())
+                        ::core::result::Result::Ok(self.#field_ident())
                     }
                 }
 
@@ -480,7 +413,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
                     #[inline]
                     fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                        Ok(self.#field_ident)
+                        ::core::result::Result::Ok(self.#field_ident)
                     }
                 }
             });
@@ -493,7 +426,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
             #[inline]
             fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                Err(::ingot_types::ParseError::NoHint)
+                ::core::result::Result::Err(::ingot_types::ParseError::NoHint)
             }
         }
 
@@ -502,7 +435,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
             #[inline]
             fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                Err(::ingot_types::ParseError::NoHint)
+                ::core::result::Result::Err(::ingot_types::ParseError::NoHint)
             }
         }
     });
@@ -588,10 +521,10 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
                 // TODO!
                 if from.as_ref().len() < #ident::MINIMUM_LENGTH {
-                    Err(::ingot_types::ParseError::TooSmall)
+                    ::core::result::Result::Err(::ingot_types::ParseError::TooSmall)
                 } else {
                     let (l, r) = from.split(#ident::MINIMUM_LENGTH);
-                    Ok((#validated_ident(l), r))
+                    ::core::result::Result::Ok((#validated_ident(l), r))
                 }
             }
         }
@@ -613,10 +546,6 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         impl<V> ::ingot_types::HasRepr for #validated_ident<V> {
             type ReprType = #ident;
         }
-
-        // impl<V> ::ingot_types::HasView for #pkt_ident<V> {
-        //     type ViewType = #validated_ident<V>;
-        // }
 
         #next_layer
     }
@@ -736,10 +665,21 @@ pub fn choice(
             impl<V> ::core::convert::TryFrom<#ident<V>> for ::ingot_types::Packet<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot_types::ParseError;
 
-                fn try_from(value: #ident<V>) -> Result<Self, Self::Error> {
+                fn try_from(value: #ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
                         #ident::#field_ident(v) => Ok(v),
-                        _ => Err(ParseError::Unwanted),
+                        _ => ::core::result::Result::Err(ParseError::Unwanted),
+                    }
+                }
+            }
+
+            impl<V> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot_types::Packet<#field_ident, #valid_field_ident<V>> {
+                type Error = ::ingot_types::ParseError;
+
+                fn try_from(value: #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
+                    match value {
+                        #validated_ident::#field_ident(v) => Ok(v.into()),
+                        _ => ::core::result::Result::Err(ParseError::Unwanted),
                     }
                 }
             }
@@ -762,15 +702,17 @@ pub fn choice(
         impl<V: ::ingot_types::Chunk> ::ingot_types::ParseChoice<V> for #validated_ident<V> {
             type Denom = #on;
 
+            #[inline]
             fn parse_choice(data: V, hint: Self::Denom) -> ::ingot_types::ParseResult<(Self, V)> {
                 match hint {
                     #( #match_arms ),*
-                    _ => Err(::ingot_types::ParseError::Unwanted)
+                    _ => ::core::result::Result::Err(::ingot_types::ParseError::Unwanted)
                 }
             }
         }
 
         impl<V> ::core::convert::From<#validated_ident<V>> for #ident<V> {
+            #[inline]
             fn from(value: #validated_ident<V>) -> Self {
                 match value {
                     #( #parse_match_arms ),*
@@ -779,6 +721,7 @@ pub fn choice(
         }
 
         impl<V> ::core::convert::From<#repr_ident> for #ident<V> {
+            #[inline]
             fn from(value: #repr_ident) -> Self {
                 match value {
                     #( #repr_match_arms ),*
@@ -797,6 +740,10 @@ pub fn choice(
                     #( #next_layer_match_arms ),*
                 }
             }
+        }
+
+        impl<V> ::ingot_types::HasView for #ident<V> {
+            type ViewType = #validated_ident<V>;
         }
 
         #( #unpacks )*

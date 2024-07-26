@@ -1,8 +1,8 @@
 #![no_std]
 
-use core::convert::Infallible;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
+use core::convert::Infallible;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -37,22 +37,35 @@ pub trait HasBuf: Sized {
     type BufType: Chunk;
 }
 
+impl<O, B: HeaderParse> HasBuf for Packet<O, B> {
+    type BufType = <<B as HeaderParse>::Target as HasBuf>::BufType;
+}
+
 pub trait HeaderParse {
     type Target: HasBuf;
 
-    fn parse(from: <Self::Target as HasBuf>::BufType) -> ParseResult<(Self::Target, <Self::Target as HasBuf>::BufType)>;
+    fn parse(
+        from: <Self::Target as HasBuf>::BufType,
+    ) -> ParseResult<(Self::Target, <Self::Target as HasBuf>::BufType)>;
 }
 
-impl<B: HeaderParse<Target = B> + HasBuf + HasRepr + Into<Self>>  Packet<B::ReprType, B> {
+impl<B: HeaderParse<Target = B> + HasBuf + HasRepr + Into<Self>> HeaderParse
+    for Packet<B::ReprType, B>
+{
+    type Target = Self;
+
     #[inline]
-    pub fn parse(from: B::BufType) -> ParseResult<(Self, B::BufType)> {
+    fn parse(
+        from: <Self::Target as HasBuf>::BufType,
+    ) -> ParseResult<(Self::Target, <Self::Target as HasBuf>::BufType)> {
         <B as HeaderParse>::parse(from)
             .map(|(header, buf)| (header.into(), buf))
     }
 }
 
 impl<O: NextLayer, B> NextLayer for Packet<O, B>
-where B: NextLayer<Denom = O::Denom>
+where
+    B: NextLayer<Denom = O::Denom>,
 {
     type Denom = O::Denom;
 
@@ -104,7 +117,7 @@ impl Chunk for &mut [u8] {
     }
 }
 
-#[cfg(feature="alloc")]
+#[cfg(feature = "alloc")]
 impl Chunk for Vec<u8> {
     #[inline]
     fn split(mut self, index: usize) -> (Self, Self) {
@@ -171,10 +184,7 @@ impl From<Infallible> for ParseError {
 pub trait ParseChoice<V: Chunk>: Sized {
     type Denom: Copy;
 
-    fn parse_choice(
-        data: V,
-        hint: Self::Denom,
-    ) -> ParseResult<(Self, V)>;
+    fn parse_choice(data: V, hint: Self::Denom) -> ParseResult<(Self, V)>;
 }
 
 pub enum ParseControl<Denom: Copy> {

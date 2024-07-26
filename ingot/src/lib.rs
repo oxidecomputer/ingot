@@ -7,7 +7,8 @@ use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
 use ingot_macros::choice;
 use ingot_macros::Ingot;
-use ingot_macros::Parse2;
+use ingot_macros::Parse;
+use ingot_types::HasView;
 use ingot_types::HeaderParse;
 use ingot_types::NextLayer;
 use ingot_types::OneChunk;
@@ -274,36 +275,6 @@ pub struct Udp {
 
 // TODO: uncork above.
 
-// need a cursor type...
-
-// PLAN OF WORK:
-// - Get composition/parser gen reasonably working on &mut[u8] and predefined types.
-//   - for now, use libpnet types before we can set up our own.
-// - Work out storage of adjacent type (e.g., ptrs in)
-// - Get
-
-// type PacketChain = (A, BChoice, CChoice);
-
-// Figure out how to express 'field of A' ->
-// type PacketChain = (A, BChoice, C1);
-// type InnerEncapChain = (A, B1, C1);
-
-// #[derive(Parse)]
-// struct PacketerChain(
-//     A,
-//     #[oxpopt(from=BUnderlie)] BChoice,
-//     #[oxpopt(from=CChoice)] C1,
-// );
-
-// #[derive(Parse)]
-// struct PacketestChain {
-//     a: A,
-//     #[oxpopt(from=BUnderlie)]
-//     b: BChoice,
-//     #[oxpopt(from=CChoice)]
-//     c: C1,
-// }
-
 #[choice(on = u16be)]
 pub enum L3 {
     Ipv4 = 0x0800,
@@ -316,16 +287,14 @@ pub enum L4 {
     Udp = 0x11,
 }
 
-// #[derive(Parse2)]
+#[derive(Parse)]
 pub struct UltimateChain<Q> {
     eth: EthernetPacket<Q>,
     l3: L3<Q>,
-    l4: L4<Q>,
-    // #[oxpopt(from=L4)]
-    // l4: Packet<Udp, ValidUdp<V>>,
+    // l4: L4<Q>,
+    #[oxpopt(from = "L4<Q>")]
+    l4: UdpPacket<Q>,
 }
-
-/* Above guy needs to come from Parse derive */
 
 fn test() {
     let mut buf = [0u8; 1024];
@@ -337,67 +306,10 @@ fn test() {
     A { 0: 1, 1: 2, 3: 3, 2: 2 };
 }
 
-// #[derive(Parse2)]
-// struct ChainChain {
-//     a: Ethernet,
-//     b: L3<V>,
-// }
-
-// test to see what gens nicely.
-impl<Q: Read> Parsed2<UltimateChain<Q::Chunk>, Q> {
-    // (A, BChoice, C1)
-    pub fn new(mut data: Q) -> ParseResult<Self> {
-        let slice = data.next_chunk()?;
-
-        // layer
-
-        // let a: Packet < Ethernet, ValidEthernet < Q > > = <Packet <Ethernet, ValidEthernet < Q > >>::parse(slice);
-
-        // let (eth, remainder) = ValidEthernet::parse(slice)?;
-        let (eth, remainder) = EthernetPacket::parse(slice)?;
-        let hint = eth.next_layer()?;
-
-        let slice = if remainder.as_ref().is_empty() {
-            data.next_chunk()?
-        } else {
-            remainder
-        };
-        let eth = eth.try_into()?;
-
-        // layer
-
-        let (l3, remainder) = ValidL3::parse_choice(slice, hint)?;
-        let hint = l3.next_layer()?;
-
-        let slice = if remainder.as_ref().is_empty() {
-            data.next_chunk()?
-        } else {
-            remainder
-        };
-        let l3 = l3.try_into()?;
-
-        // layer
-
-        let (l4, remainder) = ValidL4::parse_choice(slice, hint)?;
-        let l4 = l4.try_into()?;
-        // XXX: do we want to return remainder to the Q so that it knows
-        //      where the body begins?
-
-        // done
-
-        Ok(Self {
-            stack: HeaderStack(UltimateChain { eth, l3, l4 }),
-            data,
-            _self_referential: PhantomPinned,
-        })
-    }
-}
-// hmm.
-
 pub fn parse_q<'a>(
     a: &'a [u8],
 ) -> Parsed2<UltimateChain<&'a [u8]>, OneChunk<&'a [u8]>> {
-    Parsed2::new(OneChunk::from(a)).unwrap()
+    Parsed2::newy(OneChunk::from(a)).unwrap()
 }
 
 // Now how do we do these? unsafe trait?
