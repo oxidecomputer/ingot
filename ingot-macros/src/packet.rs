@@ -103,6 +103,11 @@ struct Analysed {
     ty: ReprType,
 }
 
+struct ZcType {
+    repr: Type,
+    transformed: bool,
+}
+
 impl Analysed {
     fn from_ty(ty: &Type) -> Result<Self, syn::Error> {
         match ty {
@@ -140,28 +145,39 @@ impl Analysed {
 }
 
 impl Analysed {
-    fn to_zerocopy_type(&self) -> Option<Type> {
+    fn to_zerocopy_type(&self) -> Option<ZcType> {
         // TODO: figure out hybrid types in here, too.
         match &self.ty {
             ReprType::Array { child, length } => {
-                let child_repr = child.to_zerocopy_type();
-                Some(
-                    syn::parse(quote! {[#child_repr; #length]}.into()).unwrap(),
-                )
+                let ZcType { repr, transformed } = child.to_zerocopy_type()?;
+                Some(ZcType {
+                    repr: syn::parse(quote! {[#repr; #length]}.into()).unwrap(),
+                    transformed,
+                })
             }
             ReprType::Tuple { children } => {
                 let mut child_types = vec![];
+                let mut any_transformed = false;
+
                 for child in children {
-                    child_types.push(child.to_zerocopy_type());
+                    let ZcType { repr, transformed } =
+                        child.to_zerocopy_type()?;
+                    child_types.push(repr);
+                    any_transformed |= transformed;
                 }
 
-                Some(syn::parse(quote! {(#( #child_types ),*)}.into()).unwrap())
+                Some(ZcType {
+                    repr: syn::parse(quote! {(#( #child_types ),*)}.into())
+                        .unwrap(),
+                    transformed: any_transformed,
+                })
             }
             ReprType::Primitive { base_ident, bits, endian } => {
                 if *bits == 8 {
-                    return Some(
-                        syn::parse(quote! {#base_ident}.into()).unwrap(),
-                    );
+                    return Some(ZcType {
+                        repr: syn::parse(quote! {#base_ident}.into()).unwrap(),
+                        transformed: false,
+                    });
                 }
                 endian.and_then(|end| {
                     if !bits.is_power_of_two() || *bits > 128 || *bits < 16 {
@@ -171,23 +187,23 @@ impl Analysed {
                     let tail =
                         Ident::new(&format!("U{}", bits), base_ident.span());
 
-                    Some(
-                        syn::parse(
-                            match end {
-                                Endianness::Big => {
-                                    quote! {::zerocopy::big_endian::#tail}
-                                }
-                                Endianness::Little => {
-                                    quote! {::zerocopy::little_endian::#tail}
-                                }
-                                Endianness::Host => {
-                                    quote! {::zerocopy::native_endian::#tail}
-                                }
+                    let repr = syn::parse(
+                        match end {
+                            Endianness::Big => {
+                                quote! {::zerocopy::big_endian::#tail}
                             }
-                            .into(),
-                        )
-                        .unwrap(),
+                            Endianness::Little => {
+                                quote! {::zerocopy::little_endian::#tail}
+                            }
+                            Endianness::Host => {
+                                quote! {::zerocopy::native_endian::#tail}
+                            }
+                        }
+                        .into(),
                     )
+                    .unwrap();
+
+                    Some(ZcType { repr, transformed: true })
                 })
             }
         }
@@ -385,9 +401,11 @@ pub fn derive(input: IngotArgs) -> TokenStream {
             && field.analysis.cached_bits % 8 == 0
         {
             let ident = &field.ident;
-            let ty = field.analysis.to_zerocopy_type();
+            // guaranteed defined for U8/U16/U32/U64/...
+            let ty = field.analysis.to_zerocopy_type().unwrap();
+            let zc_repr = ty.repr;
             zc_fields.push(quote! {
-                #ident: #ty
+                #ident: #zc_repr
             })
         } else {
             let hybrid_len =
@@ -430,7 +448,6 @@ pub fn derive(input: IngotArgs) -> TokenStream {
         let field_ident = &field.ident;
         let user_ty = &field.user_ty;
         let get_name = field.getter_name();
-        let mut_name = field.setter_name();
 
         let field_ref = Ident::new(&format!("{field_ident}_ref"), ident.span());
         let field_mut = Ident::new(&format!("{field_ident}_mut"), ident.span());
@@ -438,7 +455,10 @@ pub fn derive(input: IngotArgs) -> TokenStream {
         // Used to determine whether we need both:
         // - use of NetworkRepr conversion
         // - include &<ty>, &mut <ty> in trait.
-        let identical_tys = field.user_ty != field.repr;
+        let zc_ty = field.analysis.to_zerocopy_type();
+        let do_into = field.user_ty == field.repr;
+        let allow_ref_access =
+            do_into && zc_ty.map(|v| !v.transformed).unwrap_or_default();
 
         if let Some(hybrid) = &field.hybrid {
             // Can't have refs/muts if hybrid.
@@ -497,76 +517,22 @@ pub fn derive(input: IngotArgs) -> TokenStream {
             // normal types!
             trait_defs.push(quote! {
                 fn #get_name(&self) -> #user_ty;
-                fn #field_ref(&self) -> &#user_ty;
             });
             direct_trait_impls.push(quote! {
                 #[inline]
                 fn #get_name(&self) -> #user_ty {
                     self.#field_ident
                 }
-                #[inline]
-                fn #field_ref(&self) -> &#user_ty {
-                    &self.#field_ident
-                }
             });
-
-            if field.user_ty != field.repr {
-                trait_impls.push(quote! {
-                    #[inline]
-                    fn #get_name(&self) -> #user_ty {
-                        ::ingot_types::NetworkRepr::from_network(self.0.#field_ident)
-                    }
-                    #[inline]
-                    fn #field_ref(&self) -> &#user_ty {
-                        todo!()
-                    }
-                });
-                trait_mut_impls.push(quote! {
-                    #[inline]
-                    fn #mut_name(&mut self, val: #user_ty) {
-                        self.0.#field_ident = ::ingot_types::NetworkRepr::to_network(val);
-                    }
-                    #[inline]
-                    fn #field_mut(&mut self) -> &mut #user_ty {
-                        todo!()
-                    }
-                });
-            } else {
-                trait_impls.push(quote! {
-                    #[inline]
-                    fn #get_name(&self) -> #user_ty {
-                        self.0.#field_ident.into()
-                    }
-                    #[inline]
-                    fn #field_ref(&self) -> &#user_ty {
-                        todo!()
-                    }
-                });
-                trait_mut_impls.push(quote! {
-                    #[inline]
-                    fn #mut_name(&mut self, val: #user_ty) {
-                        self.0.#field_ident = val.into();
-                    }
-                    #[inline]
-                    fn #field_mut(&mut self) -> &mut #user_ty {
-                        todo!()
-                    }
-                });
-            }
 
             let mut_name = field.setter_name();
             trait_mut_defs.push(quote! {
                 fn #mut_name(&mut self, val: #user_ty);
-                fn #field_mut(&mut self) -> &mut #user_ty;
             });
             direct_trait_mut_impls.push(quote! {
                 #[inline]
                 fn #mut_name(&mut self, val: #user_ty) {
                     self.#field_ident = val;
-                }
-                #[inline]
-                fn #field_mut(&mut self) -> &mut #user_ty {
-                    &mut self.#field_ident
                 }
             });
 
@@ -578,13 +544,6 @@ pub fn derive(input: IngotArgs) -> TokenStream {
                         ::ingot_types::Packet::Raw(b) => b.#field_ident(),
                     }
                 }
-                #[inline]
-                fn #field_ref(&self) -> &#user_ty {
-                    match self {
-                        ::ingot_types::Packet::Repr(o) => o.#field_ref(),
-                        ::ingot_types::Packet::Raw(b) => b.#field_ref(),
-                    }
-                }
             });
             packet_mut_impls.push(quote! {
                 #[inline]
@@ -594,14 +553,91 @@ pub fn derive(input: IngotArgs) -> TokenStream {
                         ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
                     };
                 }
-                #[inline]
-                fn #field_mut(&mut self) -> &mut #user_ty {
-                    match self {
-                        ::ingot_types::Packet::Repr(o) => o.#field_mut(),
-                        ::ingot_types::Packet::Raw(b) => b.#field_mut(),
-                    }
-                }
             });
+
+            if do_into {
+                trait_impls.push(quote! {
+                    #[inline]
+                    fn #get_name(&self) -> #user_ty {
+                        // my zc_ty was #zc_ty
+                        self.0.#field_ident.into()
+                    }
+                });
+                trait_mut_impls.push(quote! {
+                    #[inline]
+                    fn #mut_name(&mut self, val: #user_ty) {
+                        self.0.#field_ident = val.into();
+                    }
+                });
+            } else {
+                trait_impls.push(quote! {
+                    #[inline]
+                    fn #get_name(&self) -> #user_ty {
+                        // my zc_ty was #zc_ty
+                        ::ingot_types::NetworkRepr::from_network(self.0.#field_ident)
+                    }
+                });
+                trait_mut_impls.push(quote! {
+                    #[inline]
+                    fn #mut_name(&mut self, val: #user_ty) {
+                        self.0.#field_ident = ::ingot_types::NetworkRepr::to_network(val);
+                    }
+                });
+            }
+
+            if allow_ref_access {
+                trait_defs.push(quote! {
+                    fn #field_ref(&self) -> &#user_ty;
+                });
+                direct_trait_impls.push(quote! {
+                    #[inline]
+                    fn #field_ref(&self) -> &#user_ty {
+                        &self.#field_ident
+                    }
+                });
+
+                trait_impls.push(quote! {
+                    #[inline]
+                    fn #field_ref(&self) -> &#user_ty {
+                        &self.0.#field_ident
+                    }
+                });
+                trait_mut_impls.push(quote! {
+                    #[inline]
+                    fn #field_mut(&mut self) -> &mut #user_ty {
+                        &mut self.0.#field_ident
+                    }
+                });
+
+                trait_mut_defs.push(quote! {
+                    fn #field_mut(&mut self) -> &mut #user_ty;
+                });
+                direct_trait_mut_impls.push(quote! {
+                    #[inline]
+                    fn #field_mut(&mut self) -> &mut #user_ty {
+                        &mut self.#field_ident
+                    }
+                });
+
+                packet_impls.push(quote! {
+                    #[inline]
+                    fn #field_ref(&self) -> &#user_ty {
+                        match self {
+                            ::ingot_types::Packet::Repr(o) => o.#field_ref(),
+                            ::ingot_types::Packet::Raw(b) => b.#field_ref(),
+                        }
+                    }
+                });
+                packet_mut_impls.push(quote! {
+                    #[inline]
+                    fn #field_mut(&mut self) -> &mut #user_ty {
+                        match self {
+                            ::ingot_types::Packet::Repr(o) => o.#field_mut(),
+                            ::ingot_types::Packet::Raw(b) => b.#field_mut(),
+                        }
+                    }
+                });
+            }
         }
     }
 
