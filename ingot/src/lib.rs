@@ -319,42 +319,12 @@ pub enum L4 {
 
 #[derive(Parse)]
 pub struct UltimateChain<Q> {
-    eth: EthernetPacket<Q>,
-    l3: L3<Q>,
+    pub eth: EthernetPacket<Q>,
+    pub l3: L3<Q>,
     // l4: L4<Q>,
     #[oxpopt(from = "L4<Q>")]
-    l4: UdpPacket<Q>,
+    pub l4: UdpPacket<Q>,
 }
-
-// impl<Q: ::ingot_types::Read> Parsed2<UltimateChain<Q::Chunk>, Q> {
-//     pub fn newy(mut data: Q) -> ::ingot_types::ParseResult<Self> {
-//         let slice = data.next_chunk()?;
-//         // let (eth, remainder) = EthernetPacket::parse(slice)?;
-//         let (eth, remainder) = ValidEthernet::parse(slice)?;
-//         let hint = eth.next_layer()?;
-//         let slice = if remainder.as_ref().is_empty() {
-//             data.next_chunk()?
-//         } else {
-//             remainder
-//         };
-//         let eth = eth.try_into()?;
-//         let (l3, remainder) = <L3<_> as HasView>::ViewType::parse_choice(slice, hint)?;
-//         let hint = l3.next_layer()?;
-//         let slice = if remainder.as_ref().is_empty() {
-//             data.next_chunk()?
-//         } else {
-//             remainder
-//         };
-//         let l3 = l3.try_into()?;
-//         let (l4, remainder) = <L4<_> as HasView>::ViewType::parse_choice(slice, hint)?;
-//         let l4 = l4.try_into()?;
-//         ::core::result::Result::Ok(Self {
-//             stack: HeaderStack(UltimateChain { eth, l3, l4 }),
-//             data,
-//             _self_referential: PhantomPinned,
-//         })
-//     }
-// }
 
 fn test() {
     let mut buf = [0u8; 1024];
