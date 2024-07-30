@@ -23,6 +23,40 @@ use pnet_macros_support::types::*;
 #[macro_use]
 extern crate alloc;
 
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+
+#[derive(Ingot)]
+pub struct TestFunFields {
+    pub fine: u8,
+    pub memcpy_be: u24be,
+    pub memcpy_le: u24le,
+    pub still_fine: u8,
+
+    pub tricky_be0: u9be,
+    pub tricky_be1: u9be,
+    pub tricky_be2: u14be,
+
+    pub trickier_be0: u1,
+    pub trickier_be1: u30be,
+    pub trickier_be2: u1,
+
+    pub tricky_le0: u9le,
+    pub tricky_le1: u9le,
+    pub tricky_le2: u14le,
+
+    pub trickier_le0: u1,
+    pub trickier_le1: u30le,
+    pub trickier_le2: u1,
+
+    pub tricky_he0: u9he,
+    pub tricky_he1: u9he,
+    pub tricky_he2: u14he,
+
+    pub also_fine: u32be,
+}
+
 // types we want to use in packet bodies.
 
 #[derive(Clone, Copy, Default)]
@@ -89,6 +123,22 @@ impl NetworkRepr<u8> for GeneveFlags {
 
     fn from_network(val: u8) -> Self {
         GeneveFlags::from_bits_truncate(val)
+    }
+}
+
+impl NetworkRepr<u2> for Ecn {
+    fn to_network(self) -> u2 {
+        self as u8
+    }
+
+    fn from_network(val: u8) -> Self {
+        match val {
+            0 => Ecn::NotCapable,
+            1 => Ecn::Capable0,
+            2 => Ecn::Capable1,
+            3 => Ecn::Capable0,
+            _ => panic!("outside bounds of u2"),
+        }
     }
 }
 
@@ -477,60 +527,4 @@ pub struct Parsed2<Stack, RawPkt: ingot_types::Read> {
 // Mods are specifically field subsets.
 
 #[cfg(test)]
-mod tests {
-    use ingot_types::Header;
-    use ingot_types::HeaderParse;
-    use ingot_types::OneChunk;
-
-    use super::*;
-    // use ingot_types::PacketParse;
-
-    #[test]
-    fn are_my_fragment_traits_sane() {
-        let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
-        // let mut eth = EthernetView::
-        let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
-        let (mut v6, rest) = ValidIpv6::parse(&mut rest[..]).unwrap();
-        assert_eq!(rest.len(), 0);
-        assert_eq!(eth.source(), MacAddr6::nil());
-        eth.set_source(MacAddr6::broadcast());
-        assert_eq!(eth.source(), MacAddr6::broadcast());
-
-        // v6.set_source(Ipv6Addr::LOCALHOST);
-        // assert_eq!(v6.source(), Ipv6Addr::LOCALHOST);
-
-        Ecn::try_from(1u8).unwrap();
-    }
-
-    #[test]
-    fn does_this_chain_stuff_compile() {
-        let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
-
-        // set up stack as Ipv4, UDP
-        {
-            let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
-            let (mut ipv4, rest) = ValidIpv4::parse(rest).unwrap();
-            let (mut udp, rest) = ValidUdp::parse(rest).unwrap();
-
-            eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
-            eth.set_destination(MacAddr6::broadcast());
-            eth.set_ethertype(0x0800);
-            ipv4.set_protocol(0x11);
-            ipv4.set_source(Ipv4Addr::from([192, 168, 0, 1]));
-            ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
-        }
-
-        let mystack = Parsed2::newy(OneChunk::from(&mut buf2[..])).unwrap();
-        let mystack = Parsed2::newy(OneChunk::from(&buf2[..])).unwrap();
-
-        match mystack.stack.0.l3 {
-            L3::Ipv4(v) => v.hop_limit(),
-            L3::Ipv6(v) => v.hop_limit(),
-        };
-
-        assert_eq!(
-            mystack.stack.0.eth.source(),
-            MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
-        );
-    }
-}
+mod tests;

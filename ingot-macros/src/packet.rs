@@ -3,9 +3,12 @@ use darling::FromDeriveInput;
 use darling::FromField;
 use darling::FromMeta;
 use proc_macro2::Ident;
+use proc_macro2::Span;
 use proc_macro2::TokenStream;
 use quote::quote;
 use regex::Regex;
+use std::cell::RefCell;
+use std::rc::Rc;
 use syn::spanned::Spanned;
 use syn::Error;
 use syn::Expr;
@@ -38,6 +41,13 @@ pub struct FieldArgs {
     ty: Type,
 }
 
+#[derive(Clone, Debug)]
+struct HybridField {
+    ident: Ident,
+    n_bits: usize,
+    first_bit: usize,
+}
+
 struct ValidField {
     repr: Type,
     ident: Ident,
@@ -48,7 +58,7 @@ struct ValidField {
 
     /// indicates child field of the
     sub_ref_idx: usize,
-    hybrid: Option<HybridFieldState>,
+    hybrid: Option<PrimitiveInHybrid>,
 }
 
 impl ValidField {
@@ -73,17 +83,287 @@ impl ValidField {
     }
 }
 
-struct HybridFieldState {}
+struct PrimitiveInHybrid {
+    parent_field: Rc<RefCell<HybridField>>,
+    first_bit_inner: usize,
+    n_bits: usize,
+    endianness: Option<Endianness>,
+}
 
-// struct TyData {
-//     n_bits:
-// }
+impl PrimitiveInHybrid {
+    fn first_byte(&self) -> usize {
+        self.first_bit_inner / 8
+    }
+
+    fn last_byte_exclusive(&self) -> usize {
+        self.first_byte() + self.byteslice_len()
+    }
+
+    fn byteslice_len(&self) -> usize {
+        let whole_bytes = self.n_bits / 8;
+        whole_bytes + if self.n_bits % 8 != 0 { 1 } else { 0 }
+    }
+
+    fn get(&self, field: &ValidField) -> TokenStream {
+        // NOTE: we might be able to optimise this by just reading the largest
+        // possible int we can and fixing it up, but the endianness considerations
+        // are finicky to say the least.
+
+        // NOTE: if we're reading a POT-size int here, we're already unaligned
+        // from a byte boundary, so we need to read more bytes than the dtype.
+        // Start with a read of the biggest u<x> we can fit.
+        let next_int_sz = self.n_bits.next_power_of_two().max(8);
+        let ceiled_bits = self.n_bits.max(8);
+        let repr_sz = if ceiled_bits.max(8).is_power_of_two() {
+            ceiled_bits
+        } else {
+            next_int_sz
+        };
+
+        let needed_bytes = repr_sz / 8;
+        // let spare_bits = self.n_bits as u32 % 8;
+        let spare_left_bits = (self.first_bit_inner as u32 % 8);
+        let spare_right_bits =
+            ((self.first_bit_inner + self.n_bits) as u32 % 8);
+        let first_byte = self.first_byte();
+        let last_byte_ex = self.last_byte_exclusive();
+
+        let target_ty = &field.repr;
+
+        let conv_frag = if self.n_bits <= 8 {
+            quote! { in_bytes[0] }
+        } else {
+            let Some(e) = self.endianness else {
+                panic!("u>8 without known endian")
+            };
+            let method = e.std_from_bytes_method();
+            quote! { #target_ty::#method(in_bytes) }
+        };
+
+        let mut byte_reads = vec![];
+
+        let right_bits_to_drop =
+            8 - ((self.first_bit_inner + self.n_bits) as u32 % 8);
+        let first_byte_mask = (1usize.wrapping_shl(spare_right_bits)) - 1;
+        let last_byte_mask = (0xff >> spare_right_bits) << spare_right_bits;
+
+        let mask2 = (1usize.wrapping_shl(spare_left_bits)) - 1;
+        // let last_byte_mask = (0xff >> spare_right_bits) << spare_right_bits;
+
+        let little_endian =
+            self.endianness.map(|v| v.is_little_endian()).unwrap_or_default();
+        let desired_align = if !little_endian {
+            self.byte_aligned_at_end()
+        } else {
+            self.byte_aligned_at_start()
+        };
+
+        match (little_endian, desired_align) {
+            // good align -- memcpy, then fixup last byte
+            (false, true) => {
+                let first_filled_byte = needed_bytes - self.byteslice_len();
+                byte_reads.push(quote! {
+                    in_bytes[#first_filled_byte..].copy_from_slice(slice);
+                });
+
+                if first_byte_mask != 0 {
+                    byte_reads.push(quote! {
+                        in_bytes[#first_filled_byte] &= (#mask2 as u8);
+                    });
+                }
+            }
+            (true, true) => {
+                // NOTE: this will need to be left aligned for little endian
+                let last_filled_byte = self.byteslice_len();
+                byte_reads.push(quote! {
+                    in_bytes[..#last_filled_byte].copy_from_slice(slice);
+                });
+
+                if first_byte_mask != 0xff {
+                    byte_reads.push(quote! {
+                        in_bytes[#last_filled_byte] &= (#last_byte_mask as u8);
+                    });
+                }
+            }
+
+            // (false, false) => {
+            (_, false) => {
+                for (i, src_byte) in
+                    (first_byte..last_byte_ex).rev().enumerate()
+                {
+                    let write_this_cycle =
+                        (src_byte - first_byte).min(needed_bytes - 1);
+
+                    byte_reads.push(quote! {
+                        let b = slice[#write_this_cycle];
+                    });
+                    // don't carry the masked portion of this byte
+                    // back into the previous one if we're the first.
+                    if i != 0 {
+                        byte_reads.push(quote! {
+                            let m = b & (#first_byte_mask as u8);
+                            in_bytes[(#write_this_cycle + 1)] |= (m << (#right_bits_to_drop));
+                        });
+                    } else {
+                        byte_reads.push(quote! {
+                            #[cfg(test)]
+                            {
+                                std::eprintln!("{:b} {:b} {:b}", #first_byte_mask, #last_byte_mask, #mask2);
+                            }
+                        });
+                    }
+
+                    if i != self.byteslice_len() - 1 || mask2 == 0 {
+                        byte_reads.push(quote! {
+                            in_bytes[#write_this_cycle] = (b >> #right_bits_to_drop);
+                        });
+                    } else {
+                        byte_reads.push(quote! {
+                            in_bytes[#write_this_cycle] = (b >> #right_bits_to_drop) & (#mask2 as u8);
+                        });
+                    }
+                }
+                // while i > first_byte {
+                //     let read_this_cycle = i - 1;
+                //     let write_this_cycle = i - 1;
+
+                //     byte_reads.push(quote! {
+                //         let b = slice[#read_this_cycle];
+                //     });
+                //     // don't carry the masked portion of this byte
+                //     // back into the previous one if we're the first.
+                //     if i != last_byte_ex {
+                //         byte_reads.push(quote! {
+                //             let m = b & (#first_byte_mask as u8);
+                //             in_bytes[(#write_this_cycle + 1)] |= (m << (#right_bits_to_drop));
+                //         });
+                //     }
+                //     byte_reads.push(quote! {
+                //         in_bytes[#write_this_cycle] |= (b >> #right_bits_to_drop);
+                //     });
+
+                //     i -= 1;
+                // }
+            }
+            (true, false) => {}
+        }
+        // if self.byte_aligned_at_end() {
+        //     // memcpy, then fixup last byte
+        //     // NOTE: this will need to be left aligned for little endian
+        //     let first_filled_byte = needed_bytes - self.byteslice_len();
+        //     byte_reads.push(quote! {
+        //         in_bytes[#first_filled_byte..].copy_from_slice(slice);
+        //     });
+
+        //     if first_byte_mask != 0 {
+        //         byte_reads.push(quote! {
+        //             in_bytes[#first_filled_byte] &= (#first_byte_mask as u8);
+        //         });
+        //     }
+        // } else {
+        //     let mut i = self.byteslice_len();
+        //     let mut j = repr_sz;
+        //     while i > 0 {
+        //         let read_this_cycle = i - 1;
+        //         let write_this_cycle = i - 1;
+
+        //         byte_reads.push(quote! {
+        //             let b = slice[#read_this_cycle];
+        //         });
+        //         // don't carry the masked portion of this byte
+        //         // back into the previous one if we're the first.
+        //         if i != self.byteslice_len() {
+        //             byte_reads.push(quote! {
+        //                 let m = b & (#first_byte_mask as u8);
+        //                 in_bytes[(#write_this_cycle - 1)] |= (m << (#right_bits_to_drop));
+        //             });
+        //         }
+        //         byte_reads.push(quote! {
+        //             in_bytes[#write_this_cycle] |= (b >> #right_bits_to_drop);
+        //         });
+
+        //         i -= 1;
+        //         j -= 1;
+        //     }
+        // }
+
+        let read_from = self.parent_field.borrow().ident.clone();
+        let chunk = syn::Index::from(field.sub_ref_idx);
+
+        quote! {
+            let mut in_bytes = [0u8; #needed_bytes];
+            let slice = &self.#chunk.#read_from[#first_byte..#last_byte_ex];
+
+            #( #byte_reads )*
+
+            #[cfg(test)]
+            {
+                std::eprintln!("---");
+                std::eprintln!("{in_bytes:02x?}");
+                // std::eprintln!("{in_bytes:02x}");
+            }
+
+            let val = #conv_frag;
+        }
+    }
+
+    fn set(&self) -> TokenStream {
+        // Start with a read of the biggest u<x> we can fit.
+        let next_int_sz = self.n_bits.max(8);
+
+        // quote! {
+        //     let base =
+        // }
+
+        // if
+
+        todo!()
+    }
+
+    fn byte_aligned_at_end(&self) -> bool {
+        (self.first_bit_inner + self.n_bits) % 8 == 0
+    }
+
+    fn byte_aligned_at_start(&self) -> bool {
+        self.first_bit_inner % 8 == 0
+    }
+}
 
 #[derive(Copy, Clone)]
 enum Endianness {
     Big,
     Little,
     Host,
+}
+
+impl Endianness {
+    fn std_from_bytes_method(self) -> Ident {
+        let label = match self {
+            Endianness::Big => "be",
+            Endianness::Little => "le",
+            Endianness::Host => "ne",
+        };
+
+        Ident::new(&format!("from_{label}_bytes"), Span::mixed_site())
+    }
+
+    fn std_to_bytes_method(self) -> Ident {
+        let label = match self {
+            Endianness::Big => "be",
+            Endianness::Little => "le",
+            Endianness::Host => "ne",
+        };
+
+        Ident::new(&format!("to_{label}_bytes"), Span::mixed_site())
+    }
+
+    fn is_little_endian(self) -> bool {
+        match self {
+            Endianness::Big => false,
+            Endianness::Little => true,
+            Endianness::Host => cfg!(target_endian = "little"),
+        }
+    }
 }
 
 enum ReprType {
@@ -101,6 +381,16 @@ impl ReprType {
 struct Analysed {
     cached_bits: usize,
     ty: ReprType,
+    is_all_rust_primitives: bool,
+}
+
+impl Analysed {
+    fn get_primitive_endianness(&self) -> Option<Endianness> {
+        match self.ty {
+            ReprType::Primitive { endian, .. } => endian,
+            _ => None,
+        }
+    }
 }
 
 struct ZcType {
@@ -111,26 +401,41 @@ struct ZcType {
 impl Analysed {
     fn from_ty(ty: &Type) -> Result<Self, syn::Error> {
         match ty {
-            Type::Array(TypeArray{ elem, len: Expr::Lit(ExprLit{lit: Lit::Int(l), ..}), .. })  => {
+            e @ Type::Array(TypeArray{ elem, len: Expr::Lit(ExprLit{lit: Lit::Int(l), ..}), .. })  => {
                 let analysed = Self::from_ty(elem)?;
                 let length = l.base10_parse::<usize>()?;
 
-                Ok(Analysed { cached_bits: analysed.cached_bits * length, ty: ReprType::Array { child: analysed.into(), length } })
+                // TODO: allow only [u8; N]?
+                if analysed.cached_bits != 8 && !matches!(analysed.ty, ReprType::Primitive { .. }) {
+                    return Err(Error::new(e.span(), "array reprs may only contain `u8`s"));
+                }
+
+                Ok(Analysed {
+                    cached_bits: analysed.cached_bits * length,
+                    is_all_rust_primitives: analysed.is_all_rust_primitives,
+                    ty: ReprType::Array { child: analysed.into(), length },
+                })
             },
             e @ Type::Array(TypeArray{ .. })  => {
                 Err(Error::new(e.span(), "array length must be an integer literal"))
             }
             Type::Tuple(a) => {
+                // TODO: outlaw this while I work on more big-ticket issues.
+                return Err(Error::new(a.span(), "tuple types are not currently allowed as reprs"));
+
                 let mut n_bits = 0;
                 let mut children = vec![];
+                let mut is_all_rust_primitives = true;
+
                 for elem in &a.elems {
                     let analysed = Self::from_ty(elem)?;
                     n_bits += analysed.cached_bits;
                     children.push(analysed);
+                    is_all_rust_primitives &= analysed.is_all_rust_primitives;
                 }
 
                 // Ok(n_bits)
-                Ok(Analysed { cached_bits: n_bits, ty: ReprType::Tuple { children } })
+                Ok(Analysed { cached_bits: n_bits, ty: ReprType::Tuple { children }, is_all_rust_primitives })
             },
             Type::Path(a) => {
                 let b = a.path.require_ident()?;
@@ -250,7 +555,13 @@ fn bits_in_primitive(ident: &Ident) -> Result<Analysed, syn::Error> {
 
     let ty = ReprType::Primitive { base_ident, bits, endian };
 
-    Ok(Analysed { cached_bits: bits, ty })
+    Ok(Analysed {
+        cached_bits: bits,
+        ty,
+        is_all_rust_primitives: bits >= 8
+            && bits.is_power_of_two()
+            && bits <= 128,
+    })
 }
 
 pub fn derive(input: IngotArgs) -> TokenStream {
@@ -388,45 +699,71 @@ pub fn derive(input: IngotArgs) -> TokenStream {
 
     // Zerocopy type construction.
 
+    #[derive(Clone, Debug)]
+    struct HyState {
+        bits_seen: usize,
+        field_data: Rc<RefCell<HybridField>>,
+    }
+
     // TODO: partition based on var-width fields.
     let mut zc_impls: Vec<TokenStream> = vec![];
     let mut zc_fields: Vec<TokenStream> = vec![];
-    let mut hybrid_field: Option<usize> = None;
+    let mut hybrid_field: Option<HyState> = None;
     let mut zc_ty_names: Vec<Ident> = vec![];
 
     let mut hybrid_count = 0;
+
     for field in &mut fields {
         if hybrid_field.is_none()
             && field.first_bit % 8 == 0
-            && field.analysis.cached_bits % 8 == 0
+            && field.analysis.is_all_rust_primitives
         {
             let ident = &field.ident;
             // guaranteed defined for U8/U16/U32/U64/...
             let ty = field.analysis.to_zerocopy_type().unwrap();
             let zc_repr = ty.repr;
             zc_fields.push(quote! {
-                #ident: #zc_repr
+                pub #ident: #zc_repr
             })
         } else {
-            let hybrid_len =
-                hybrid_field.unwrap_or_default() + field.analysis.cached_bits;
             let ty_ident =
                 Ident::new(&format!("hybrid{}", hybrid_count), ident.span());
 
-            field.hybrid = Some(HybridFieldState {});
+            let hybrid_state = hybrid_field.get_or_insert_with(|| HyState {
+                bits_seen: 0,
+                field_data: Rc::new(RefCell::new(HybridField {
+                    ident: ty_ident.clone(),
+                    n_bits: 0,
+                    first_bit: field.first_bit,
+                })),
+            });
+            // let hybrid_len =
+            //     hybrid_field.unwrap_or_default() + field.analysis.cached_bits;
 
-            if hybrid_len % 8 == 0 {
+            hybrid_state.bits_seen += field.analysis.cached_bits;
+            hybrid_state.field_data.borrow_mut().n_bits +=
+                field.analysis.cached_bits;
+
+            // field.
+
+            let first_bit_inner =
+                field.first_bit - hybrid_state.field_data.borrow().first_bit;
+
+            field.hybrid = Some(PrimitiveInHybrid {
+                parent_field: hybrid_state.field_data.clone(),
+                first_bit_inner,
+                n_bits: field.analysis.cached_bits,
+                endianness: field.analysis.get_primitive_endianness(),
+            });
+
+            if hybrid_state.bits_seen % 8 == 0 {
                 // push field out
-                let n_bytes = hybrid_len / 8;
+                let n_bytes = hybrid_state.bits_seen / 8;
                 zc_fields.push(quote! {
-                    #ty_ident: [u8; #n_bytes]
+                    pub #ty_ident: [u8; #n_bytes]
                 });
+                hybrid_count += 1;
                 hybrid_field = None;
-            } else {
-                if hybrid_field.is_none() {
-                    hybrid_count += 1;
-                }
-                hybrid_field = Some(hybrid_len);
             }
         }
     }
@@ -461,6 +798,15 @@ pub fn derive(input: IngotArgs) -> TokenStream {
             do_into && zc_ty.map(|v| !v.transformed).unwrap_or_default();
 
         if let Some(hybrid) = &field.hybrid {
+            let (get_conv, set_conv) = if do_into {
+                (quote! {val.into()}, quote! {val.into()})
+            } else {
+                (
+                    quote! {::ingot_types::NetworkRepr::from_network(val)},
+                    quote! {::ingot_types::NetworkRepr::to_network(val)},
+                )
+            };
+
             // Can't have refs/muts if hybrid.
             trait_defs.push(quote! {
                 fn #field_ident(&self) -> #user_ty;
@@ -471,10 +817,13 @@ pub fn derive(input: IngotArgs) -> TokenStream {
                     self.#field_ident
                 }
             });
+            let subty_get = hybrid.get(field);
             trait_impls.push(quote! {
                 #[inline]
                 fn #get_name(&self) -> #user_ty {
-                    todo!("getters on subtypes not yet done")
+                    // todo!("getters on subtypes not yet done")
+                    #subty_get
+                    #get_conv
                 }
             });
 
@@ -646,7 +995,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
     quote! {
         // pub struct #validated_ident<V>(V);
 
-        pub struct #validated_ident<V>(#( ::zerocopy::Ref<V, #private_mod_ident::#zc_ty_names> ),*);
+        pub struct #validated_ident<V>(#(pub ::zerocopy::Ref<V, #private_mod_ident::#zc_ty_names> ),*);
 
         impl<V> ::ingot_types::Header for #validated_ident<V> {
             const MINIMUM_LENGTH: usize = (#t_bits / 8);
@@ -675,7 +1024,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
         }
 
         #[allow(non_snake_case)]
-        mod #private_mod_ident {
+        pub mod #private_mod_ident {
             use super::*;
 
             #( #zc_impls )*
