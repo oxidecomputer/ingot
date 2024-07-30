@@ -57,65 +57,45 @@ fn does_this_chain_stuff_compile() {
 #[test]
 fn field_accesses_of_all_kinds() {
     // type has len: 24B
+    #[rustfmt::skip]
     let mut base_bytes = [
         // 1, 10_560_325
-        0x01,
-        0xa1,
-        0x23,
-        0x45,
+        0x01, 0xa1, 0x23, 0x45,
         // 10_560_325, 255
-        0x45,
-        0x23,
-        0xa1,
-        0xff,
+        0x45, 0x23, 0xa1, 0xff,
         // 257, 258, 16_026
         //be0-----------|be1-----------|be2-----------------|
-        0b1000_0000,
-        0b1_100_0000,
-        0b10_11_1110,
-        0b1001_1010,
-        //1, 0x02AA_AAAA, 0
+        0b1000_0000, 0b1_100_0000, 0b10_11_1110, 0b1001_1010,
+        //1, 0x2AAA_AAAA, 0
         //b|tb0-------------------------------------------|b|
-        0b1_101_0101,
-        0b0101_0101,
-        0b0101_0101,
-        0b0101_010_0,
+        0b1_101_0101, 0b0101_0101, 0b0101_0101, 0b0101_010_0,
         // 257, 258, 16_026
         //le0-----------|le1-----------|le2-----------------|
-        0b0000_0000,
-        0b1_000_0000,
-        0b00_00_0000,
-        0b0000_0000,
+        0b0000_0000, 0b1_000_0000, 0b00_00_0000, 0b0000_0000,
         //1, ???, 0
         //b|tb0-------------------------------------------|b|
-        0b1_101_0101,
-        0b0101_0101,
-        0b0101_0101,
-        0b0101_010_0,
+        0b1_101_0101, 0b0101_0101, 0b0101_0101, 0b0101_010_0,
         //he0-----------|he1-----------|he2-----------------|
-        0b0000_0000,
-        0b1_000_0000,
-        0b00_00_0000,
-        0b0000_0000,
+        0b0000_0000, 0b1_000_0000, 0b00_00_0000, 0b0000_0000,
         // 31_326_686
-        0x01,
-        0xde,
-        0x01,
-        0xde,
+        0x01, 0xde, 0x01, 0xde,
     ];
 
     let (a, _rest) = ValidTestFunFields::parse(&mut base_bytes[..]).unwrap();
 
-    assert_eq!(a.fine(), 1);
-    assert_eq!(a.memcpy_be(), 10_560_325);
-    assert_eq!(a.memcpy_le(), 10_560_325);
-    assert_eq!(a.still_fine(), 255);
+    assert_eq!(a.fine(), 1, "fine");
+    assert_eq!(a.memcpy_be(), 10_560_325, "memcpy_be");
+    assert_eq!(a.memcpy_le(), 10_560_325, "memcpy_le");
+    assert_eq!(a.still_fine(), 255, "still_fine");
 
-    assert_eq!(a.tricky_be0(), 257);
-    assert_eq!(a.tricky_be1(), 258);
-    assert_eq!(a.tricky_be2(), 16_026);
+    assert_eq!(a.tricky_be0(), 257, "tricky_be0");
+    assert_eq!(a.tricky_be1(), 258, "tricky_be1");
+    assert_eq!(a.tricky_be2(), 16_026, "tricky_be2");
 
-    assert_eq!(a.trickier_be0(), 1);
-    assert_eq!(a.trickier_be1(), 0x02AA_AAAA);
-    assert_eq!(a.trickier_be2(), 0);
+    assert_eq!(a.trickier_be0(), 1, "trickier_be0");
+    let v = a.trickier_be1();
+    assert_eq!(v, 0x2AAA_AAAA, "{v:x}");
+    assert_eq!(a.trickier_be2(), 0, "trickier_be2");
+
+    // TODO: impl trickier LEs.
 }

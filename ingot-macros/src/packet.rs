@@ -120,11 +120,46 @@ impl PrimitiveInHybrid {
             next_int_sz
         };
 
+        // Straddle over byte boundaries, where applicable.
+        let left_to_lose = self.first_bit_inner as u32 % 8;
+        let left_overspill = (8 - left_to_lose) % 8;
+        let right_overspill = (self.first_bit_inner + self.n_bits) as u32 % 8;
+        let right_to_lose = (8 - right_overspill) % 8;
+
+        let left_include_mask =
+            0xffu8.wrapping_shl(left_to_lose).wrapping_shr(left_to_lose);
+        let right_exclude_mask =
+            0xffu8.wrapping_shr(right_to_lose).wrapping_shl(right_to_lose);
+
+        let left_exclude_mask = !left_include_mask;
+        let right_include_mask = !right_exclude_mask;
+
+        let little_endian =
+            self.endianness.map(|v| v.is_little_endian()).unwrap_or_default();
+
+        let (general_shift_amt, general_mask, last_mask, last_shift) =
+            if !little_endian {
+                let shift_amt = (8 - right_overspill) % 8;
+                let other_shift_amt = (8 - left_overspill) % 8;
+                (
+                    shift_amt,
+                    right_exclude_mask,
+                    left_include_mask,
+                    other_shift_amt,
+                )
+            } else {
+                let shift_amt = (8 - left_overspill) % 8;
+                let other_shift_amt = (8 - right_overspill) % 8;
+                (
+                    shift_amt,
+                    left_exclude_mask,
+                    right_include_mask,
+                    other_shift_amt,
+                )
+            };
+
         let needed_bytes = repr_sz / 8;
         // let spare_bits = self.n_bits as u32 % 8;
-        let spare_left_bits = (self.first_bit_inner as u32 % 8);
-        let spare_right_bits =
-            ((self.first_bit_inner + self.n_bits) as u32 % 8);
         let first_byte = self.first_byte();
         let last_byte_ex = self.last_byte_exclusive();
 
@@ -142,16 +177,6 @@ impl PrimitiveInHybrid {
 
         let mut byte_reads = vec![];
 
-        let right_bits_to_drop =
-            8 - ((self.first_bit_inner + self.n_bits) as u32 % 8);
-        let first_byte_mask = (1usize.wrapping_shl(spare_right_bits)) - 1;
-        let last_byte_mask = (0xff >> spare_right_bits) << spare_right_bits;
-
-        let mask2 = (1usize.wrapping_shl(spare_left_bits)) - 1;
-        // let last_byte_mask = (0xff >> spare_right_bits) << spare_right_bits;
-
-        let little_endian =
-            self.endianness.map(|v| v.is_little_endian()).unwrap_or_default();
         let desired_align = if !little_endian {
             self.byte_aligned_at_end()
         } else {
@@ -166,9 +191,9 @@ impl PrimitiveInHybrid {
                     in_bytes[#first_filled_byte..].copy_from_slice(slice);
                 });
 
-                if first_byte_mask != 0 {
+                if last_mask != 0 {
                     byte_reads.push(quote! {
-                        in_bytes[#first_filled_byte] &= (#mask2 as u8);
+                        in_bytes[#first_filled_byte] &= #last_mask;
                     });
                 }
             }
@@ -179,9 +204,9 @@ impl PrimitiveInHybrid {
                     in_bytes[..#last_filled_byte].copy_from_slice(slice);
                 });
 
-                if first_byte_mask != 0xff {
+                if last_mask != 0 {
                     byte_reads.push(quote! {
-                        in_bytes[#last_filled_byte] &= (#last_byte_mask as u8);
+                        in_bytes[#last_filled_byte] &= #last_mask;
                     });
                 }
             }
@@ -201,91 +226,24 @@ impl PrimitiveInHybrid {
                     // back into the previous one if we're the first.
                     if i != 0 {
                         byte_reads.push(quote! {
-                            let m = b & (#first_byte_mask as u8);
-                            in_bytes[(#write_this_cycle + 1)] |= (m << (#right_bits_to_drop));
-                        });
-                    } else {
-                        byte_reads.push(quote! {
-                            #[cfg(test)]
-                            {
-                                std::eprintln!("{:b} {:b} {:b}", #first_byte_mask, #last_byte_mask, #mask2);
-                            }
+                            let m = b & #general_mask;
+                            in_bytes[(#write_this_cycle + 1)] |= (m << (#general_shift_amt));
                         });
                     }
 
-                    if i != self.byteslice_len() - 1 || mask2 == 0 {
+                    if i != self.byteslice_len() - 1 || last_mask == 0 {
                         byte_reads.push(quote! {
-                            in_bytes[#write_this_cycle] = (b >> #right_bits_to_drop);
+                            in_bytes[#write_this_cycle] = (b >> #general_shift_amt);
                         });
                     } else {
                         byte_reads.push(quote! {
-                            in_bytes[#write_this_cycle] = (b >> #right_bits_to_drop) & (#mask2 as u8);
+                            in_bytes[#write_this_cycle] = (b & #last_mask) >> #general_shift_amt;
                         });
                     }
                 }
-                // while i > first_byte {
-                //     let read_this_cycle = i - 1;
-                //     let write_this_cycle = i - 1;
-
-                //     byte_reads.push(quote! {
-                //         let b = slice[#read_this_cycle];
-                //     });
-                //     // don't carry the masked portion of this byte
-                //     // back into the previous one if we're the first.
-                //     if i != last_byte_ex {
-                //         byte_reads.push(quote! {
-                //             let m = b & (#first_byte_mask as u8);
-                //             in_bytes[(#write_this_cycle + 1)] |= (m << (#right_bits_to_drop));
-                //         });
-                //     }
-                //     byte_reads.push(quote! {
-                //         in_bytes[#write_this_cycle] |= (b >> #right_bits_to_drop);
-                //     });
-
-                //     i -= 1;
-                // }
             }
             (true, false) => {}
         }
-        // if self.byte_aligned_at_end() {
-        //     // memcpy, then fixup last byte
-        //     // NOTE: this will need to be left aligned for little endian
-        //     let first_filled_byte = needed_bytes - self.byteslice_len();
-        //     byte_reads.push(quote! {
-        //         in_bytes[#first_filled_byte..].copy_from_slice(slice);
-        //     });
-
-        //     if first_byte_mask != 0 {
-        //         byte_reads.push(quote! {
-        //             in_bytes[#first_filled_byte] &= (#first_byte_mask as u8);
-        //         });
-        //     }
-        // } else {
-        //     let mut i = self.byteslice_len();
-        //     let mut j = repr_sz;
-        //     while i > 0 {
-        //         let read_this_cycle = i - 1;
-        //         let write_this_cycle = i - 1;
-
-        //         byte_reads.push(quote! {
-        //             let b = slice[#read_this_cycle];
-        //         });
-        //         // don't carry the masked portion of this byte
-        //         // back into the previous one if we're the first.
-        //         if i != self.byteslice_len() {
-        //             byte_reads.push(quote! {
-        //                 let m = b & (#first_byte_mask as u8);
-        //                 in_bytes[(#write_this_cycle - 1)] |= (m << (#right_bits_to_drop));
-        //             });
-        //         }
-        //         byte_reads.push(quote! {
-        //             in_bytes[#write_this_cycle] |= (b >> #right_bits_to_drop);
-        //         });
-
-        //         i -= 1;
-        //         j -= 1;
-        //     }
-        // }
 
         let read_from = self.parent_field.borrow().ident.clone();
         let chunk = syn::Index::from(field.sub_ref_idx);
@@ -299,7 +257,8 @@ impl PrimitiveInHybrid {
             #[cfg(test)]
             {
                 std::eprintln!("---");
-                std::eprintln!("{in_bytes:02x?}");
+                std::eprintln!("{} {} {:08b} {:08b} {}", #left_overspill, #right_overspill, #general_mask, #last_mask, #general_shift_amt);
+                std::eprintln!("{in_bytes:x?}");
                 // std::eprintln!("{in_bytes:02x}");
             }
 
