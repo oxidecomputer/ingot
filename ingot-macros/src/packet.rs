@@ -90,6 +90,11 @@ struct PrimitiveInHybrid {
     endianness: Option<Endianness>,
 }
 
+enum FieldOp {
+    Get,
+    Set,
+}
+
 impl PrimitiveInHybrid {
     fn first_byte(&self) -> usize {
         self.first_bit_inner / 8
@@ -175,6 +180,8 @@ impl PrimitiveInHybrid {
             quote! { #target_ty::#method(in_bytes) }
         };
 
+        let on_wire_len = self.byteslice_len();
+
         let mut byte_reads = vec![];
 
         let desired_align = if !little_endian {
@@ -199,20 +206,21 @@ impl PrimitiveInHybrid {
             }
             (true, true) => {
                 // NOTE: this will need to be left aligned for little endian
-                let last_filled_byte = self.byteslice_len();
+                let last_filled_byte = self.byteslice_len()
+                    - if right_overspill != 0 { 1 } else { 0 };
                 byte_reads.push(quote! {
-                    in_bytes[..#last_filled_byte].copy_from_slice(slice);
+                    in_bytes[..#on_wire_len].copy_from_slice(&slice[..#on_wire_len]);
                 });
 
-                if last_mask != 0 {
+                if right_overspill != 0 {
                     byte_reads.push(quote! {
                         in_bytes[#last_filled_byte] &= #last_mask;
+                        in_bytes[#last_filled_byte] >>= #general_shift_amt;
                     });
                 }
             }
 
-            // (false, false) => {
-            (_, false) => {
+            (false, false) => {
                 for (i, src_byte) in
                     (first_byte..last_byte_ex).rev().enumerate()
                 {
@@ -242,7 +250,12 @@ impl PrimitiveInHybrid {
                     }
                 }
             }
-            (true, false) => {}
+            (true, false) => {
+                // TODO
+                // byte_reads.push(quote! {
+                //     todo!()
+                // });
+            }
         }
 
         let read_from = self.parent_field.borrow().ident.clone();
@@ -266,17 +279,195 @@ impl PrimitiveInHybrid {
         }
     }
 
-    fn set(&self) -> TokenStream {
+    fn set(&self, field: &ValidField) -> TokenStream {
         // Start with a read of the biggest u<x> we can fit.
-        let next_int_sz = self.n_bits.max(8);
+        let next_int_sz = self.n_bits.next_power_of_two().max(8);
+        let ceiled_bits = self.n_bits.max(8);
+        let repr_sz = if ceiled_bits.max(8).is_power_of_two() {
+            ceiled_bits
+        } else {
+            next_int_sz
+        };
 
-        // quote! {
-        //     let base =
-        // }
+        // Straddle over byte boundaries, where applicable.
+        let left_to_lose = self.first_bit_inner as u32 % 8;
+        let left_overspill = (8 - left_to_lose) % 8;
+        let right_overspill = (self.first_bit_inner + self.n_bits) as u32 % 8;
+        let right_to_lose = (8 - right_overspill) % 8;
 
-        // if
+        let left_include_mask =
+            0xffu8.wrapping_shl(left_to_lose).wrapping_shr(left_to_lose);
+        let right_exclude_mask =
+            0xffu8.wrapping_shr(right_to_lose).wrapping_shl(right_to_lose);
 
-        todo!()
+        let left_exclude_mask = !left_include_mask;
+        let right_include_mask = !right_exclude_mask;
+
+        let little_endian =
+            self.endianness.map(|v| v.is_little_endian()).unwrap_or_default();
+
+        let (general_shift_amt, general_mask, last_mask, last_shift) =
+            if !little_endian {
+                let shift_amt = (8 - right_overspill) % 8;
+                let other_shift_amt = (8 - left_overspill) % 8;
+                (
+                    shift_amt,
+                    right_exclude_mask,
+                    left_include_mask,
+                    other_shift_amt,
+                )
+            } else {
+                let shift_amt = (8 - left_overspill) % 8;
+                let other_shift_amt = (8 - right_overspill) % 8;
+                (
+                    shift_amt,
+                    left_exclude_mask,
+                    right_include_mask,
+                    other_shift_amt,
+                )
+            };
+
+        let needed_bytes = repr_sz / 8;
+        // let spare_bits = self.n_bits as u32 % 8;
+        let first_byte = self.first_byte();
+        let last_byte_ex = self.last_byte_exclusive();
+
+        let target_ty = &field.repr;
+
+        let conv_frag = if self.n_bits <= 8 {
+            quote! { [val_raw] }
+        } else {
+            let Some(e) = self.endianness else {
+                panic!("u>8 without known endian")
+            };
+            let method = e.std_to_bytes_method();
+            quote! { #target_ty::#method(val) }
+        };
+
+        let mut byte_stores = vec![];
+
+        let desired_align = if !little_endian {
+            self.byte_aligned_at_end()
+        } else {
+            self.byte_aligned_at_start()
+        };
+
+        let read_from = self.parent_field.borrow().ident.clone();
+        let chunk = syn::Index::from(field.sub_ref_idx);
+
+        match (little_endian, desired_align) {
+            (false, true) => {
+                let first_filled_byte = needed_bytes - self.byteslice_len();
+                let (copy_from, copy_into): (usize, usize) = if left_overspill
+                    != 0
+                {
+                    // mask out bits we're inserting in leftmost byte
+                    // ||= in that byte
+                    byte_stores.push(quote! {
+                        slice[0] &= #left_exclude_mask;
+                        slice[0] |= (val_as_bytes[#first_filled_byte] & #left_include_mask);
+                    });
+
+                    (first_filled_byte + 1, 1)
+                } else {
+                    (first_filled_byte, 0)
+                };
+
+                byte_stores.push(quote! {
+                    slice[#copy_into..].copy_from_slice(&val_as_bytes[#copy_from..]);
+                });
+            }
+            (true, true) => {
+                let last_filled_byte = self.byteslice_len();
+                let last_byte_idx = last_filled_byte - 1;
+                let bytes_limit: usize = if right_overspill != 0 {
+                    // mask out bits we're inserting in leftmost byte
+                    // ||= in that byte
+                    byte_stores.push(quote! {
+                        slice[#last_byte_idx] &= #right_exclude_mask;
+                        slice[#last_byte_idx] |= (val_as_bytes[#last_byte_idx] & #right_include_mask);
+                    });
+
+                    last_filled_byte - 1
+                } else {
+                    last_filled_byte
+                };
+
+                byte_stores.push(quote! {
+                    slice[..#bytes_limit].copy_from_slice(&val_as_bytes[..#bytes_limit]);
+                });
+            }
+            (false, false) => {
+                let n_repr_bytes =
+                    (self.n_bits / 8) + ((self.n_bits % 8) != 0) as usize;
+                eprintln!(
+                    "iter {needed_bytes} vs. {n_repr_bytes:?} vs {}",
+                    self.byteslice_len()
+                );
+                let bs_len = self.byteslice_len();
+                byte_stores.push(quote! {
+                    #[cfg(test)]
+                    std::eprintln!("iter {} vs. {} vs {}", #needed_bytes, #n_repr_bytes, #bs_len);
+                    let last_el = slice.len() - 1;
+                });
+
+                if left_overspill != 0 {
+                    byte_stores.push(quote! {
+                        slice[0] &= #left_exclude_mask;
+                    });
+                }
+
+                if right_overspill != 0 {
+                    byte_stores.push(quote! {
+                        slice[last_el] &= #right_exclude_mask;
+                    });
+                }
+
+                for (i, src_byte) in
+                    (needed_bytes - n_repr_bytes..needed_bytes).enumerate()
+                {
+                    let dst_byte = first_byte + i;
+
+                    // first byte and left overspill: be careful on first set
+                    byte_stores.push(quote! {
+                        let b = val_as_bytes[#src_byte];
+                        let base = b >> #general_shift_amt;
+                        let rem = b << #general_shift_amt;
+                    });
+
+                    let is_internal_byte = i != 0 && i != n_repr_bytes - 1;
+
+                    byte_stores.push(quote! {
+                        slice[#i] |= base;
+                    });
+
+                    if src_byte + 1 < needed_bytes - 1 {
+                        byte_stores.push(quote! {
+                            slice[#i + 1] = rem;
+                        });
+                    } else if right_overspill != 0
+                        && src_byte + 1 == needed_bytes - 1
+                    {
+                        byte_stores.push(quote! {
+                            slice[#i + 1] |= rem;
+                        });
+                    }
+                }
+            }
+            _ => {
+                // TODO
+                byte_stores.push(quote! {
+                    todo!()
+                });
+            }
+        }
+
+        quote! {
+            let val_as_bytes = #conv_frag;
+            let mut slice = &mut self.#chunk.#read_from[#first_byte..#last_byte_ex];
+
+            #( #byte_stores )*
+        }
     }
 
     fn byte_aligned_at_end(&self) -> bool {
@@ -758,7 +949,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
 
         if let Some(hybrid) = &field.hybrid {
             let (get_conv, set_conv) = if do_into {
-                (quote! {val.into()}, quote! {val.into()})
+                (quote! {val.into()}, quote! {val})
             } else {
                 (
                     quote! {::ingot_types::NetworkRepr::from_network(val)},
@@ -796,10 +987,12 @@ pub fn derive(input: IngotArgs) -> TokenStream {
                     self.#field_ident = val;
                 }
             });
+            let subty_set = hybrid.set(field);
             trait_mut_impls.push(quote! {
                 #[inline]
                 fn #mut_name(&mut self, val: #user_ty) {
-                    todo!("setters on subtypes not yet done");
+                    let val_raw = #set_conv;
+                    #subty_set
                 }
             });
 
