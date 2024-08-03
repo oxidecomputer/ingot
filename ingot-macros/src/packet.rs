@@ -230,12 +230,13 @@ impl PrimitiveInHybrid {
                     byte_reads.push(quote! {
                         let b = slice[#write_this_cycle];
                     });
+
                     // don't carry the masked portion of this byte
                     // back into the previous one if we're the first.
                     if i != 0 {
                         byte_reads.push(quote! {
-                            let m = b & #general_mask;
-                            in_bytes[(#write_this_cycle + 1)] |= (m << (#general_shift_amt));
+                            // let m = b & #general_mask;
+                            in_bytes[(#write_this_cycle + 1)] |= (b << (#right_overspill));
                         });
                     }
 
@@ -419,9 +420,12 @@ impl PrimitiveInHybrid {
 
                 if right_overspill != 0 {
                     byte_stores.push(quote! {
-                        slice[last_el] &= #right_exclude_mask;
+                        slice[last_el] &= #right_include_mask;
                     });
                 }
+
+                // let shift = right_overspill;
+                let shift = general_shift_amt;
 
                 for (i, src_byte) in
                     (needed_bytes - n_repr_bytes..needed_bytes).enumerate()
@@ -431,27 +435,47 @@ impl PrimitiveInHybrid {
                     // first byte and left overspill: be careful on first set
                     byte_stores.push(quote! {
                         let b = val_as_bytes[#src_byte];
-                        let base = b >> #general_shift_amt;
-                        let rem = b << #general_shift_amt;
+                        let base = b << #shift;
+                        let rem = b >> ((8 - #shift) % 8);
                     });
 
-                    let is_internal_byte = i != 0 && i != n_repr_bytes - 1;
-
-                    byte_stores.push(quote! {
-                        slice[#i] |= base;
-                    });
-
-                    if src_byte + 1 < needed_bytes - 1 {
+                    if i == 0 && left_overspill == 0 {
                         byte_stores.push(quote! {
-                            slice[#i + 1] = rem;
+                            slice[#i] = base;
                         });
-                    } else if right_overspill != 0
-                        && src_byte + 1 == needed_bytes - 1
-                    {
+                    } else {
                         byte_stores.push(quote! {
-                            slice[#i + 1] |= rem;
+                            slice[#i] |= base;
                         });
                     }
+
+                    if i > 0 {
+                        byte_stores.push(quote! {
+                            slice[#i - 1] |= rem;
+                        });
+                    }
+
+                    // if i > 0 {
+                    //     byte_stores.push(quote! {
+                    //         slice[#i - 1] |= rem;
+                    //     });
+                    // }
+
+                    // byte_stores.push(quote! {
+                    //     slice[#i] |= base;
+                    // });
+
+                    // if src_byte + 1 < needed_bytes - 1 {
+                    //     byte_stores.push(quote! {
+                    //         slice[#i + 1] = rem;
+                    //     });
+                    // } else if right_overspill != 0
+                    //     && src_byte + 1 == needed_bytes - 1
+                    // {
+                    //     byte_stores.push(quote! {
+                    //         slice[#i + 1] |= rem;
+                    //     });
+                    // }
                 }
             }
             _ => {
@@ -463,10 +487,31 @@ impl PrimitiveInHybrid {
         }
 
         quote! {
-            let val_as_bytes = #conv_frag;
-            let mut slice = &mut self.#chunk.#read_from[#first_byte..#last_byte_ex];
+            #[cfg(test)]
+            {
+                std::eprintln!("BEFORE ---");
 
-            #( #byte_stores )*
+                std::eprintln!("{:08b} {:08b}", #left_include_mask, #left_exclude_mask);
+                std::eprintln!("{:08b} {:08b}", #right_include_mask, #right_exclude_mask);
+                std::eprintln!("{:x?}", self.#chunk.#read_from);
+            }
+            let val_as_bytes = #conv_frag;
+            let slice: &mut [u8] = &mut self.#chunk.#read_from[#first_byte..#last_byte_ex];
+
+            #[cfg(test)]
+            {
+                std::eprintln!("val {val_as_bytes:x?}");
+                std::eprintln!("{slice:x?}");
+            }
+
+            #( #byte_stores )*;
+
+            #[cfg(test)]
+            {
+                std::eprintln!("AFTER ---");
+                std::eprintln!("{slice:x?}");
+                std::eprintln!("{:x?}", &self.#chunk.#read_from[..]);
+            }
         }
     }
 

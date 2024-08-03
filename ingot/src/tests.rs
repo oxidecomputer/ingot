@@ -130,4 +130,20 @@ fn field_accesses_of_all_kinds() {
     // assert_eq!(a.tricky_le2(), 16_026, "tricky_le2");
     // a.set_tricky_le2(16_027);
     // assert_eq!(a.tricky_le2(), 16_027, "tricky_le2");
+
+    // nothing got unduly unset.
+    assert_eq!(a.fine(), 0xff, "check_fine");
+    assert_eq!(a.memcpy_be(), 0x22_2324, "check_memcpy_be");
+    assert_eq!(a.memcpy_le(), 0x22_2324, "check_memcpy_le");
+    assert_eq!(a.still_fine(), 0x0f, "check_still_fine");
+
+    assert_eq!(a.tricky_be0(), 300, "check_tricky_be0");
+    assert_eq!(a.tricky_be1(), 301, "check_tricky_be1");
+    assert_eq!(a.tricky_be2(), 13_011, "check_tricky_be2");
+
+    assert_eq!(a.trickier_be0(), 0, "check_trickier_be0");
+    assert_eq!(a.trickier_be1(), 0x1BBB_BBBB, "check_trickier_be1");
+    assert_eq!(a.trickier_be2(), 1, "check_trickier_be2");
+
+    assert_eq!(a.tricky_le0(), 36, "check_tricky_le0");
 }
