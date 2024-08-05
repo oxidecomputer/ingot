@@ -134,11 +134,11 @@ impl PrimitiveInHybrid {
 
         let left_include_mask =
             0xffu8.wrapping_shl(left_to_lose).wrapping_shr(left_to_lose);
-        let right_exclude_mask =
+        let right_include_mask =
             0xffu8.wrapping_shr(right_to_lose).wrapping_shl(right_to_lose);
 
         let left_exclude_mask = !left_include_mask;
-        let right_include_mask = !right_exclude_mask;
+        let right_exclude_mask = !right_include_mask;
 
         let little_endian =
             self.endianness.map(|v| v.is_little_endian()).unwrap_or_default();
@@ -149,7 +149,7 @@ impl PrimitiveInHybrid {
                 let other_shift_amt = (8 - left_overspill) % 8;
                 (
                     shift_amt,
-                    right_exclude_mask,
+                    right_include_mask,
                     left_include_mask,
                     other_shift_amt,
                 )
@@ -159,7 +159,7 @@ impl PrimitiveInHybrid {
                 (
                     shift_amt,
                     left_exclude_mask,
-                    right_include_mask,
+                    right_exclude_mask,
                     other_shift_amt,
                 )
             };
@@ -291,11 +291,11 @@ impl PrimitiveInHybrid {
                 let last_filled_byte = self.byteslice_len();
                 let last_byte_idx = last_filled_byte - 1;
                 let bytes_limit: usize = if right_overspill != 0 {
-                    // mask out bits we're inserting in leftmost byte
+                    // mask out bits we're inserting in rightmost byte
                     // ||= in that byte
                     byte_stores.push(quote! {
-                        slice[#last_byte_idx] &= #right_exclude_mask;
-                        slice[#last_byte_idx] |= (val_as_bytes[#last_byte_idx] & #right_include_mask);
+                        slice[#last_byte_idx] &= #right_include_mask;
+                        slice[#last_byte_idx] |= (val_as_bytes[#last_byte_idx] & #right_exclude_mask);
                     });
 
                     last_filled_byte - 1
@@ -310,10 +310,6 @@ impl PrimitiveInHybrid {
             (false, false, FieldOp::Set) => {
                 let n_repr_bytes =
                     (self.n_bits / 8) + ((self.n_bits % 8) != 0) as usize;
-                eprintln!(
-                    "iter {needed_bytes} vs. {n_repr_bytes:?} vs {}",
-                    self.byteslice_len()
-                );
                 let bs_len = self.byteslice_len();
                 byte_stores.push(quote! {
                     #[cfg(test)]
@@ -329,7 +325,7 @@ impl PrimitiveInHybrid {
 
                 if right_overspill != 0 {
                     byte_stores.push(quote! {
-                        slice[last_el] &= #right_include_mask;
+                        slice[last_el] &= #right_exclude_mask;
                     });
                 }
 
