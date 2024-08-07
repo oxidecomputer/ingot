@@ -15,6 +15,7 @@ use ingot_types::NextLayer;
 use ingot_types::OneChunk;
 use ingot_types::ParseChoice;
 use ingot_types::ParseError;
+use ingot_types::VarBytes;
 use macaddr::MacAddr6;
 use pnet_macros_support::types::*;
 
@@ -214,7 +215,7 @@ pub enum Ethertype2 {
 // TODO: uncork later.
 
 #[derive(Ingot)]
-pub struct Ipv4 {
+pub struct Ipv4<V> {
     // #[ingot(valid = "version = 4")]
     pub version: u4,
     // #[ingot(valid = "ihl >= 5")]
@@ -240,10 +241,10 @@ pub struct Ipv4 {
     pub source: Ipv4Addr,
     #[ingot(is = "[u8; 4]")]
     pub destination: Ipv4Addr,
-    // pub destination: [u8; 4]
-    // pub destination: u32,
+
     // #[ingot(extension(len = "self.ihl * 4 - 20"))]
-    // pub v4ext: ???
+    #[ingot(var_len = "ihl * 4 - 20")]
+    pub options: VarBytes<V>,
 }
 
 #[derive(Ingot)]
@@ -264,10 +265,8 @@ pub struct Ipv6 {
 
     #[ingot(is = "[u8; 16]")]
     pub source: Ipv6Addr,
-    // pub source: [u8; 16],
     #[ingot(is = "[u8; 16]")]
     pub destination: Ipv6Addr,
-    // pub destination: [u8; 16],
     // #[ingot(extension)]
     // pub v6ext: ???
 }
@@ -323,22 +322,24 @@ pub struct Udp {
     pub checksum: u16be,
 }
 
-// #[derive(Ingot)]
-// pub struct Geneve {
-//     // #[ingot(valid = 0)]
-//     pub version: u2,
-//     pub opt_len: u6,
-//     #[ingot(is = "u8")]
-//     pub flags: GeneveFlags,
-//     pub protocol_type: u16be,
+#[derive(Ingot)]
+pub struct Geneve<V> {
+    // #[ingot(valid = 0)]
+    pub version: u2,
+    pub opt_len: u6,
+    #[ingot(is = "u8")]
+    pub flags: GeneveFlags,
+    pub protocol_type: u16be,
 
-//     pub vni: u24be,
-//     // #[ingot(valid = 0)]
-//     pub reserved: u8,
+    pub vni: u24be,
+    // #[ingot(valid = 0)]
+    pub reserved: u8,
 
-//     // #[ingot(extension)]
-//     // pub tunnel_opts: ???
-// }
+    #[ingot(var_len = "opt_len * 4")]
+    pub options: VarBytes<V>,
+    // #[ingot(extension)]
+    // pub tunnel_opts: ???
+}
 
 // #[derive(Ingot)]
 // pub struct GeneveOpt {

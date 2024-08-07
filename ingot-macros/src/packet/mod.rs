@@ -1,4 +1,6 @@
+use bitfield::PrimitiveInBitfield;
 use darling::ast;
+use darling::ast::Fields;
 use darling::FromDeriveInput;
 use darling::FromField;
 use darling::FromMeta;
@@ -8,6 +10,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use regex::Regex;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use syn::spanned::Spanned;
 use syn::Error;
@@ -17,28 +20,299 @@ use syn::Lit;
 use syn::Type;
 use syn::TypeArray;
 
-#[derive(FromDeriveInput)]
+mod bitfield;
+
+type Shared<T> = Rc<RefCell<T>>;
+
+#[derive(Clone, FromDeriveInput)]
 #[darling(attributes(ingot), supports(struct_named))]
 pub struct IngotArgs {
     ident: Ident,
     data: ast::Data<(), FieldArgs>,
 }
 
-#[derive(FromMeta, Default)]
+#[derive(Clone, FromMeta, Default)]
 #[darling(default)]
 pub struct NextLayerSpec {
     #[darling(default)]
     or_extension: bool,
 }
 
-#[derive(FromField)]
-#[darling(attributes(ingot, is))]
+#[derive(Clone, FromField)]
+#[darling(attributes(ingot))]
 pub struct FieldArgs {
     is: Option<Type>,
     next_layer: Option<NextLayerSpec>,
+    var_len: Option<Expr>,
+    #[darling(default)]
+    subparse: bool,
 
     ident: Option<syn::Ident>,
     ty: Type,
+}
+
+struct ValidField2 {
+    /// The name of this field.
+    ident: Ident,
+    /// The index of this field.
+    idx: usize,
+    /// The user-facing type for this field.
+    user_ty: Type,
+    /// The subelement within a `Valid` block this field
+    /// is stored within. This field may *be* that subelement.
+    sub_field_idx: usize,
+
+    // per-el state.
+    state: FieldState,
+}
+
+enum FieldState {
+    /// Simple fields. May be
+    FixedWidth {
+        /// The base representation of a type in terms of primitives.
+        underlying_ty: Type,
+        ///
+        first_bit_in_chunk: usize,
+
+        // from analysed
+        /// Number of bits contained within this field.
+        cached_bits: usize,
+        ty: ReprType,
+        is_all_rust_primitives: bool,
+
+        /// Extra state needed to unpack this field if we have
+        /// stuck it in a bitfield
+        bitfield_info: Option<PrimitiveInBitfield>,
+    },
+    /// Byte-aligned (sz + offset) variable-width fields.
+    /// (Really, just byte arrays.)
+    VarWidth { length_fn: Expr },
+    /// Byte-aligned (sz + offset) var-width fields which may have a
+    /// capped length assigned.
+    Parsable {
+        /// Parsable blocks don't *need* to be length delimited,
+        /// but we can occasionally make the guarantee
+        length_fn: Option<Expr>,
+    },
+}
+
+struct StructParseDeriveCtx {
+    ident: Ident,
+    data: Fields<FieldArgs>,
+
+    validated: HashMap<Ident, Shared<ValidField2>>,
+    validated_order: Vec<Shared<ValidField2>>,
+
+    nominated_next_header: Option<Ident>,
+}
+
+impl StructParseDeriveCtx {
+    pub fn new(input: IngotArgs) -> Result<Self, syn::Error> {
+        let IngotArgs { ident, data } = input;
+        let field_data = data.take_struct().unwrap();
+        let mut validated = HashMap::new();
+        let validated_order: RefCell<Vec<Shared<ValidField2>>> = vec![].into();
+        let mut nominated_next_header = None;
+
+        let sub_field_idx = RefCell::new(0);
+        let curr_chunk_bits: RefCell<Option<usize>> = None.into();
+
+        let finalize_chunk = || {
+            let mut q = sub_field_idx.borrow_mut();
+            *q += 1;
+            let bits = curr_chunk_bits.take();
+
+            match bits {
+                Some(v) if v % 8 != 0 => Err(Error::new(
+                    validated_order
+                        .borrow()
+                        .last()
+                        .unwrap()
+                        .borrow()
+                        .user_ty
+                        .span(),
+                    format!("fields are not byte-aligned -- total {v}b"),
+                )),
+                _ => Ok(()),
+            }
+        };
+
+        for (idx, field) in field_data.fields.iter().enumerate() {
+            let field_ident = field.ident.as_ref().unwrap().clone();
+            let user_ty = field.ty.clone();
+
+            let state = match (
+                field.subparse,
+                &field.var_len,
+                &field.next_layer,
+            ) {
+                (true, length_fn, None) => {
+                    finalize_chunk()?;
+                    FieldState::Parsable { length_fn: length_fn.clone() }
+                }
+                (_, Some(length_fn), None) => {
+                    finalize_chunk()?;
+                    FieldState::VarWidth { length_fn: length_fn.clone() }
+                }
+                (false, None, next_layer) => {
+                    let underlying_ty =
+                        if let Some(ty) = &field.is { ty } else { &field.ty }
+                            .clone();
+                    let analysis = FixedWidth::from_ty(&underlying_ty)?;
+                    let n_bits = analysis.cached_bits;
+
+                    let mut ccb_ref = curr_chunk_bits.borrow_mut();
+                    let curr_chunk_bits = ccb_ref.get_or_insert(0);
+                    let first_bit_in_chunk = *curr_chunk_bits;
+                    *curr_chunk_bits += analysis.cached_bits;
+
+                    if analysis.ty.is_aggregate()
+                        && (*curr_chunk_bits % 8 != 0 || n_bits % 8 != 0)
+                    {
+                        return Err(Error::new(
+                            underlying_ty.span(),
+                            "aggregate types must be byte-aligned at their start and end",
+                        ));
+                    }
+
+                    if let Some(nl) = next_layer {
+                        if nominated_next_header.is_some() {
+                            return Err(Error::new(
+                                field_ident.span(),
+                                "only one field can be nominated as a next-header hint",
+                            ));
+                        }
+
+                        if nl.or_extension {
+                            todo!("integrated extension parsing not yet ready")
+                        }
+
+                        nominated_next_header = Some(field_ident.clone());
+                    }
+
+                    FieldState::FixedWidth {
+                        underlying_ty,
+                        first_bit_in_chunk,
+                        cached_bits: analysis.cached_bits,
+                        ty: analysis.ty,
+                        is_all_rust_primitives: analysis.is_all_rust_primitives,
+                        bitfield_info: None,
+                    }
+                }
+                _ => {
+                    return Err(syn::Error::new(
+                        field.ty.span(),
+                        "only fixed-width field can be used as next header",
+                    ))
+                }
+            };
+
+            let valid_field = ValidField2 {
+                ident: field_ident.clone(),
+                idx,
+                user_ty,
+                sub_field_idx: *sub_field_idx.borrow(),
+                state,
+            };
+
+            let shared_field = Rc::new(RefCell::new(valid_field));
+            validated.insert(field_ident, shared_field.clone());
+            validated_order.borrow_mut().push(shared_field);
+        }
+
+        finalize_chunk()?;
+
+        let validated_order = validated_order.into_inner();
+
+        Ok(Self {
+            ident,
+            data: field_data,
+            validated,
+            validated_order,
+            nominated_next_header,
+        })
+    }
+
+    pub fn validated_ident(&self) -> Ident {
+        let ident = &self.ident;
+        Ident::new(&format!("Valid{ident}"), ident.span())
+    }
+    pub fn ref_ident(&self) -> Ident {
+        let ident = &self.ident;
+        Ident::new(&format!("{ident}Ref"), ident.span())
+    }
+    pub fn mut_ident(&self) -> Ident {
+        let ident = &self.ident;
+        Ident::new(&format!("{ident}Mut"), ident.span())
+    }
+    pub fn pkt_ident(&self) -> Ident {
+        let ident = &self.ident;
+        Ident::new(&format!("{ident}Packet"), ident.span())
+    }
+    pub fn private_mod_ident(&self) -> Ident {
+        let ident = &self.ident;
+        Ident::new(&format!("_{ident}_ingot_impl"), ident.span())
+    }
+
+    pub fn gen_next_header_lookup(&self) -> TokenStream {
+        let ident = &self.ident;
+        let validated_ident = self.validated_ident();
+
+        if let Some(field_ident) = &self.nominated_next_header {
+            let user_ty =
+                &self.validated.get(&field_ident).unwrap().borrow().user_ty;
+            quote! {
+                impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
+                    type Denom = #user_ty;
+
+                    #[inline]
+                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                        ::core::result::Result::Ok(self.#field_ident())
+                    }
+                }
+
+                impl ::ingot_types::NextLayer for #ident {
+                    type Denom = #user_ty;
+
+                    #[inline]
+                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                        ::core::result::Result::Ok(self.#field_ident)
+                    }
+                }
+            }
+        } else {
+            quote! {
+                impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
+                    type Denom = ();
+
+                    #[inline]
+                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                        ::core::result::Result::Err(::ingot_types::ParseError::NoHint)
+                    }
+                }
+
+                impl ::ingot_types::NextLayer for #ident {
+                    type Denom = ();
+
+                    #[inline]
+                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                        ::core::result::Result::Err(::ingot_types::ParseError::NoHint)
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct FirstPass {
+    variant: FieldType,
+    base_args: FieldArgs,
+}
+
+enum FieldType {
+    FixedWidth,
+    VarWidth,
+    Parsable,
 }
 
 #[derive(Clone, Debug)]
@@ -58,7 +332,7 @@ struct ValidField {
 
     /// indicates child field of the
     sub_ref_idx: usize,
-    hybrid: Option<PrimitiveInHybrid>,
+    hybrid: Option<PrimitiveInBitfield>,
 }
 
 impl ValidField {
@@ -79,366 +353,11 @@ impl ValidField {
     }
 
     fn is_primitive(&self) -> bool {
-        matches!(self.analysis.ty, ReprType::Primitive { .. })
-    }
-}
-
-struct PrimitiveInHybrid {
-    parent_field: Rc<RefCell<HybridField>>,
-    first_bit_inner: usize,
-    n_bits: usize,
-    endianness: Option<Endianness>,
-}
-
-#[derive(Clone, Copy)]
-enum FieldOp {
-    Get,
-    Set,
-}
-
-impl PrimitiveInHybrid {
-    fn first_byte(&self) -> usize {
-        self.first_bit_inner / 8
-    }
-
-    fn last_byte_exclusive(&self) -> usize {
-        self.first_byte() + self.byteslice_len()
-    }
-
-    fn byteslice_len(&self) -> usize {
-        let whole_bytes = self.n_bits / 8;
-        whole_bytes + if self.n_bits % 8 != 0 { 1 } else { 0 }
-    }
-
-    fn get_set_body(&self, field: &ValidField, op: FieldOp) -> TokenStream {
-        // NOTE: we might be able to optimise this by just reading the largest
-        // possible int we can and fixing it up, but the endianness considerations
-        // are finicky to say the least.
-
-        // NOTE: if we're reading a POT-size int here, we're already unaligned
-        // from a byte boundary, so we need to read more bytes than the dtype.
-        // Start with a read of the biggest u<x> we can fit.
-        let next_int_sz = self.n_bits.next_power_of_two().max(8);
-        let ceiled_bits = self.n_bits.max(8);
-        let repr_sz = if ceiled_bits.max(8).is_power_of_two() {
-            ceiled_bits
+        if let Analysed::FixedWidth(fw) = &self.analysis {
+            matches!(fw.ty, ReprType::Primitive { .. })
         } else {
-            next_int_sz
-        };
-
-        // Straddle over byte boundaries, where applicable.
-        let left_to_lose = self.first_bit_inner as u32 % 8;
-        let left_overspill = (8 - left_to_lose) % 8;
-        let right_overspill = (self.first_bit_inner + self.n_bits) as u32 % 8;
-        let right_to_lose = (8 - right_overspill) % 8;
-
-        let left_include_mask =
-            0xffu8.wrapping_shl(left_to_lose).wrapping_shr(left_to_lose);
-        let right_include_mask =
-            0xffu8.wrapping_shr(right_to_lose).wrapping_shl(right_to_lose);
-
-        let left_exclude_mask = !left_include_mask;
-        let right_exclude_mask = !right_include_mask;
-
-        let little_endian =
-            self.endianness.map(|v| v.is_little_endian()).unwrap_or_default();
-
-        let (general_shift_amt, general_mask, last_mask, last_shift) =
-            if !little_endian {
-                let shift_amt = (8 - right_overspill) % 8;
-                let other_shift_amt = (8 - left_overspill) % 8;
-                (
-                    shift_amt,
-                    right_include_mask,
-                    left_include_mask,
-                    other_shift_amt,
-                )
-            } else {
-                let shift_amt = (8 - left_overspill) % 8;
-                let other_shift_amt = (8 - right_overspill) % 8;
-                (
-                    shift_amt,
-                    left_exclude_mask,
-                    right_exclude_mask,
-                    other_shift_amt,
-                )
-            };
-
-        let needed_bytes = repr_sz / 8;
-        // let spare_bits = self.n_bits as u32 % 8;
-        let first_byte = self.first_byte();
-        let last_byte_ex = self.last_byte_exclusive();
-
-        let target_ty = &field.repr;
-
-        let conv_frag = match (op, self.n_bits) {
-            (FieldOp::Get, n) if n < 8 => {
-                quote! { in_bytes[0] }
-            }
-            (FieldOp::Get, _) => {
-                let Some(e) = self.endianness else {
-                    panic!("u>8 without known endian")
-                };
-                let method = e.std_from_bytes_method();
-                quote! { #target_ty::#method(in_bytes) }
-            }
-            (FieldOp::Set, n) if n < 8 => {
-                quote! { [val_raw] }
-            }
-            (FieldOp::Set, _) => {
-                let Some(e) = self.endianness else {
-                    panic!("u>8 without known endian")
-                };
-                let method = e.std_to_bytes_method();
-                quote! { #target_ty::#method(val) }
-            }
-        };
-
-        let on_wire_len = self.byteslice_len();
-
-        let mut byte_reads = vec![];
-        let mut byte_stores = vec![];
-
-        let desired_align = if !little_endian {
-            self.byte_aligned_at_end()
-        } else {
-            self.byte_aligned_at_start()
-        };
-
-        match (little_endian, desired_align, op) {
-            // good align -- memcpy, then fixup last byte
-            (false, true, FieldOp::Get) => {
-                let first_filled_byte = needed_bytes - self.byteslice_len();
-                byte_reads.push(quote! {
-                    in_bytes[#first_filled_byte..].copy_from_slice(slice);
-                });
-
-                if last_mask != 0 {
-                    byte_reads.push(quote! {
-                        in_bytes[#first_filled_byte] &= #last_mask;
-                    });
-                }
-            }
-            (true, true, FieldOp::Get) => {
-                // NOTE: this will need to be left aligned for little endian
-                let last_filled_byte = self.byteslice_len()
-                    - if right_overspill != 0 { 1 } else { 0 };
-                byte_reads.push(quote! {
-                    in_bytes[..#on_wire_len].copy_from_slice(&slice[..#on_wire_len]);
-                });
-
-                if right_overspill != 0 {
-                    byte_reads.push(quote! {
-                        in_bytes[#last_filled_byte] &= #last_mask;
-                        in_bytes[#last_filled_byte] >>= #general_shift_amt;
-                    });
-                }
-            }
-
-            (false, false, FieldOp::Get) => {
-                for (i, src_byte) in
-                    (first_byte..last_byte_ex).rev().enumerate()
-                {
-                    let write_this_cycle =
-                        (src_byte - first_byte).min(needed_bytes - 1);
-
-                    byte_reads.push(quote! {
-                        let b = slice[#write_this_cycle];
-                    });
-
-                    // don't carry the masked portion of this byte
-                    // back into the previous one if we're the first.
-                    if i != 0 {
-                        byte_reads.push(quote! {
-                            // let m = b & #general_mask;
-                            in_bytes[(#write_this_cycle + 1)] |= (b << (#right_overspill));
-                        });
-                    }
-
-                    if i != self.byteslice_len() - 1 || last_mask == 0 {
-                        byte_reads.push(quote! {
-                            in_bytes[#write_this_cycle] = (b >> #general_shift_amt);
-                        });
-                    } else {
-                        byte_reads.push(quote! {
-                            in_bytes[#write_this_cycle] = (b & #last_mask) >> #general_shift_amt;
-                        });
-                    }
-                }
-            }
-            (false, true, FieldOp::Set) => {
-                let first_filled_byte = needed_bytes - self.byteslice_len();
-                let (copy_from, copy_into): (usize, usize) = if left_overspill
-                    != 0
-                {
-                    // mask out bits we're inserting in leftmost byte
-                    // ||= in that byte
-                    byte_stores.push(quote! {
-                        slice[0] &= #left_exclude_mask;
-                        slice[0] |= (val_as_bytes[#first_filled_byte] & #left_include_mask);
-                    });
-
-                    (first_filled_byte + 1, 1)
-                } else {
-                    (first_filled_byte, 0)
-                };
-
-                byte_stores.push(quote! {
-                    slice[#copy_into..].copy_from_slice(&val_as_bytes[#copy_from..]);
-                });
-            }
-            (true, true, FieldOp::Set) => {
-                let last_filled_byte = self.byteslice_len();
-                let last_byte_idx = last_filled_byte - 1;
-                let bytes_limit: usize = if right_overspill != 0 {
-                    // mask out bits we're inserting in rightmost byte
-                    // ||= in that byte
-                    byte_stores.push(quote! {
-                        slice[#last_byte_idx] &= #right_include_mask;
-                        slice[#last_byte_idx] |= (val_as_bytes[#last_byte_idx] & #right_exclude_mask);
-                    });
-
-                    last_filled_byte - 1
-                } else {
-                    last_filled_byte
-                };
-
-                byte_stores.push(quote! {
-                    slice[..#bytes_limit].copy_from_slice(&val_as_bytes[..#bytes_limit]);
-                });
-            }
-            (false, false, FieldOp::Set) => {
-                let n_repr_bytes =
-                    (self.n_bits / 8) + ((self.n_bits % 8) != 0) as usize;
-                let bs_len = self.byteslice_len();
-                byte_stores.push(quote! {
-                    #[cfg(test)]
-                    std::eprintln!("iter {} vs. {} vs {}", #needed_bytes, #n_repr_bytes, #bs_len);
-                    let last_el = slice.len() - 1;
-                });
-
-                if left_overspill != 0 {
-                    byte_stores.push(quote! {
-                        slice[0] &= #left_exclude_mask;
-                    });
-                }
-
-                if right_overspill != 0 {
-                    byte_stores.push(quote! {
-                        slice[last_el] &= #right_exclude_mask;
-                    });
-                }
-
-                // let shift = right_overspill;
-                let shift = general_shift_amt;
-
-                for (i, src_byte) in
-                    (needed_bytes - n_repr_bytes..needed_bytes).enumerate()
-                {
-                    let dst_byte = first_byte + i;
-
-                    // first byte and left overspill: be careful on first set
-                    byte_stores.push(quote! {
-                        let b = val_as_bytes[#src_byte];
-                        let base = b << #shift;
-                        let rem = b >> ((8 - #shift) % 8);
-                    });
-
-                    if i == 0 && left_overspill == 0 {
-                        byte_stores.push(quote! {
-                            slice[#i] = base;
-                        });
-                    } else {
-                        byte_stores.push(quote! {
-                            slice[#i] |= base;
-                        });
-                    }
-
-                    if i > 0 {
-                        byte_stores.push(quote! {
-                            slice[#i - 1] |= rem;
-                        });
-                    }
-                }
-            }
-            (false, false, FieldOp::Set) => {
-                // TODO
-                byte_stores.push(quote! {
-                    todo!()
-                });
-            }
-            (true, false, _) => {
-                // TODO
-                // byte_reads.push(quote! {
-                //     todo!()
-                // });
-            }
+            false
         }
-
-        let read_from = self.parent_field.borrow().ident.clone();
-        let chunk = syn::Index::from(field.sub_ref_idx);
-
-        match op {
-            FieldOp::Get => quote! {
-                let mut in_bytes = [0u8; #needed_bytes];
-                let slice = &self.#chunk.#read_from[#first_byte..#last_byte_ex];
-
-                #( #byte_reads )*
-
-                #[cfg(test)]
-                {
-                    std::eprintln!("---");
-                    std::eprintln!("{} {} {:08b} {:08b} {}", #left_overspill, #right_overspill, #general_mask, #last_mask, #general_shift_amt);
-                    std::eprintln!("{in_bytes:x?}");
-                    // std::eprintln!("{in_bytes:02x}");
-                }
-
-                let val = #conv_frag;
-            },
-            FieldOp::Set => quote! {
-                #[cfg(test)]
-                {
-                    std::eprintln!("BEFORE ---");
-
-                    std::eprintln!("{:08b} {:08b}", #left_include_mask, #left_exclude_mask);
-                    std::eprintln!("{:08b} {:08b}", #right_include_mask, #right_exclude_mask);
-                    std::eprintln!("{:x?}", self.#chunk.#read_from);
-                }
-                let val_as_bytes = #conv_frag;
-                let slice: &mut [u8] = &mut self.#chunk.#read_from[#first_byte..#last_byte_ex];
-
-                #[cfg(test)]
-                {
-                    std::eprintln!("val {val_as_bytes:x?}");
-                    std::eprintln!("{slice:x?}");
-                }
-
-                #( #byte_stores )*;
-
-                #[cfg(test)]
-                {
-                    std::eprintln!("AFTER ---");
-                    std::eprintln!("{slice:x?}");
-                    std::eprintln!("{:x?}", &self.#chunk.#read_from[..]);
-                }
-            },
-        }
-    }
-
-    fn get(&self, field: &ValidField) -> TokenStream {
-        self.get_set_body(field, FieldOp::Get)
-    }
-
-    fn set(&self, field: &ValidField) -> TokenStream {
-        self.get_set_body(field, FieldOp::Set)
-    }
-
-    fn byte_aligned_at_end(&self) -> bool {
-        (self.first_bit_inner + self.n_bits) % 8 == 0
-    }
-
-    fn byte_aligned_at_start(&self) -> bool {
-        self.first_bit_inner % 8 == 0
     }
 }
 
@@ -480,8 +399,8 @@ impl Endianness {
 }
 
 enum ReprType {
-    Array { child: Box<Analysed>, length: usize },
-    Tuple { children: Vec<Analysed> },
+    Array { child: Box<FixedWidth>, length: usize },
+    Tuple { children: Vec<FixedWidth> },
     Primitive { base_ident: Ident, bits: usize, endian: Option<Endianness> },
 }
 
@@ -491,13 +410,19 @@ impl ReprType {
     }
 }
 
-struct Analysed {
+enum Analysed {
+    FixedWidth(FixedWidth),
+    VarWidth(Expr),
+    Parsable,
+}
+
+struct FixedWidth {
     cached_bits: usize,
     ty: ReprType,
     is_all_rust_primitives: bool,
 }
 
-impl Analysed {
+impl FixedWidth {
     fn get_primitive_endianness(&self) -> Option<Endianness> {
         match self.ty {
             ReprType::Primitive { endian, .. } => endian,
@@ -511,7 +436,7 @@ struct ZcType {
     transformed: bool,
 }
 
-impl Analysed {
+impl FixedWidth {
     fn from_ty(ty: &Type) -> Result<Self, syn::Error> {
         match ty {
             e @ Type::Array(TypeArray{ elem, len: Expr::Lit(ExprLit{lit: Lit::Int(l), ..}), .. })  => {
@@ -523,7 +448,7 @@ impl Analysed {
                     return Err(Error::new(e.span(), "array reprs may only contain `u8`s"));
                 }
 
-                Ok(Analysed {
+                Ok(FixedWidth {
                     cached_bits: analysed.cached_bits * length,
                     is_all_rust_primitives: analysed.is_all_rust_primitives,
                     ty: ReprType::Array { child: analysed.into(), length },
@@ -548,21 +473,21 @@ impl Analysed {
                 }
 
                 // Ok(n_bits)
-                Ok(Analysed { cached_bits: n_bits, ty: ReprType::Tuple { children }, is_all_rust_primitives })
+                Ok(FixedWidth { cached_bits: n_bits, ty: ReprType::Tuple { children }, is_all_rust_primitives })
             },
             Type::Path(a) => {
                 let b = a.path.require_ident()?;
                 bits_in_primitive(b)
             },
 
-            Type::Paren(a) => Analysed::from_ty(&a.elem),
+            Type::Paren(a) => FixedWidth::from_ty(&a.elem),
 
             e => Err(Error::new(e.span(), "field must be constructed from a literal, tuple, or array of integral types")),
         }
     }
 }
 
-impl Analysed {
+impl FixedWidth {
     fn to_zerocopy_type(&self) -> Option<ZcType> {
         // TODO: figure out hybrid types in here, too.
         match &self.ty {
@@ -628,7 +553,7 @@ impl Analysed {
     }
 }
 
-fn bits_in_primitive(ident: &Ident) -> Result<Analysed, syn::Error> {
+fn bits_in_primitive(ident: &Ident) -> Result<FixedWidth, syn::Error> {
     let name = ident.to_string();
 
     // validation rules:
@@ -668,7 +593,7 @@ fn bits_in_primitive(ident: &Ident) -> Result<Analysed, syn::Error> {
 
     let ty = ReprType::Primitive { base_ident, bits, endian };
 
-    Ok(Analysed {
+    Ok(FixedWidth {
         cached_bits: bits,
         ty,
         is_all_rust_primitives: bits >= 8
@@ -678,6 +603,8 @@ fn bits_in_primitive(ident: &Ident) -> Result<Analysed, syn::Error> {
 }
 
 pub fn derive(input: IngotArgs) -> TokenStream {
+    let x = StructParseDeriveCtx::new(input.clone()).unwrap();
+
     let IngotArgs { ident, data } = input;
 
     let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
@@ -706,12 +633,21 @@ pub fn derive(input: IngotArgs) -> TokenStream {
     let mut t_bits = 0;
     let mut next_layer: Option<TokenStream> = None;
 
+    // note: concept of first_bit is broken for now.
+    // need to rethink & rework.
+
     for field in field_data.fields {
         let underlying_ty =
             if let Some(ty) = &field.is { ty } else { &field.ty };
         let user_ty = &field.ty;
 
-        let analysis = match Analysed::from_ty(&underlying_ty) {
+        // let analysis = match field.var_len {
+        //     Some(expr) => todo!(),
+        //     None => todo!(),
+        // };
+
+        // NOTE: can't analyse anything with a generic using this fn.
+        let analysis = match FixedWidth::from_ty(&underlying_ty) {
             Ok(v) => v,
             Err(v) => return v.into_compile_error().into(),
         };
@@ -734,7 +670,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
             repr: underlying_ty.clone(),
             ident: field_ident.clone(),
             first_bit: t_bits,
-            analysis,
+            analysis: Analysed::FixedWidth(analysis),
             hybrid: None,
             user_ty: user_ty.clone(),
             // TODO: increment as we pass by varwidth fields
@@ -827,13 +763,16 @@ pub fn derive(input: IngotArgs) -> TokenStream {
     let mut hybrid_count = 0;
 
     for field in &mut fields {
+        let Analysed::FixedWidth(ref analysis) = field.analysis else {
+            continue;
+        };
         if hybrid_field.is_none()
             && field.first_bit % 8 == 0
-            && field.analysis.is_all_rust_primitives
+            && analysis.is_all_rust_primitives
         {
             let ident = &field.ident;
             // guaranteed defined for U8/U16/U32/U64/...
-            let ty = field.analysis.to_zerocopy_type().unwrap();
+            let ty = analysis.to_zerocopy_type().unwrap();
             let zc_repr = ty.repr;
             zc_fields.push(quote! {
                 pub #ident: #zc_repr
@@ -853,20 +792,19 @@ pub fn derive(input: IngotArgs) -> TokenStream {
             // let hybrid_len =
             //     hybrid_field.unwrap_or_default() + field.analysis.cached_bits;
 
-            hybrid_state.bits_seen += field.analysis.cached_bits;
-            hybrid_state.field_data.borrow_mut().n_bits +=
-                field.analysis.cached_bits;
+            hybrid_state.bits_seen += analysis.cached_bits;
+            hybrid_state.field_data.borrow_mut().n_bits += analysis.cached_bits;
 
             // field.
 
             let first_bit_inner =
                 field.first_bit - hybrid_state.field_data.borrow().first_bit;
 
-            field.hybrid = Some(PrimitiveInHybrid {
+            field.hybrid = Some(PrimitiveInBitfield {
                 parent_field: hybrid_state.field_data.clone(),
                 first_bit_inner,
-                n_bits: field.analysis.cached_bits,
-                endianness: field.analysis.get_primitive_endianness(),
+                n_bits: analysis.cached_bits,
+                endianness: analysis.get_primitive_endianness(),
             });
 
             if hybrid_state.bits_seen % 8 == 0 {
@@ -895,6 +833,9 @@ pub fn derive(input: IngotArgs) -> TokenStream {
     }
 
     for field in &fields {
+        let Analysed::FixedWidth(ref analysis) = field.analysis else {
+            continue;
+        };
         let field_ident = &field.ident;
         let user_ty = &field.user_ty;
         let get_name = field.getter_name();
@@ -905,7 +846,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
         // Used to determine whether we need both:
         // - use of NetworkRepr conversion
         // - include &<ty>, &mut <ty> in trait.
-        let zc_ty = field.analysis.to_zerocopy_type();
+        let zc_ty = analysis.to_zerocopy_type();
         let do_into = field.user_ty == field.repr;
         let allow_ref_access =
             do_into && zc_ty.map(|v| !v.transformed).unwrap_or_default();
@@ -939,6 +880,14 @@ pub fn derive(input: IngotArgs) -> TokenStream {
                     #get_conv
                 }
             });
+
+            // zc_impls.push(quote! {
+            //     #[derive(zerocopy::IntoBytes, Clone, Debug, zerocopy::FromBytes, zerocopy::Unaligned, zerocopy::Immutable, zerocopy::KnownLayout)]
+            //     #[repr(C, packed)]
+            //     pub struct #ty_ident {
+            //         #( #zc_fields ),*
+            //     }
+            // });
 
             let mut_name = field.setter_name();
             trait_mut_defs.push(quote! {

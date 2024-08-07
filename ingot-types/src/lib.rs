@@ -5,6 +5,8 @@ use alloc::vec::Vec;
 use core::convert::Infallible;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
+#[cfg(not(feature = "alloc"))]
+use heapless::Vec;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -19,6 +21,11 @@ pub enum Packet<O, B> {
     /// Packed representation of a ...
     Raw(B),
 }
+
+#[cfg(feature = "alloc")]
+pub type VarBytes<V> = Packet<Vec<u8>, V>;
+#[cfg(not(feature = "alloc"))]
+pub type VarBytes<V> = Packet<Vec<u8, 256>, V>;
 
 pub trait Header {
     const MINIMUM_LENGTH: usize;

@@ -10,6 +10,7 @@ alloc = []
 default = ["alloc"]
 
 [dependencies]
+heapless.workspace = true
 macaddr.workspace = true
 pnet_macros_support.workspace = true
 zerocopy.workspace = true
