@@ -8,8 +8,10 @@ use darling::FromMeta;
 use proc_macro2::Ident;
 use proc_macro2::Span;
 use proc_macro2::TokenStream;
+use proc_macro2::TokenTree;
 use quote::quote;
 use quote::ToTokens;
+use quote::TokenStreamExt;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -156,15 +158,14 @@ impl ChunkState {
 
                     if let Some(bf) = bitfield_info {
                         let parent_bf = bf.parent_field.borrow();
-                        let ident = parent_bf.ident.clone();
+                        let f_ident = parent_bf.ident.clone();
                         let n_bytes = parent_bf.n_bits / 8;
-                        // last_seen_bf.get_or_insert_with(|| );
 
-                        if last_seen_bf.as_ref() != Some(&ident) {
+                        if last_seen_bf.as_ref() != Some(&f_ident) {
                             zc_fields.push(quote! {
-                                pub #ty_ident: [u8; #n_bytes]
+                                pub #f_ident: [u8; #n_bytes]
                             });
-                            last_seen_bf = Some(ident);
+                            last_seen_bf = Some(f_ident);
                         }
                     } else {
                         let ident = &field.ident;
@@ -181,7 +182,9 @@ impl ChunkState {
 
                 Some(quote! {
                     #[derive(
-                        Clone, Debug,
+                        ::core::clone::Clone,
+                        ::core::marker::Copy,
+                        ::core::fmt::Debug,
                         ::zerocopy::IntoBytes,
                         ::zerocopy::FromBytes,
                         ::zerocopy::Unaligned,
@@ -552,6 +555,7 @@ impl StructParseDeriveCtx {
         }
     }
 
+    /// Generates
     pub fn gen_zerocopy_substructs(&self) -> TokenStream {
         let defs =
             self.chunk_layout.iter().map(|v| v.chunk_zc_definition(self));
@@ -559,6 +563,179 @@ impl StructParseDeriveCtx {
         quote! {
             #( #defs )*
         }
+    }
+
+    /// Generate implementations of `ingot_types::Header` for the user-
+    /// provided owned type and the generated `xxxValid` type.
+    pub fn gen_header_impls(&self) -> TokenStream {
+        let ident = &self.ident;
+        let validated_ident = self.validated_ident();
+        let base_bytes: usize = self
+            .chunk_layout
+            .iter()
+            .map(|v| match v {
+                ChunkState::FixedWidth { size_bytes, .. } => *size_bytes,
+                ChunkState::VarWidth(_) => 0,
+                // NOTE: we should/can also include <ty>::MINIMUM_LENGTH here,
+                //       since that will stll be a constexpr.
+                ChunkState::Parsable(_) => 0,
+            })
+            .sum();
+
+        let mut zc_len_checks = vec![quote! {Self::MINIMUM_LENGTH}];
+        let mut owned_len_checks = zc_len_checks.clone();
+
+        for (i, field) in self.chunk_layout.iter().enumerate() {
+            let idx = syn::Index::from(i);
+            match field {
+                ChunkState::VarWidth(id) | ChunkState::Parsable(id) => {
+                    zc_len_checks.push(quote! {
+                        self.#idx.packet_length()
+                    });
+                    owned_len_checks.push(quote! {
+                        self.#id.packet_length()
+                    });
+                }
+                ChunkState::FixedWidth { .. } => {}
+            }
+        }
+
+        quote! {
+            impl<V> ::ingot_types::Header for #validated_ident<V> {
+                const MINIMUM_LENGTH: usize = #base_bytes;
+
+                fn packet_length(&self) -> usize {
+                    #( #zc_len_checks )+*
+                }
+            }
+
+            impl ::ingot_types::Header for #ident {
+                const MINIMUM_LENGTH: usize = #base_bytes;
+
+                fn packet_length(&self) -> usize {
+                    #( #owned_len_checks )+*
+                }
+            }
+        }
+    }
+
+    /// Generate internal types / trait impls used as part of the borrowed repr.
+    pub fn gen_zc_module(&self) -> TokenStream {
+        let private_mod_ident = self.private_mod_ident();
+        let inner_structs = self.gen_zerocopy_substructs();
+
+        quote! {
+            #[allow(non_snake_case)]
+            pub mod #private_mod_ident {
+                use super::*;
+
+                #inner_structs
+
+                // impl<V: ::zerocopy::ByteSlice> #ref_ident for #validated_ident<V> {
+                //     #( #trait_impls )*
+                // }
+
+                // impl #ref_ident for #ident {
+                //     #( #direct_trait_impls )*
+                // }
+
+                // impl<V: ::zerocopy::ByteSliceMut> #mut_ident for #validated_ident<V> {
+                //     #( #trait_mut_impls )*
+                // }
+
+                // impl #mut_ident for #ident {
+                //     #( #direct_trait_mut_impls )*
+                // }
+            }
+        }
+    }
+}
+
+impl ToTokens for StructParseDeriveCtx {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let valid_struct = self.gen_validated_struct_def();
+        let header_trait_impls = self.gen_header_impls();
+        let zc_mod = self.gen_zc_module();
+        let next_layer = self.gen_next_header_lookup();
+
+        tokens.extend(quote! {
+            #valid_struct
+
+            #header_trait_impls
+
+            // ---
+            // gen_packet_trait_defs
+            // ---
+            // pub trait #ref_ident {
+            //     #( #trait_defs )*
+            // }
+
+            // pub trait #mut_ident {
+            //     #( #trait_mut_defs )*
+            // }
+
+            #zc_mod
+
+            // impl<O, B> #ref_ident for ::ingot_types::Packet<O, B>
+            // where
+            //     O: #ref_ident,
+            //     B: #ref_ident,
+            // {
+            //     #( #packet_impls )*
+            // }
+
+            // impl<O, B> #mut_ident for ::ingot_types::Packet<O, B>
+            // where
+            //     O: #mut_ident,
+            //     B: #mut_ident,
+            // {
+            //     #( #packet_mut_impls )*
+            // }
+
+            // impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #validated_ident<V> {
+            //     type BufType = V;
+            // }
+
+            // impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #validated_ident<V> {
+            //     type Target = Self;
+            //     fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
+            //         use ::ingot_types::Header;
+
+            //         // TODO!
+            //         if from.as_ref().len() < #ident::MINIMUM_LENGTH {
+            //             ::core::result::Result::Err(::ingot_types::ParseError::TooSmall)
+            //         } else {
+            //             let (l, r) = from.split_at(#ident::MINIMUM_LENGTH);
+            //             let v0 = ::zerocopy::Ref::from_bytes(l)
+            //                 .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
+            //             ::core::result::Result::Ok((
+            //                 #validated_ident(v0),
+            //                 r,
+            //             ))
+            //         }
+            //     }
+            // }
+
+            // impl<V, T> ::core::convert::From<#validated_ident<V>> for ::ingot_types::Packet<T, #validated_ident<V>> {
+            //     fn from(value: #validated_ident<V>) -> Self {
+            //         ::ingot_types::Packet::Raw(value)
+            //     }
+            // }
+
+            // impl<T> ::core::convert::From<#ident> for ::ingot_types::Packet<#ident, T> {
+            //     fn from(value: #ident) -> Self {
+            //         ::ingot_types::Packet::Repr(value)
+            //     }
+            // }
+
+            // pub type #pkt_ident<V> = ::ingot_types::Packet<#ident, #validated_ident<V>>;
+
+            // impl<V> ::ingot_types::HasRepr for #validated_ident<V> {
+            //     type ReprType = #ident;
+            // }
+
+            #next_layer
+        });
     }
 }
 
@@ -855,7 +1032,12 @@ pub fn derive(input: IngotArgs) -> TokenStream {
     let x = StructParseDeriveCtx::new(input.clone()).unwrap();
 
     // eprintln!("{x:#?}");
-    eprintln!("{}", x.gen_zerocopy_substructs());
+    eprintln!(
+        "{}",
+        prettyplease::unparse(
+            &syn::parse_file(&x.into_token_stream().to_string()).unwrap()
+        )
+    );
 
     let IngotArgs { ident, data, generics } = input;
 

@@ -21,6 +21,7 @@ bitflags = "2"
 darling = "0.20"
 heapless = "0.8"
 macaddr = "1"
+prettyplease = "0.2"
 proc-macro2 = { version = "1" }
 quote = "1.0"
 regex = "1"

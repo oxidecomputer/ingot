@@ -33,6 +33,38 @@ pub trait Header {
     fn packet_length(&self) -> usize;
 }
 
+impl<O, B> Header for Packet<O, B>
+where
+    O: Header,
+    B: Header,
+    B: HasRepr<ReprType = O>,
+{
+    const MINIMUM_LENGTH: usize = O::MINIMUM_LENGTH;
+
+    #[inline]
+    fn packet_length(&self) -> usize {
+        match self {
+            Packet::Repr(o) => o.packet_length(),
+            Packet::Raw(b) => b.packet_length(),
+        }
+    }
+}
+
+impl<V> Header for VarBytes<V>
+where
+    V: Chunk,
+{
+    const MINIMUM_LENGTH: usize = 0;
+
+    #[inline]
+    fn packet_length(&self) -> usize {
+        match self {
+            Packet::Repr(o) => o.len(),
+            Packet::Raw(b) => b.len(),
+        }
+    }
+}
+
 pub trait HasView {
     type ViewType;
 }
