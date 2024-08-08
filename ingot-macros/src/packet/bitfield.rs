@@ -4,8 +4,9 @@ use quote::quote;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[derive(Clone, Debug)]
 pub struct PrimitiveInBitfield {
-    pub parent_field: Rc<RefCell<HybridField>>,
+    pub parent_field: Rc<RefCell<Bitfield>>,
     pub first_bit_inner: usize,
     pub n_bits: usize,
     pub endianness: Option<Endianness>,

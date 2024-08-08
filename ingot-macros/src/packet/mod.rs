@@ -1,6 +1,7 @@
 use bitfield::PrimitiveInBitfield;
 use darling::ast;
 use darling::ast::Fields;
+use darling::ast::GenericParamExt;
 use darling::FromDeriveInput;
 use darling::FromField;
 use darling::FromMeta;
@@ -8,17 +9,22 @@ use proc_macro2::Ident;
 use proc_macro2::Span;
 use proc_macro2::TokenStream;
 use quote::quote;
+use quote::ToTokens;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use syn::parse::Parse;
+use syn::parse_quote;
 use syn::spanned::Spanned;
 use syn::Error;
 use syn::Expr;
 use syn::ExprLit;
+use syn::Generics;
 use syn::Lit;
 use syn::Type;
 use syn::TypeArray;
+use syn::TypeParam;
 
 mod bitfield;
 
@@ -28,17 +34,18 @@ type Shared<T> = Rc<RefCell<T>>;
 #[darling(attributes(ingot), supports(struct_named))]
 pub struct IngotArgs {
     ident: Ident,
+    generics: Generics,
     data: ast::Data<(), FieldArgs>,
 }
 
-#[derive(Clone, FromMeta, Default)]
+#[derive(Clone, FromMeta, Default, Debug)]
 #[darling(default)]
 pub struct NextLayerSpec {
     #[darling(default)]
     or_extension: bool,
 }
 
-#[derive(Clone, FromField)]
+#[derive(Clone, Debug, FromField)]
 #[darling(attributes(ingot))]
 pub struct FieldArgs {
     is: Option<Type>,
@@ -51,6 +58,7 @@ pub struct FieldArgs {
     ty: Type,
 }
 
+#[derive(Clone, Debug)]
 struct ValidField2 {
     /// The name of this field.
     ident: Ident,
@@ -66,19 +74,19 @@ struct ValidField2 {
     state: FieldState,
 }
 
+#[derive(Clone, Debug)]
 enum FieldState {
     /// Simple fields. May be
     FixedWidth {
         /// The base representation of a type in terms of primitives.
         underlying_ty: Type,
-        ///
+        /// The bitoffset of this field within a block of adjacent
+        /// FixedWidth elements.
         first_bit_in_chunk: usize,
 
-        // from analysed
-        /// Number of bits contained within this field.
-        cached_bits: usize,
-        ty: ReprType,
-        is_all_rust_primitives: bool,
+        /// Number of bits contained within this field, among other
+        /// state.
+        analysis: FixedWidthAnalysis,
 
         /// Extra state needed to unpack this field if we have
         /// stuck it in a bitfield
@@ -96,34 +104,134 @@ enum FieldState {
     },
 }
 
+#[derive(Clone, Debug)]
+enum ChunkState {
+    FixedWidth {
+        /// Names of all fields contained in this block.
+        fields: Vec<Ident>,
+        size_bytes: usize,
+        fw_idx: usize,
+    },
+    /// Byte-aligned (sz + offset) variable-width fields.
+    /// (Really, just byte arrays.)
+    VarWidth(Ident),
+    /// Byte-aligned (sz + offset) var-width fields which may have a
+    /// capped length assigned.
+    Parsable(Ident),
+}
+
+impl ChunkState {
+    pub fn chunk_ty_name(&self, parent: &Ident) -> Option<Ident> {
+        match self {
+            ChunkState::FixedWidth { fw_idx, .. } => Some(Ident::new(
+                &format!("{parent}Part{fw_idx}"),
+                parent.span(),
+            )),
+            _ => None,
+        }
+    }
+
+    /// Return the token stream for this chunk as a Zerocopy struct.
+    pub fn chunk_zc_definition(
+        &self,
+        ctx: &StructParseDeriveCtx,
+    ) -> Option<TokenStream> {
+        match self {
+            ChunkState::FixedWidth { fields, .. } => {
+                let ty_ident = self
+                    .chunk_ty_name(&ctx.ident)
+                    .expect("FixedWidth must be able to generate chunk name");
+                let mut zc_fields = vec![];
+                let mut last_seen_bf = None;
+                for field in
+                    fields.iter().map(|id| ctx.validated.get(id).unwrap())
+                {
+                    let field = field.borrow();
+                    let FieldState::FixedWidth {
+                        analysis, bitfield_info, ..
+                    } = &field.state
+                    else {
+                        panic!("non fixed-width field in fixed-width chunk")
+                    };
+
+                    if let Some(bf) = bitfield_info {
+                        let parent_bf = bf.parent_field.borrow();
+                        let ident = parent_bf.ident.clone();
+                        let n_bytes = parent_bf.n_bits / 8;
+                        // last_seen_bf.get_or_insert_with(|| );
+
+                        if last_seen_bf.as_ref() != Some(&ident) {
+                            zc_fields.push(quote! {
+                                pub #ty_ident: [u8; #n_bytes]
+                            });
+                            last_seen_bf = Some(ident);
+                        }
+                    } else {
+                        let ident = &field.ident;
+                        let ty = analysis.to_zerocopy_type().expect(
+                            "guaranteed defined for U8/U16/U32/U64/...",
+                        );
+                        let zc_repr = ty.repr;
+
+                        zc_fields.push(quote! {
+                            pub #ident: #zc_repr
+                        });
+                    }
+                }
+
+                Some(quote! {
+                    #[derive(
+                        Clone, Debug,
+                        ::zerocopy::IntoBytes,
+                        ::zerocopy::FromBytes,
+                        ::zerocopy::Unaligned,
+                        ::zerocopy::Immutable,
+                        ::zerocopy::KnownLayout,
+                    )]
+                    #[repr(C, packed)]
+                    pub struct #ty_ident {
+                        #( #zc_fields ),*
+                    }
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
 struct StructParseDeriveCtx {
     ident: Ident,
+    generics: Generics,
     data: Fields<FieldArgs>,
 
     validated: HashMap<Ident, Shared<ValidField2>>,
     validated_order: Vec<Shared<ValidField2>>,
+    chunk_layout: Vec<ChunkState>,
 
     nominated_next_header: Option<Ident>,
 }
 
 impl StructParseDeriveCtx {
     pub fn new(input: IngotArgs) -> Result<Self, syn::Error> {
-        let IngotArgs { ident, data } = input;
+        let IngotArgs { ident, data, generics } = input;
         let field_data = data.take_struct().unwrap();
         let mut validated = HashMap::new();
         let validated_order: RefCell<Vec<Shared<ValidField2>>> = vec![].into();
         let mut nominated_next_header = None;
+        let mut chunk_layout = vec![];
 
+        let mut fws_written = 0;
         let sub_field_idx = RefCell::new(0);
-        let curr_chunk_bits: RefCell<Option<usize>> = None.into();
+        let curr_chunk_bits: RefCell<Option<(usize, Vec<Ident>)>> = None.into();
 
-        let finalize_chunk = || {
+        let mut finalize_chunk = || {
             let mut q = sub_field_idx.borrow_mut();
             *q += 1;
             let bits = curr_chunk_bits.take();
 
             match bits {
-                Some(v) if v % 8 != 0 => Err(Error::new(
+                Some((len, _)) if len % 8 != 0 => Err(Error::new(
                     validated_order
                         .borrow()
                         .last()
@@ -131,12 +239,42 @@ impl StructParseDeriveCtx {
                         .borrow()
                         .user_ty
                         .span(),
-                    format!("fields are not byte-aligned -- total {v}b"),
+                    format!(
+                        "fields are not byte-aligned -- \
+                        total {len}b at fixed-len boundary"
+                    ),
                 )),
-                _ => Ok(()),
+                Some((len, fields)) => {
+                    let fw_idx = fws_written;
+                    fws_written += 1;
+                    chunk_layout.push(ChunkState::FixedWidth {
+                        fields,
+                        size_bytes: len / 8,
+                        fw_idx,
+                    });
+                    Ok(())
+                }
+                None => {
+                    let els = validated_order.borrow();
+                    let last_el = els.last().unwrap().borrow();
+                    let ident = last_el.ident.clone();
+                    let chunk = match &last_el.state {
+                        FieldState::VarWidth { .. } => {
+                            ChunkState::VarWidth(ident)
+                        }
+                        FieldState::Parsable { .. } => {
+                            ChunkState::Parsable(ident)
+                        }
+                        FieldState::FixedWidth { .. } => unreachable!(),
+                    };
+                    chunk_layout.push(chunk);
+                    Ok(())
+                }
             }
         };
 
+        // first pass: split struct into discrete chunks, ensure byte
+        // alignment in the right spots.
         for (idx, field) in field_data.fields.iter().enumerate() {
             let field_ident = field.ident.as_ref().unwrap().clone();
             let user_ty = field.ty.clone();
@@ -158,13 +296,15 @@ impl StructParseDeriveCtx {
                     let underlying_ty =
                         if let Some(ty) = &field.is { ty } else { &field.ty }
                             .clone();
-                    let analysis = FixedWidth::from_ty(&underlying_ty)?;
+                    let analysis = FixedWidthAnalysis::from_ty(&underlying_ty)?;
                     let n_bits = analysis.cached_bits;
 
                     let mut ccb_ref = curr_chunk_bits.borrow_mut();
-                    let curr_chunk_bits = ccb_ref.get_or_insert(0);
+                    let (curr_chunk_bits, curr_chunk_fields) =
+                        ccb_ref.get_or_insert((0, vec![]));
                     let first_bit_in_chunk = *curr_chunk_bits;
                     *curr_chunk_bits += analysis.cached_bits;
+                    curr_chunk_fields.push(field_ident.clone());
 
                     if analysis.ty.is_aggregate()
                         && (*curr_chunk_bits % 8 != 0 || n_bits % 8 != 0)
@@ -193,9 +333,7 @@ impl StructParseDeriveCtx {
                     FieldState::FixedWidth {
                         underlying_ty,
                         first_bit_in_chunk,
-                        cached_bits: analysis.cached_bits,
-                        ty: analysis.ty,
-                        is_all_rust_primitives: analysis.is_all_rust_primitives,
+                        analysis,
                         bitfield_info: None,
                     }
                 }
@@ -224,11 +362,79 @@ impl StructParseDeriveCtx {
 
         let validated_order = validated_order.into_inner();
 
+        #[derive(Clone, Debug)]
+        struct BfState {
+            bits_seen: usize,
+            field_data: Rc<RefCell<Bitfield>>,
+        }
+
+        let mut bitfield_state: Option<BfState> = None;
+        let mut bitfield_count = 0;
+
+        // second pass: fill in bitfield information within VarWidth blocks.
+        // we already know that they obey reasonable byte alignment.
+        for field in &validated_order {
+            let mut field = field.borrow_mut();
+
+            let FieldState::FixedWidth {
+                first_bit_in_chunk,
+                analysis,
+                bitfield_info,
+                ..
+            } = &mut field.state
+            else {
+                continue;
+            };
+            if bitfield_state.is_none()
+                && *first_bit_in_chunk % 8 == 0
+                && analysis.is_all_rust_primitives
+            {
+                continue;
+            }
+            let first_bit = *first_bit_in_chunk;
+
+            let ty_ident = Ident::new(
+                &format!("bitfield_{}", bitfield_count),
+                ident.span(),
+            );
+
+            let curr_bitfield_state =
+                bitfield_state.get_or_insert_with(|| BfState {
+                    bits_seen: 0,
+                    field_data: Rc::new(RefCell::new(Bitfield {
+                        ident: ty_ident.clone(),
+                        n_bits: 0,
+                        first_bit,
+                    })),
+                });
+
+            curr_bitfield_state.bits_seen += analysis.cached_bits;
+            curr_bitfield_state.field_data.borrow_mut().n_bits +=
+                analysis.cached_bits;
+
+            let first_bit_inner =
+                first_bit - curr_bitfield_state.field_data.borrow().first_bit;
+
+            *bitfield_info = Some(PrimitiveInBitfield {
+                parent_field: curr_bitfield_state.field_data.clone(),
+                first_bit_inner,
+                n_bits: analysis.cached_bits,
+                endianness: analysis.get_primitive_endianness(),
+            });
+
+            if curr_bitfield_state.bits_seen % 8 == 0 {
+                bitfield_count += 1;
+                bitfield_state = None;
+            }
+        }
+
         Ok(Self {
             ident,
+            generics,
             data: field_data,
             validated,
             validated_order,
+            chunk_layout,
             nominated_next_header,
         })
     }
@@ -237,18 +443,22 @@ impl StructParseDeriveCtx {
         let ident = &self.ident;
         Ident::new(&format!("Valid{ident}"), ident.span())
     }
+
     pub fn ref_ident(&self) -> Ident {
         let ident = &self.ident;
         Ident::new(&format!("{ident}Ref"), ident.span())
     }
+
     pub fn mut_ident(&self) -> Ident {
         let ident = &self.ident;
         Ident::new(&format!("{ident}Mut"), ident.span())
     }
+
     pub fn pkt_ident(&self) -> Ident {
         let ident = &self.ident;
         Ident::new(&format!("{ident}Packet"), ident.span())
     }
+
     pub fn private_mod_ident(&self) -> Ident {
         let ident = &self.ident;
         Ident::new(&format!("_{ident}_ingot_impl"), ident.span())
@@ -302,21 +512,58 @@ impl StructParseDeriveCtx {
             }
         }
     }
-}
 
-struct FirstPass {
-    variant: FieldType,
-    base_args: FieldArgs,
-}
+    pub fn my_generic(&self) -> Option<&TypeParam> {
+        self.generics.params.first().and_then(|v| v.as_type_param())
+    }
 
-enum FieldType {
-    FixedWidth,
-    VarWidth,
-    Parsable,
+    pub fn gen_validated_struct_def(&self) -> TokenStream {
+        let validated_ident = self.validated_ident();
+        let private_mod_ident = self.private_mod_ident();
+        let local_ty_p: TypeParam;
+        let type_param = match self.my_generic() {
+            Some(g) => g,
+            None => {
+                local_ty_p = parse_quote! {V};
+                &local_ty_p
+            }
+        };
+        let type_param_ident = &type_param.ident;
+
+        let entries = self.chunk_layout.iter().map(|c| match c {
+            ChunkState::FixedWidth { .. } => {
+                let name = c.chunk_ty_name(&self.ident);
+                quote! {
+                    pub ::zerocopy::Ref<#type_param_ident, #private_mod_ident::#name>
+                }
+            },
+            ChunkState::VarWidth(i) | ChunkState::Parsable(i) => {
+                let ref_field = self.validated.get(i).expect("reference to a non-existent field").borrow();
+                let ty = &ref_field.user_ty;
+
+                quote! {#ty}
+            },
+        });
+
+        quote! {
+            pub struct #validated_ident<#type_param>(
+                #( #entries ),*
+            );
+        }
+    }
+
+    pub fn gen_zerocopy_substructs(&self) -> TokenStream {
+        let defs =
+            self.chunk_layout.iter().map(|v| v.chunk_zc_definition(self));
+
+        quote! {
+            #( #defs )*
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
-struct HybridField {
+struct Bitfield {
     ident: Ident,
     n_bits: usize,
     first_bit: usize,
@@ -361,7 +608,7 @@ impl ValidField {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum Endianness {
     Big,
     Little,
@@ -398,9 +645,10 @@ impl Endianness {
     }
 }
 
+#[derive(Clone, Debug)]
 enum ReprType {
-    Array { child: Box<FixedWidth>, length: usize },
-    Tuple { children: Vec<FixedWidth> },
+    Array { child: Box<FixedWidthAnalysis>, length: usize },
+    Tuple { children: Vec<FixedWidthAnalysis> },
     Primitive { base_ident: Ident, bits: usize, endian: Option<Endianness> },
 }
 
@@ -411,18 +659,19 @@ impl ReprType {
 }
 
 enum Analysed {
-    FixedWidth(FixedWidth),
+    FixedWidth(FixedWidthAnalysis),
     VarWidth(Expr),
     Parsable,
 }
 
-struct FixedWidth {
+#[derive(Clone, Debug)]
+struct FixedWidthAnalysis {
     cached_bits: usize,
     ty: ReprType,
     is_all_rust_primitives: bool,
 }
 
-impl FixedWidth {
+impl FixedWidthAnalysis {
     fn get_primitive_endianness(&self) -> Option<Endianness> {
         match self.ty {
             ReprType::Primitive { endian, .. } => endian,
@@ -436,7 +685,7 @@ struct ZcType {
     transformed: bool,
 }
 
-impl FixedWidth {
+impl FixedWidthAnalysis {
     fn from_ty(ty: &Type) -> Result<Self, syn::Error> {
         match ty {
             e @ Type::Array(TypeArray{ elem, len: Expr::Lit(ExprLit{lit: Lit::Int(l), ..}), .. })  => {
@@ -448,7 +697,7 @@ impl FixedWidth {
                     return Err(Error::new(e.span(), "array reprs may only contain `u8`s"));
                 }
 
-                Ok(FixedWidth {
+                Ok(FixedWidthAnalysis {
                     cached_bits: analysed.cached_bits * length,
                     is_all_rust_primitives: analysed.is_all_rust_primitives,
                     ty: ReprType::Array { child: analysed.into(), length },
@@ -473,21 +722,21 @@ impl FixedWidth {
                 }
 
                 // Ok(n_bits)
-                Ok(FixedWidth { cached_bits: n_bits, ty: ReprType::Tuple { children }, is_all_rust_primitives })
+                Ok(FixedWidthAnalysis { cached_bits: n_bits, ty: ReprType::Tuple { children }, is_all_rust_primitives })
             },
             Type::Path(a) => {
                 let b = a.path.require_ident()?;
                 bits_in_primitive(b)
             },
 
-            Type::Paren(a) => FixedWidth::from_ty(&a.elem),
+            Type::Paren(a) => FixedWidthAnalysis::from_ty(&a.elem),
 
             e => Err(Error::new(e.span(), "field must be constructed from a literal, tuple, or array of integral types")),
         }
     }
 }
 
-impl FixedWidth {
+impl FixedWidthAnalysis {
     fn to_zerocopy_type(&self) -> Option<ZcType> {
         // TODO: figure out hybrid types in here, too.
         match &self.ty {
@@ -553,7 +802,7 @@ impl FixedWidth {
     }
 }
 
-fn bits_in_primitive(ident: &Ident) -> Result<FixedWidth, syn::Error> {
+fn bits_in_primitive(ident: &Ident) -> Result<FixedWidthAnalysis, syn::Error> {
     let name = ident.to_string();
 
     // validation rules:
@@ -593,7 +842,7 @@ fn bits_in_primitive(ident: &Ident) -> Result<FixedWidth, syn::Error> {
 
     let ty = ReprType::Primitive { base_ident, bits, endian };
 
-    Ok(FixedWidth {
+    Ok(FixedWidthAnalysis {
         cached_bits: bits,
         ty,
         is_all_rust_primitives: bits >= 8
@@ -605,7 +854,10 @@ fn bits_in_primitive(ident: &Ident) -> Result<FixedWidth, syn::Error> {
 pub fn derive(input: IngotArgs) -> TokenStream {
     let x = StructParseDeriveCtx::new(input.clone()).unwrap();
 
-    let IngotArgs { ident, data } = input;
+    // eprintln!("{x:#?}");
+    eprintln!("{}", x.gen_zerocopy_substructs());
+
+    let IngotArgs { ident, data, generics } = input;
 
     let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
     let ref_ident = Ident::new(&format!("{ident}Ref"), ident.span());
@@ -647,7 +899,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
         // };
 
         // NOTE: can't analyse anything with a generic using this fn.
-        let analysis = match FixedWidth::from_ty(&underlying_ty) {
+        let analysis = match FixedWidthAnalysis::from_ty(&underlying_ty) {
             Ok(v) => v,
             Err(v) => return v.into_compile_error().into(),
         };
@@ -751,7 +1003,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
     #[derive(Clone, Debug)]
     struct HyState {
         bits_seen: usize,
-        field_data: Rc<RefCell<HybridField>>,
+        field_data: Rc<RefCell<Bitfield>>,
     }
 
     // TODO: partition based on var-width fields.
@@ -783,7 +1035,7 @@ pub fn derive(input: IngotArgs) -> TokenStream {
 
             let hybrid_state = hybrid_field.get_or_insert_with(|| HyState {
                 bits_seen: 0,
-                field_data: Rc::new(RefCell::new(HybridField {
+                field_data: Rc::new(RefCell::new(Bitfield {
                     ident: ty_ident.clone(),
                     n_bits: 0,
                     first_bit: field.first_bit,
