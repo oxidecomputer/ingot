@@ -32,7 +32,12 @@ impl PrimitiveInBitfield {
         whole_bytes + if self.n_bits % 8 != 0 { 1 } else { 0 }
     }
 
-    fn get_set_body(&self, field: &ValidField, op: FieldOp) -> TokenStream {
+    fn get_set_body(&self, field: &ValidField2, op: FieldOp) -> TokenStream {
+        let FieldState::FixedWidth { underlying_ty, .. } = &field.state else {
+            panic!(
+                "tried to compute bitfield get/set on non-fixedwidth field."
+            );
+        };
         // NOTE: we might be able to optimise this by just reading the largest
         // possible int we can and fixing it up, but the endianness considerations
         // are finicky to say the least.
@@ -91,8 +96,6 @@ impl PrimitiveInBitfield {
         let first_byte = self.first_byte();
         let last_byte_ex = self.last_byte_exclusive();
 
-        let target_ty = &field.repr;
-
         let conv_frag = match (op, self.n_bits) {
             (FieldOp::Get, n) if n < 8 => {
                 quote! { in_bytes[0] }
@@ -102,7 +105,7 @@ impl PrimitiveInBitfield {
                     panic!("u>8 without known endian")
                 };
                 let method = e.std_from_bytes_method();
-                quote! { #target_ty::#method(in_bytes) }
+                quote! { #underlying_ty::#method(in_bytes) }
             }
             (FieldOp::Set, n) if n < 8 => {
                 quote! { [val_raw] }
@@ -112,7 +115,7 @@ impl PrimitiveInBitfield {
                     panic!("u>8 without known endian")
                 };
                 let method = e.std_to_bytes_method();
-                quote! { #target_ty::#method(val) }
+                quote! { #underlying_ty::#method(val) }
             }
         };
 
@@ -234,8 +237,6 @@ impl PrimitiveInBitfield {
                     (self.n_bits / 8) + ((self.n_bits % 8) != 0) as usize;
                 let bs_len = self.byteslice_len();
                 byte_stores.push(quote! {
-                    #[cfg(test)]
-                    std::eprintln!("iter {} vs. {} vs {}", #needed_bytes, #n_repr_bytes, #bs_len);
                     let last_el = slice.len() - 1;
                 });
 
@@ -298,60 +299,30 @@ impl PrimitiveInBitfield {
         }
 
         let read_from = self.parent_field.borrow().ident.clone();
-        let chunk = syn::Index::from(field.sub_ref_idx);
 
         match op {
             FieldOp::Get => quote! {
                 let mut in_bytes = [0u8; #needed_bytes];
-                let slice = &self.#chunk.#read_from[#first_byte..#last_byte_ex];
+                let slice = &self.#read_from[#first_byte..#last_byte_ex];
 
                 #( #byte_reads )*
-
-                #[cfg(test)]
-                {
-                    std::eprintln!("---");
-                    std::eprintln!("{} {} {:08b} {:08b} {}", #left_overspill, #right_overspill, #general_mask, #last_mask, #general_shift_amt);
-                    std::eprintln!("{in_bytes:x?}");
-                    // std::eprintln!("{in_bytes:02x}");
-                }
 
                 let val = #conv_frag;
             },
             FieldOp::Set => quote! {
-                #[cfg(test)]
-                {
-                    std::eprintln!("BEFORE ---");
-
-                    std::eprintln!("{:08b} {:08b}", #left_include_mask, #left_exclude_mask);
-                    std::eprintln!("{:08b} {:08b}", #right_include_mask, #right_exclude_mask);
-                    std::eprintln!("{:x?}", self.#chunk.#read_from);
-                }
                 let val_as_bytes = #conv_frag;
-                let slice: &mut [u8] = &mut self.#chunk.#read_from[#first_byte..#last_byte_ex];
-
-                #[cfg(test)]
-                {
-                    std::eprintln!("val {val_as_bytes:x?}");
-                    std::eprintln!("{slice:x?}");
-                }
+                let slice: &mut [u8] = &mut self.#read_from[#first_byte..#last_byte_ex];
 
                 #( #byte_stores )*;
-
-                #[cfg(test)]
-                {
-                    std::eprintln!("AFTER ---");
-                    std::eprintln!("{slice:x?}");
-                    std::eprintln!("{:x?}", &self.#chunk.#read_from[..]);
-                }
             },
         }
     }
 
-    pub fn get(&self, field: &ValidField) -> TokenStream {
+    pub fn get(&self, field: &ValidField2) -> TokenStream {
         self.get_set_body(field, FieldOp::Get)
     }
 
-    pub fn set(&self, field: &ValidField) -> TokenStream {
+    pub fn set(&self, field: &ValidField2) -> TokenStream {
         self.get_set_body(field, FieldOp::Set)
     }
 

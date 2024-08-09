@@ -133,7 +133,7 @@ impl ValidField2 {
             .0
             .iter()
             .filter_map(|id| ctx.validated.get(&id).map(|v| (id, v)))
-            .filter(|(id, v)| v.borrow().sub_field_idx < self.sub_field_idx)
+            .filter(|(_, v)| v.borrow().sub_field_idx < self.sub_field_idx)
             .map(|(id, v)| {
                 let field = v.borrow();
                 let parent_to_query = Ident::new(
@@ -278,6 +278,73 @@ impl ChunkState {
                     #[repr(C, packed)]
                     pub struct #ty_ident {
                         #( #zc_fields ),*
+                    }
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn chunk_methods_definition(
+        &self,
+        ctx: &StructParseDeriveCtx,
+    ) -> Option<TokenStream> {
+        match self {
+            ChunkState::FixedWidth { fields, .. } => {
+                let ty_ident = self
+                    .chunk_ty_name(&ctx.ident)
+                    .expect("fixed width chunks must gen named types");
+
+                let mut fns = vec![];
+                for select_field in
+                    fields.iter().map(|v| ctx.validated.get(v).unwrap())
+                {
+                    let select_field = select_field.borrow();
+                    let ValidField2 { ref user_ty, .. } = *select_field;
+                    let get_name = select_field.getter_name();
+                    let mut_name = select_field.setter_name();
+
+                    match &select_field.state {
+                        FieldState::FixedWidth {
+                            underlying_ty,
+                            bitfield_info: Some(bf),
+                            ..
+                        } => {
+                            let do_into = user_ty == underlying_ty;
+                            let (get_conv, set_conv) = if do_into {
+                                (quote! {val.into()}, quote! {val})
+                            } else {
+                                (
+                                    quote! {::ingot_types::NetworkRepr::from_network(val)},
+                                    quote! {::ingot_types::NetworkRepr::to_network(val)},
+                                )
+                            };
+
+                            let subty_get = bf.get(&select_field);
+                            fns.push(quote! {
+                                #[inline]
+                                fn #get_name(&self) -> #user_ty {
+                                    #subty_get
+                                    #get_conv
+                                }
+                            });
+
+                            let subty_set = bf.set(&select_field);
+                            fns.push(quote! {
+                                #[inline]
+                                fn #mut_name(&mut self, val: #user_ty) {
+                                    let val_raw = #set_conv;
+                                    #subty_set
+                                }
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+
+                Some(quote! {
+                    impl #ty_ident {
+                        #( #fns )*
                     }
                 })
             }
@@ -729,10 +796,23 @@ impl StructParseDeriveCtx {
         }
     }
 
+    pub fn gen_zerocopy_methods(&self) -> TokenStream {
+        let mut blocks = vec![];
+
+        for chunk in &self.chunk_layout {
+            if let Some(impl_block) = chunk.chunk_methods_definition(self) {
+                blocks.push(impl_block)
+            }
+        }
+
+        quote! {#( #blocks )*}
+    }
+
     /// Generate internal types / trait impls used as part of the borrowed repr.
     pub fn gen_zc_module(&self) -> TokenStream {
         let private_mod_ident = self.private_mod_ident();
         let inner_structs = self.gen_zerocopy_substructs();
+        let substruct_methods = self.gen_zerocopy_methods();
 
         quote! {
             #[allow(non_snake_case)]
@@ -741,10 +821,13 @@ impl StructParseDeriveCtx {
 
                 #inner_structs
 
+                #substruct_methods
+
                 // impl<V: ::zerocopy::ByteSlice> #ref_ident for #validated_ident<V> {
                 //     #( #trait_impls )*
                 // }
 
+                // NOTE: I now need to be generic'd.
                 // impl #ref_ident for #ident {
                 //     #( #direct_trait_impls )*
                 // }
@@ -753,6 +836,7 @@ impl StructParseDeriveCtx {
                 //     #( #trait_mut_impls )*
                 // }
 
+                // NOTE: I now need to be generic'd.
                 // impl #mut_ident for #ident {
                 //     #( #direct_trait_mut_impls )*
                 // }
@@ -1653,15 +1737,15 @@ pub fn derive(input: IngotArgs) -> TokenStream {
                     self.#field_ident
                 }
             });
-            let subty_get = hybrid.get(field);
-            trait_impls.push(quote! {
-                #[inline]
-                fn #get_name(&self) -> #user_ty {
-                    // todo!("getters on subtypes not yet done")
-                    #subty_get
-                    #get_conv
-                }
-            });
+            // let subty_get = hybrid.get(field);
+            // trait_impls.push(quote! {
+            //     #[inline]
+            //     fn #get_name(&self) -> #user_ty {
+            //         // todo!("getters on subtypes not yet done")
+            //         #subty_get
+            //         #get_conv
+            //     }
+            // });
 
             // zc_impls.push(quote! {
             //     #[derive(zerocopy::IntoBytes, Clone, Debug, zerocopy::FromBytes, zerocopy::Unaligned, zerocopy::Immutable, zerocopy::KnownLayout)]
@@ -1681,14 +1765,14 @@ pub fn derive(input: IngotArgs) -> TokenStream {
                     self.#field_ident = val;
                 }
             });
-            let subty_set = hybrid.set(field);
-            trait_mut_impls.push(quote! {
-                #[inline]
-                fn #mut_name(&mut self, val: #user_ty) {
-                    let val_raw = #set_conv;
-                    #subty_set
-                }
-            });
+            // let subty_set = hybrid.set(field);
+            // trait_mut_impls.push(quote! {
+            //     #[inline]
+            //     fn #mut_name(&mut self, val: #user_ty) {
+            //         let val_raw = #set_conv;
+            //         #subty_set
+            //     }
+            // });
 
             packet_impls.push(quote! {
                 #[inline]
