@@ -1,5 +1,4 @@
 use bitfield::PrimitiveInBitfield;
-use core::borrow;
 use darling::ast;
 use darling::ast::Fields;
 use darling::ast::GenericParamExt;
@@ -9,17 +8,16 @@ use darling::FromMeta;
 use proc_macro2::Ident;
 use proc_macro2::Span;
 use proc_macro2::TokenStream;
-use proc_macro2::TokenTree;
 use quote::quote;
 use quote::ToTokens;
-use quote::TokenStreamExt;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
-use syn::parse::Parse;
 use syn::parse_quote;
 use syn::spanned::Spanned;
+use syn::visit::Visit;
 use syn::Error;
 use syn::Expr;
 use syn::ExprLit;
@@ -92,6 +90,73 @@ impl ValidField2 {
 
     fn setter_name(&self) -> Ident {
         Ident::new(&format!("set_{}", self.ident), self.ident.span())
+    }
+
+    fn is_in_bitfield(&self) -> bool {
+        match self.state {
+            FieldState::FixedWidth { bitfield_info: Some(_), .. } => true,
+            _ => false,
+        }
+    }
+
+    fn length_fn(&self) -> Option<&Expr> {
+        match &self.state {
+            FieldState::FixedWidth { .. } => None,
+            FieldState::VarWidth { length_fn } => Some(&length_fn),
+            FieldState::Parsable { length_fn } => length_fn.as_ref(),
+        }
+    }
+
+    fn resolved_length_fn(
+        &self,
+        ctx: &StructParseDeriveCtx,
+    ) -> Option<(TokenStream, &Expr)> {
+        // basic idea:
+        //  if no length fn, we're fine.
+        //  otherwise find all idents which exist *in a prior chunk*.
+        //  generate a preamble which defines local variables with those names.
+        let length_fn = self.length_fn()?;
+
+        #[derive(Default)]
+        struct IdentVisitor<'ast>(HashSet<&'ast Ident>);
+
+        impl<'ast> Visit<'ast> for IdentVisitor<'ast> {
+            fn visit_ident(&mut self, i: &'ast Ident) {
+                self.0.insert(i);
+            }
+        }
+
+        let mut vis = IdentVisitor::default();
+        vis.visit_expr(&length_fn);
+
+        let defns = vis
+            .0
+            .iter()
+            .filter_map(|id| ctx.validated.get(&id).map(|v| (id, v)))
+            .filter(|(id, v)| v.borrow().sub_field_idx < self.sub_field_idx)
+            .map(|(id, v)| {
+                let field = v.borrow();
+                let parent_to_query = Ident::new(
+                    &format!("v{}", field.sub_field_idx),
+                    Span::call_site(),
+                );
+
+                if field.is_in_bitfield() {
+                    quote! {
+                        let #id = #parent_to_query.#id();
+                    }
+                } else {
+                    quote! {
+                        let #id = #parent_to_query.#id;
+                    }
+                }
+            });
+
+        let preamble = quote! {
+            #( #defns )*
+        };
+
+        Some((preamble, length_fn))
     }
 }
 
@@ -706,9 +771,9 @@ impl StructParseDeriveCtx {
             let field = field.borrow();
             let get_name = field.getter_name();
             let mut_name = field.setter_name();
+            let field_ref = field.ref_name();
+            let field_mut = field.mut_name();
             let ValidField2 { ref ident, ref user_ty, ref state, .. } = *field;
-            let field_ref = Ident::new(&format!("{ident}_ref"), ident.span());
-            let field_mut = Ident::new(&format!("{ident}_mut"), ident.span());
 
             match state {
                 FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
@@ -776,17 +841,12 @@ impl StructParseDeriveCtx {
             let field = field.borrow();
             let get_name = field.getter_name();
             let mut_name = field.setter_name();
+            let field_ref = field.ref_name();
+            let field_mut = field.mut_name();
             let ValidField2 { ref ident, ref user_ty, ref state, .. } = *field;
-            let field_ref = Ident::new(&format!("{ident}_ref"), ident.span());
-            let field_mut = Ident::new(&format!("{ident}_mut"), ident.span());
 
             match state {
-                FieldState::FixedWidth {
-                    underlying_ty,
-                    bitfield_info: Some(_),
-                    analysis,
-                    first_bit_in_chunk,
-                } => {
+                FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
                     packet_impls.push(quote! {
                         #[inline]
                         fn #get_name(&self) -> #user_ty {
@@ -806,12 +866,7 @@ impl StructParseDeriveCtx {
                         }
                     });
                 }
-                FieldState::FixedWidth {
-                    underlying_ty,
-                    analysis,
-                    first_bit_in_chunk,
-                    ..
-                } => {
+                FieldState::FixedWidth { underlying_ty, analysis, .. } => {
                     let do_into = user_ty == underlying_ty;
                     let zc_ty = analysis.to_zerocopy_type();
                     let allow_ref_access = do_into
@@ -905,24 +960,71 @@ impl StructParseDeriveCtx {
         let ident = &self.ident;
         let validated_ident = self.validated_ident();
 
+        let mut segment_fragments = vec![];
+        let mut els = vec![];
+        for (i, chunk) in self.chunk_layout.iter().enumerate() {
+            let val_ident = Ident::new(&format!("v{i}"), Span::call_site());
+            match chunk {
+                ChunkState::FixedWidth { size_bytes, .. } => {
+                    segment_fragments.push(quote! {
+                        if from.as_ref().len() < #size_bytes {
+                            return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
+                        }
+
+                        let (l, from) = from.split_at(#size_bytes);
+                        let #val_ident = ::zerocopy::Ref::from_bytes(l)
+                            .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
+                    });
+                }
+                ChunkState::VarWidth(id) => {
+                    let field = self.validated[id].borrow();
+
+                    let (preamble, len_expr) =
+                        field.resolved_length_fn(self).unwrap();
+
+                    segment_fragments.push(quote! {
+                        #preamble
+
+                        let chunk_len = (#len_expr) as usize;
+                        if from.as_ref().len() < chunk_len {
+                            return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
+                        }
+
+                        let (varlen, from) = from.split_at(chunk_len);
+                        let #val_ident = varlen.into();
+                    });
+                }
+                ChunkState::Parsable(id) => {
+                    let field = self.validated[id].borrow();
+                    let user_ty = &field.user_ty;
+
+                    // TODO: probably needs more care around generics.
+                    //       to say nothing of actually calling in `parse_choice`
+                    //       if ext_hdr'd.
+                    segment_fragments.push(quote! {
+                        let (#val_ident, from) = #user_ty::parse()?;
+                    });
+                }
+            }
+            els.push(val_ident);
+        }
+
         quote! {
             impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #validated_ident<V> {
                 type Target = Self;
                 fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
                     use ::ingot_types::Header;
 
-                    // TODO!
                     if from.as_ref().len() < #ident::MINIMUM_LENGTH {
-                        ::core::result::Result::Err(::ingot_types::ParseError::TooSmall)
-                    } else {
-                        let (l, r) = from.split_at(#ident::MINIMUM_LENGTH);
-                        let v0 = ::zerocopy::Ref::from_bytes(l)
-                            .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
-                        ::core::result::Result::Ok((
-                            #validated_ident(v0),
-                            r,
-                        ))
+                        return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
                     }
+
+                    #( #segment_fragments )*
+
+                    ::core::result::Result::Ok((
+                        #validated_ident(#( #els ),*),
+                        from,
+                    ))
                 }
             }
         }
