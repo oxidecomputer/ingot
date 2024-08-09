@@ -22,6 +22,36 @@ pub enum Packet<O, B> {
     Raw(B),
 }
 
+impl<O, B> Packet<O, B> {
+    pub fn repr(&self) -> Option<&O> {
+        match self {
+            Packet::Repr(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    pub fn repr_mut(&mut self) -> Option<&mut O> {
+        match self {
+            Packet::Repr(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    pub fn raw(&self) -> Option<&B> {
+        match self {
+            Packet::Raw(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn raw_mut(&mut self) -> Option<&mut B> {
+        match self {
+            Packet::Raw(b) => Some(b),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(feature = "alloc")]
 pub type VarBytes<V> = Packet<Vec<u8>, V>;
 #[cfg(not(feature = "alloc"))]

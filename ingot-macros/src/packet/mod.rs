@@ -1,4 +1,5 @@
 use bitfield::PrimitiveInBitfield;
+use core::borrow;
 use darling::ast;
 use darling::ast::Fields;
 use darling::ast::GenericParamExt;
@@ -74,6 +75,24 @@ struct ValidField2 {
 
     // per-el state.
     state: FieldState,
+}
+
+impl ValidField2 {
+    fn getter_name(&self) -> &Ident {
+        &self.ident
+    }
+
+    fn ref_name(&self) -> Ident {
+        Ident::new(&format!("{}_ref", self.ident), self.ident.span())
+    }
+
+    fn mut_name(&self) -> Ident {
+        Ident::new(&format!("{}_mut", self.ident), self.ident.span())
+    }
+
+    fn setter_name(&self) -> Ident {
+        Ident::new(&format!("set_{}", self.ident), self.ident.span())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -471,66 +490,75 @@ impl StructParseDeriveCtx {
         let ident = &self.ident;
         let validated_ident = self.validated_ident();
 
-        if let Some(field_ident) = &self.nominated_next_header {
+        let (denom, ref_body, owned_body) = if let Some(field_ident) =
+            &self.nominated_next_header
+        {
             let user_ty =
                 &self.validated.get(&field_ident).unwrap().borrow().user_ty;
+            (
+                quote! {#user_ty},
+                quote! {::core::result::Result::Ok(self.#field_ident())},
+                quote! {::core::result::Result::Ok(self.#field_ident)},
+            )
+        } else {
+            let no_val = quote! {::core::result::Result::Err(::ingot_types::ParseError::NoHint)};
+            (quote! {()}, no_val.clone(), no_val)
+        };
+
+        let owned_impl = if let Some(g) = self.my_explicit_generic() {
             quote! {
-                impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
-                    type Denom = #user_ty;
+                impl<#g> ::ingot_types::NextLayer for #ident<#g> {
+                    type Denom = #denom;
 
                     #[inline]
                     fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                        ::core::result::Result::Ok(self.#field_ident())
-                    }
-                }
-
-                impl ::ingot_types::NextLayer for #ident {
-                    type Denom = #user_ty;
-
-                    #[inline]
-                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                        ::core::result::Result::Ok(self.#field_ident)
+                        #owned_body
                     }
                 }
             }
         } else {
             quote! {
-                impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
-                    type Denom = ();
-
-                    #[inline]
-                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                        ::core::result::Result::Err(::ingot_types::ParseError::NoHint)
-                    }
-                }
-
                 impl ::ingot_types::NextLayer for #ident {
-                    type Denom = ();
+                    type Denom = #denom;
 
                     #[inline]
                     fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
-                        ::core::result::Result::Err(::ingot_types::ParseError::NoHint)
+                        #owned_body
                     }
                 }
             }
+        };
+
+        quote! {
+            impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
+                type Denom = #denom;
+
+                #[inline]
+                fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                    #ref_body
+                }
+            }
+
+            #owned_impl
         }
     }
 
-    pub fn my_generic(&self) -> Option<&TypeParam> {
+    /// Helper to return a generic field to use on borrowed types.
+    pub fn my_explicit_generic(&self) -> Option<&TypeParam> {
         self.generics.params.first().and_then(|v| v.as_type_param())
     }
 
+    /// Helper to return a generic field to use on borrowed types.
+    pub fn my_generic(&self) -> TypeParam {
+        self.my_explicit_generic().cloned().unwrap_or_else(|| parse_quote! {V})
+    }
+
+    /// Generate a tuple struct containing the chunks which a parsable
+    /// struct is decomposed into.
     pub fn gen_validated_struct_def(&self) -> TokenStream {
         let validated_ident = self.validated_ident();
         let private_mod_ident = self.private_mod_ident();
-        let local_ty_p: TypeParam;
-        let type_param = match self.my_generic() {
-            Some(g) => g,
-            None => {
-                local_ty_p = parse_quote! {V};
-                &local_ty_p
-            }
-        };
+        let type_param = self.my_generic();
         let type_param_ident = &type_param.ident;
 
         let entries = self.chunk_layout.iter().map(|c| match c {
@@ -555,7 +583,7 @@ impl StructParseDeriveCtx {
         }
     }
 
-    /// Generates
+    /// Generates private zerocopy struct definitions for all fixedwidth chunks.
     pub fn gen_zerocopy_substructs(&self) -> TokenStream {
         let defs =
             self.chunk_layout.iter().map(|v| v.chunk_zc_definition(self));
@@ -600,6 +628,29 @@ impl StructParseDeriveCtx {
             }
         }
 
+        // TODO: assuming at most one generic
+        let owned_impl = if let Some(g) = self.my_explicit_generic() {
+            quote! {
+                impl<#g> ::ingot_types::Header for #ident<#g> {
+                    const MINIMUM_LENGTH: usize = #base_bytes;
+
+                    fn packet_length(&self) -> usize {
+                        #( #owned_len_checks )+*
+                    }
+                }
+            }
+        } else {
+            quote! {
+                impl ::ingot_types::Header for #ident {
+                    const MINIMUM_LENGTH: usize = #base_bytes;
+
+                    fn packet_length(&self) -> usize {
+                        #( #owned_len_checks )+*
+                    }
+                }
+            }
+        };
+
         quote! {
             impl<V> ::ingot_types::Header for #validated_ident<V> {
                 const MINIMUM_LENGTH: usize = #base_bytes;
@@ -609,13 +660,7 @@ impl StructParseDeriveCtx {
                 }
             }
 
-            impl ::ingot_types::Header for #ident {
-                const MINIMUM_LENGTH: usize = #base_bytes;
-
-                fn packet_length(&self) -> usize {
-                    #( #owned_len_checks )+*
-                }
-            }
+            #owned_impl
         }
     }
 
@@ -649,13 +694,255 @@ impl StructParseDeriveCtx {
             }
         }
     }
+
+    /// Generate the top level trait for reading/writing to an owned/borrowed packet.
+    pub fn gen_trait_def(&self) -> TokenStream {
+        let ref_ident = self.ref_ident();
+        let mut_ident = self.mut_ident();
+        let mut trait_defs = vec![];
+        let mut mut_trait_defs = vec![];
+
+        for field in &self.validated_order {
+            let field = field.borrow();
+            let get_name = field.getter_name();
+            let mut_name = field.setter_name();
+            let ValidField2 { ref ident, ref user_ty, ref state, .. } = *field;
+            let field_ref = Ident::new(&format!("{ident}_ref"), ident.span());
+            let field_mut = Ident::new(&format!("{ident}_mut"), ident.span());
+
+            match state {
+                FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
+                    trait_defs.push(quote! {
+                        fn #ident(&self) -> #user_ty;
+                    });
+                    mut_trait_defs.push(quote! {
+                        fn #mut_name(&mut self, val: #user_ty);
+                    });
+                }
+                FieldState::FixedWidth { underlying_ty, analysis, .. } => {
+                    let do_into = user_ty == underlying_ty;
+                    let zc_ty = analysis.to_zerocopy_type();
+                    let allow_ref_access = do_into
+                        && zc_ty.map(|v| !v.transformed).unwrap_or_default();
+
+                    trait_defs.push(quote! {
+                        fn #get_name(&self) -> #user_ty;
+                    });
+                    mut_trait_defs.push(quote! {
+                        fn #mut_name(&mut self, val: #user_ty);
+                    });
+
+                    if allow_ref_access {
+                        trait_defs.push(quote! {
+                            fn #field_ref(&self) -> &#user_ty;
+                        });
+                        mut_trait_defs.push(quote! {
+                            fn #field_mut(&mut self) -> &mut #user_ty;
+                        });
+                    }
+                }
+                // Note: this case is predicated on the fact that we cannot
+                // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                    trait_defs.push(quote! {
+                        fn #field_ref(&self) -> &#user_ty;
+                    });
+                    mut_trait_defs.push(quote! {
+                        fn #field_mut(&mut self) -> &mut #user_ty;
+                    });
+                }
+            }
+        }
+
+        quote! {
+            pub trait #ref_ident {
+                #( #trait_defs )*
+            }
+
+            pub trait #mut_ident {
+                #( #mut_trait_defs )*
+            }
+        }
+    }
+
+    /// Generate impls of the top level trait for reading/writing to the Packet type.
+    pub fn gen_trait_pkt_impls(&self) -> TokenStream {
+        let ref_ident = self.ref_ident();
+        let mut_ident = self.mut_ident();
+        let mut packet_impls = vec![];
+        let mut packet_mut_impls = vec![];
+
+        for field in &self.validated_order {
+            let field = field.borrow();
+            let get_name = field.getter_name();
+            let mut_name = field.setter_name();
+            let ValidField2 { ref ident, ref user_ty, ref state, .. } = *field;
+            let field_ref = Ident::new(&format!("{ident}_ref"), ident.span());
+            let field_mut = Ident::new(&format!("{ident}_mut"), ident.span());
+
+            match state {
+                FieldState::FixedWidth {
+                    underlying_ty,
+                    bitfield_info: Some(_),
+                    analysis,
+                    first_bit_in_chunk,
+                } => {
+                    packet_impls.push(quote! {
+                        #[inline]
+                        fn #get_name(&self) -> #user_ty {
+                            match self {
+                                ::ingot_types::Packet::Repr(o) => o.#get_name(),
+                                ::ingot_types::Packet::Raw(b) => b.#get_name(),
+                            }
+                        }
+                    });
+                    packet_mut_impls.push(quote! {
+                        #[inline]
+                        fn #mut_name(&mut self, val: #user_ty) {
+                            match self {
+                                ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
+                                ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
+                            };
+                        }
+                    });
+                }
+                FieldState::FixedWidth {
+                    underlying_ty,
+                    analysis,
+                    first_bit_in_chunk,
+                    ..
+                } => {
+                    let do_into = user_ty == underlying_ty;
+                    let zc_ty = analysis.to_zerocopy_type();
+                    let allow_ref_access = do_into
+                        && zc_ty.map(|v| !v.transformed).unwrap_or_default();
+
+                    packet_impls.push(quote! {
+                        #[inline]
+                        fn #ident(&self) -> #user_ty {
+                            match self {
+                                ::ingot_types::Packet::Repr(o) => o.#ident(),
+                                ::ingot_types::Packet::Raw(b) => b.#ident(),
+                            }
+                        }
+                    });
+                    packet_mut_impls.push(quote! {
+                        #[inline]
+                        fn #mut_name(&mut self, val: #user_ty) {
+                            match self {
+                                ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
+                                ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
+                            };
+                        }
+                    });
+
+                    if allow_ref_access {
+                        packet_impls.push(quote! {
+                            #[inline]
+                            fn #field_ref(&self) -> &#user_ty {
+                                match self {
+                                    ::ingot_types::Packet::Repr(o) => o.#field_ref(),
+                                    ::ingot_types::Packet::Raw(b) => b.#field_ref(),
+                                }
+                            }
+                        });
+                        packet_mut_impls.push(quote! {
+                            #[inline]
+                            fn #field_mut(&mut self) -> &mut #user_ty {
+                                match self {
+                                    ::ingot_types::Packet::Repr(o) => o.#field_mut(),
+                                    ::ingot_types::Packet::Raw(b) => b.#field_mut(),
+                                }
+                            }
+                        });
+                    }
+                }
+                // Note: this case is predicated on the fact that we cannot
+                // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                    packet_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> &#user_ty {
+                            match self {
+                                ::ingot_types::Packet::Repr(o) => o.#field_ref(),
+                                ::ingot_types::Packet::Raw(b) => b.#field_ref(),
+                            }
+                        }
+                    });
+                    packet_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> &mut #user_ty {
+                            match self {
+                                ::ingot_types::Packet::Repr(o) => o.#field_mut(),
+                                ::ingot_types::Packet::Raw(b) => b.#field_mut(),
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        quote! {
+            impl<O, B> #ref_ident for ::ingot_types::Packet<O, B>
+            where
+                O: #ref_ident,
+                B: #ref_ident,
+            {
+                #( #packet_impls )*
+            }
+
+            impl<O, B> #mut_ident for ::ingot_types::Packet<O, B>
+            where
+                O: #mut_ident,
+                B: #mut_ident,
+            {
+                #( #packet_mut_impls )*
+            }
+        }
+    }
+
+    pub fn gen_parse_impl(&self) -> TokenStream {
+        let ident = &self.ident;
+        let validated_ident = self.validated_ident();
+
+        quote! {
+            impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #validated_ident<V> {
+                type Target = Self;
+                fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
+                    use ::ingot_types::Header;
+
+                    // TODO!
+                    if from.as_ref().len() < #ident::MINIMUM_LENGTH {
+                        ::core::result::Result::Err(::ingot_types::ParseError::TooSmall)
+                    } else {
+                        let (l, r) = from.split_at(#ident::MINIMUM_LENGTH);
+                        let v0 = ::zerocopy::Ref::from_bytes(l)
+                            .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
+                        ::core::result::Result::Ok((
+                            #validated_ident(v0),
+                            r,
+                        ))
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl ToTokens for StructParseDeriveCtx {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        let ident = &self.ident;
+        let validated_ident = self.validated_ident();
+        let pkt_ident = self.pkt_ident();
+
         let valid_struct = self.gen_validated_struct_def();
         let header_trait_impls = self.gen_header_impls();
+
+        let trait_def = self.gen_trait_def();
+        let ingot_pkt_impls = self.gen_trait_pkt_impls();
+
         let zc_mod = self.gen_zc_module();
+        let parse_impl = self.gen_parse_impl();
         let next_layer = self.gen_next_header_lookup();
 
         tokens.extend(quote! {
@@ -663,76 +950,35 @@ impl ToTokens for StructParseDeriveCtx {
 
             #header_trait_impls
 
-            // ---
-            // gen_packet_trait_defs
-            // ---
-            // pub trait #ref_ident {
-            //     #( #trait_defs )*
-            // }
-
-            // pub trait #mut_ident {
-            //     #( #trait_mut_defs )*
-            // }
+            #trait_def
 
             #zc_mod
 
-            // impl<O, B> #ref_ident for ::ingot_types::Packet<O, B>
-            // where
-            //     O: #ref_ident,
-            //     B: #ref_ident,
-            // {
-            //     #( #packet_impls )*
-            // }
+            #ingot_pkt_impls
 
-            // impl<O, B> #mut_ident for ::ingot_types::Packet<O, B>
-            // where
-            //     O: #mut_ident,
-            //     B: #mut_ident,
-            // {
-            //     #( #packet_mut_impls )*
-            // }
+            pub type #pkt_ident<V> = ::ingot_types::Packet<#ident, #validated_ident<V>>;
 
-            // impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #validated_ident<V> {
-            //     type BufType = V;
-            // }
+            impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #validated_ident<V> {
+                type BufType = V;
+            }
 
-            // impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #validated_ident<V> {
-            //     type Target = Self;
-            //     fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
-            //         use ::ingot_types::Header;
+            impl<V> ::ingot_types::HasRepr for #validated_ident<V> {
+                type ReprType = #ident;
+            }
 
-            //         // TODO!
-            //         if from.as_ref().len() < #ident::MINIMUM_LENGTH {
-            //             ::core::result::Result::Err(::ingot_types::ParseError::TooSmall)
-            //         } else {
-            //             let (l, r) = from.split_at(#ident::MINIMUM_LENGTH);
-            //             let v0 = ::zerocopy::Ref::from_bytes(l)
-            //                 .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
-            //             ::core::result::Result::Ok((
-            //                 #validated_ident(v0),
-            //                 r,
-            //             ))
-            //         }
-            //     }
-            // }
+            impl<V, T> ::core::convert::From<#validated_ident<V>> for ::ingot_types::Packet<T, #validated_ident<V>> {
+                fn from(value: #validated_ident<V>) -> Self {
+                    ::ingot_types::Packet::Raw(value)
+                }
+            }
 
-            // impl<V, T> ::core::convert::From<#validated_ident<V>> for ::ingot_types::Packet<T, #validated_ident<V>> {
-            //     fn from(value: #validated_ident<V>) -> Self {
-            //         ::ingot_types::Packet::Raw(value)
-            //     }
-            // }
+            impl<T> ::core::convert::From<#ident> for ::ingot_types::Packet<#ident, T> {
+                fn from(value: #ident) -> Self {
+                    ::ingot_types::Packet::Repr(value)
+                }
+            }
 
-            // impl<T> ::core::convert::From<#ident> for ::ingot_types::Packet<#ident, T> {
-            //     fn from(value: #ident) -> Self {
-            //         ::ingot_types::Packet::Repr(value)
-            //     }
-            // }
-
-            // pub type #pkt_ident<V> = ::ingot_types::Packet<#ident, #validated_ident<V>>;
-
-            // impl<V> ::ingot_types::HasRepr for #validated_ident<V> {
-            //     type ReprType = #ident;
-            // }
+            #parse_impl
 
             #next_layer
         });
