@@ -243,7 +243,8 @@ pub struct Ipv4<V> {
     pub destination: Ipv4Addr,
 
     // #[ingot(extension(len = "self.ihl * 4 - 20"))]
-    #[ingot(var_len = "ihl * 4 - 20")]
+    // #[ingot(var_len = "(ihl as usize * 4).saturating_sub(20)")]
+    #[ingot(var_len = "(ihl * 4).saturating_sub(20)")]
     pub options: VarBytes<V>,
 }
 
@@ -323,7 +324,8 @@ pub struct Udp {
 }
 
 #[derive(Ingot)]
-pub struct Geneve<V> {
+// pub struct Geneve<V> {
+pub struct Geneve {
     // #[ingot(valid = 0)]
     pub version: u2,
     pub opt_len: u6,
@@ -334,11 +336,20 @@ pub struct Geneve<V> {
     pub vni: u24be,
     // #[ingot(valid = 0)]
     pub reserved: u8,
-
-    #[ingot(var_len = "opt_len * 4")]
-    pub options: VarBytes<V>,
+    // #[ingot(var_len = "opt_len * 4")]
+    // pub options: VarBytes<V>,
     // #[ingot(extension)]
     // pub tunnel_opts: ???
+}
+
+trait Quack<T> {
+    fn b(&self) -> &VarBytes<T>;
+}
+
+impl<T> Quack<T> for Ipv4<T> {
+    fn b(&self) -> &VarBytes<T> {
+        &self.options
+    }
 }
 
 // #[derive(Ingot)]
@@ -356,42 +367,42 @@ pub struct Geneve<V> {
 
 // TODO: uncork above.
 
-#[choice(on = u16be)]
-pub enum L3 {
-    Ipv4 = 0x0800,
-    Ipv6 = 0x86dd,
-}
+// #[choice(on = u16be)]
+// pub enum L3 {
+//     Ipv4 = 0x0800,
+//     Ipv6 = 0x86dd,
+// }
 
-#[choice(on = u8)]
-pub enum L4 {
-    Tcp = 0x06,
-    Udp = 0x11,
-}
+// #[choice(on = u8)]
+// pub enum L4 {
+//     Tcp = 0x06,
+//     Udp = 0x11,
+// }
 
-#[derive(Parse)]
-pub struct UltimateChain<Q> {
-    pub eth: EthernetPacket<Q>,
-    pub l3: L3<Q>,
-    // l4: L4<Q>,
-    #[oxpopt(from = "L4<Q>")]
-    pub l4: UdpPacket<Q>,
-}
+// #[derive(Parse)]
+// pub struct UltimateChain<Q> {
+//     pub eth: EthernetPacket<Q>,
+//     pub l3: L3<Q>,
+//     // l4: L4<Q>,
+//     #[oxpopt(from = "L4<Q>")]
+//     pub l4: UdpPacket<Q>,
+// }
 
-fn test() {
-    let mut buf = [0u8; 1024];
-    let a: Option<UltimateChain<&mut [u8]>> = None;
-    let b: Option<UltimateChain<&[u8]>> = None;
-    let b: Option<UltimateChain<Vec<u8>>> = None;
+// fn test() {
+//     let mut buf = [0u8; 1024];
+//     let a: Option<UltimateChain<&mut [u8]>> = None;
+//     let b: Option<UltimateChain<&[u8]>> = None;
+//     let b: Option<UltimateChain<Vec<u8>>> = None;
 
-    struct A(u8, u8, u8, u8);
-    A { 0: 1, 1: 2, 3: 3, 2: 2 };
-}
+//     struct A(u8, u8, u8, u8);
+//     A { 0: 1, 1: 2, 3: 3, 2: 2 };
+// }
 
-pub fn parse_q<'a>(
-    a: &'a [u8],
-) -> Parsed2<UltimateChain<&'a [u8]>, OneChunk<&'a [u8]>> {
-    Parsed2::newy(OneChunk::from(a)).unwrap()
-}
+// pub fn parse_q<'a>(
+//     a: &'a [u8],
+// ) -> Parsed2<UltimateChain<&'a [u8]>, OneChunk<&'a [u8]>> {
+//     Parsed2::newy(OneChunk::from(a)).unwrap()
+// }
 
 // Now how do we do these? unsafe trait?
 

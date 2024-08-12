@@ -328,7 +328,7 @@ impl ChunkState {
                             let subty_get = bf.get(&select_field);
                             fns.push(quote! {
                                 #[inline]
-                                fn #get_name(&self) -> #user_ty {
+                                pub fn #get_name(&self) -> #user_ty {
                                     #subty_get
                                     #get_conv
                                 }
@@ -337,7 +337,7 @@ impl ChunkState {
                             let subty_set = bf.set(&select_field);
                             fns.push(quote! {
                                 #[inline]
-                                fn #mut_name(&mut self, val: #user_ty) {
+                                pub fn #mut_name(&mut self, val: #user_ty) {
                                     let val_raw = #set_conv;
                                     #subty_set
                                 }
@@ -768,7 +768,7 @@ impl StructParseDeriveCtx {
         // TODO: assuming at most one generic
         let owned_impl = if let Some(g) = self.my_explicit_generic() {
             quote! {
-                impl<#g> ::ingot_types::Header for #ident<#g> {
+                impl<#g: ::ingot_types::Chunk> ::ingot_types::Header for #ident<#g> {
                     const MINIMUM_LENGTH: usize = #base_bytes;
 
                     fn packet_length(&self) -> usize {
@@ -789,7 +789,7 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            impl<V> ::ingot_types::Header for #validated_ident<V> {
+            impl<V: ::ingot_types::Chunk> ::ingot_types::Header for #validated_ident<V> {
                 const MINIMUM_LENGTH: usize = #base_bytes;
 
                 fn packet_length(&self) -> usize {
@@ -822,6 +822,13 @@ impl StructParseDeriveCtx {
         let private_mod_ident = self.private_mod_ident();
         let inner_structs = self.gen_zerocopy_substructs();
         let substruct_methods = self.gen_zerocopy_methods();
+        let parse_impl = self.gen_parse_impl();
+
+        let (ref_def, mut_def) = if let Some(g) = self.my_explicit_generic() {
+            (quote! {#ref_ident<#g>}, quote! {#mut_ident<#g>})
+        } else {
+            (quote! {#ref_ident}, quote! {#mut_ident})
+        };
 
         let mut trait_impls = vec![];
         let mut direct_trait_impls = vec![];
@@ -958,13 +965,13 @@ impl StructParseDeriveCtx {
                     trait_impls.push(quote! {
                         #[inline]
                         fn #field_ref(&self) -> &#user_ty {
-                            &self.#sub_field_idx.#ident
+                            &self.#sub_field_idx
                         }
                     });
                     trait_mut_impls.push(quote! {
                         #[inline]
                         fn #field_mut(&mut self) -> &mut #user_ty {
-                            &mut self.#sub_field_idx.#ident
+                            &mut self.#sub_field_idx
                         }
                     });
                     direct_trait_mut_impls.push(quote! {
@@ -977,6 +984,19 @@ impl StructParseDeriveCtx {
             }
         }
 
+        let (direct_ref_head, direct_mut_head) =
+            if let Some(a) = self.my_explicit_generic() {
+                (
+                    quote! {impl<#a> #ref_def for #ident<#a>},
+                    quote! {impl<#a> #mut_def for #ident<#a>},
+                )
+            } else {
+                (
+                    quote! {impl #ref_def for #ident},
+                    quote! {impl #mut_def for #ident},
+                )
+            };
+
         quote! {
             #[allow(non_snake_case)]
             pub mod #private_mod_ident {
@@ -986,23 +1006,25 @@ impl StructParseDeriveCtx {
 
                 #substruct_methods
 
-                impl<V: ::zerocopy::ByteSlice> #ref_ident for #validated_ident<V> {
+                impl<V: ::zerocopy::ByteSlice> #ref_def for #validated_ident<V> {
                     #( #trait_impls )*
                 }
 
                 // NOTE: I now need to be generic'd.
-                impl #ref_ident for #ident {
+                #direct_ref_head {
                     #( #direct_trait_impls )*
                 }
 
-                impl<V: ::zerocopy::ByteSliceMut> #mut_ident for #validated_ident<V> {
+                impl<V: ::zerocopy::ByteSliceMut> #mut_def for #validated_ident<V> {
                     #( #trait_mut_impls )*
                 }
 
                 // NOTE: I now need to be generic'd.
-                impl #mut_ident for #ident {
+                #direct_mut_head {
                     #( #direct_trait_mut_impls )*
                 }
+
+                #parse_impl
             }
         }
     }
@@ -1013,6 +1035,12 @@ impl StructParseDeriveCtx {
         let mut_ident = self.mut_ident();
         let mut trait_defs = vec![];
         let mut mut_trait_defs = vec![];
+
+        let (ref_def, mut_def) = if let Some(g) = self.my_explicit_generic() {
+            (quote! {#ref_ident<#g>}, quote! {#mut_ident<#g>})
+        } else {
+            (quote! {#ref_ident}, quote! {#mut_ident})
+        };
 
         for field in &self.validated_order {
             let field = field.borrow();
@@ -1067,11 +1095,11 @@ impl StructParseDeriveCtx {
         }
 
         quote! {
-            pub trait #ref_ident {
+            pub trait #ref_def {
                 #( #trait_defs )*
             }
 
-            pub trait #mut_ident {
+            pub trait #mut_def {
                 #( #mut_trait_defs )*
             }
         }
@@ -1083,6 +1111,12 @@ impl StructParseDeriveCtx {
         let mut_ident = self.mut_ident();
         let mut packet_impls = vec![];
         let mut packet_mut_impls = vec![];
+
+        let (ref_def, mut_def) = if let Some(g) = self.my_explicit_generic() {
+            (quote! {#ref_ident<#g>}, quote! {#mut_ident<#g>})
+        } else {
+            (quote! {#ref_ident}, quote! {#mut_ident})
+        };
 
         for field in &self.validated_order {
             let field = field.borrow();
@@ -1162,6 +1196,9 @@ impl StructParseDeriveCtx {
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                    // We need to translate the `V` (or whatever) in these types
+                    // into the buffer type of the current packet.
+
                     packet_impls.push(quote! {
                         #[inline]
                         fn #field_ref(&self) -> &#user_ty {
@@ -1184,19 +1221,34 @@ impl StructParseDeriveCtx {
             }
         }
 
+        let (direct_ref_head, direct_mut_head) = if let Some(a) =
+            self.my_explicit_generic()
+        {
+            // (quote!{impl<#a> #ref_def for #ident<#a>}, quote!{impl<#a> #mut_def for #ident<#a>})
+            (
+                quote! {impl<O, B, #a> #ref_def for ::ingot_types::Packet<O, B>},
+                quote! {impl<O, B, #a> #mut_def for ::ingot_types::Packet<O, B>},
+            )
+        } else {
+            (
+                quote! {impl<O, B> #ref_def for ::ingot_types::Packet<O, B>},
+                quote! {impl<O, B> #mut_def for ::ingot_types::Packet<O, B>},
+            )
+        };
+
         quote! {
-            impl<O, B> #ref_ident for ::ingot_types::Packet<O, B>
+            #direct_ref_head
             where
-                O: #ref_ident,
-                B: #ref_ident,
+                O: #ref_def,
+                B: #ref_def,
             {
                 #( #packet_impls )*
             }
 
-            impl<O, B> #mut_ident for ::ingot_types::Packet<O, B>
+            #direct_mut_head
             where
-                O: #mut_ident,
-                B: #mut_ident,
+                O: #mut_def,
+                B: #mut_def,
             {
                 #( #packet_mut_impls )*
             }
@@ -1204,7 +1256,6 @@ impl StructParseDeriveCtx {
     }
 
     pub fn gen_parse_impl(&self) -> TokenStream {
-        let ident = &self.ident;
         let validated_ident = self.validated_ident();
 
         let mut segment_fragments = vec![];
@@ -1213,13 +1264,14 @@ impl StructParseDeriveCtx {
             let val_ident = Ident::new(&format!("v{i}"), Span::call_site());
             match chunk {
                 ChunkState::FixedWidth { size_bytes, .. } => {
+                    let ch_ty = chunk.chunk_ty_name(&self.ident).unwrap();
                     segment_fragments.push(quote! {
                         if from.as_ref().len() < #size_bytes {
                             return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
                         }
 
                         let (l, from) = from.split_at(#size_bytes);
-                        let #val_ident = ::zerocopy::Ref::from_bytes(l)
+                        let #val_ident: ::zerocopy::Ref<_, #ch_ty> = ::zerocopy::Ref::from_bytes(l)
                             .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
                     });
                 }
@@ -1238,7 +1290,7 @@ impl StructParseDeriveCtx {
                         }
 
                         let (varlen, from) = from.split_at(chunk_len);
-                        let #val_ident = varlen.into();
+                        let #val_ident = ::ingot_types::Packet::Raw(varlen);
                     });
                 }
                 ChunkState::Parsable(id) => {
@@ -1262,7 +1314,7 @@ impl StructParseDeriveCtx {
                 fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
                     use ::ingot_types::Header;
 
-                    if from.as_ref().len() < #ident::MINIMUM_LENGTH {
+                    if from.as_ref().len() < Self::MINIMUM_LENGTH {
                         return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
                     }
 
@@ -1291,8 +1343,13 @@ impl ToTokens for StructParseDeriveCtx {
         let ingot_pkt_impls = self.gen_trait_pkt_impls();
 
         let zc_mod = self.gen_zc_module();
-        let parse_impl = self.gen_parse_impl();
         let next_layer = self.gen_next_header_lookup();
+
+        let self_ty = if self.my_explicit_generic().is_some() {
+            quote! {#ident<V>}
+        } else {
+            quote! {#ident}
+        };
 
         tokens.extend(quote! {
             #valid_struct
@@ -1305,29 +1362,27 @@ impl ToTokens for StructParseDeriveCtx {
 
             #ingot_pkt_impls
 
-            pub type #pkt_ident<V> = ::ingot_types::Packet<#ident, #validated_ident<V>>;
+            pub type #pkt_ident<V> = ::ingot_types::Packet<#self_ty, #validated_ident<V>>;
 
             impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #validated_ident<V> {
                 type BufType = V;
             }
 
             impl<V> ::ingot_types::HasRepr for #validated_ident<V> {
-                type ReprType = #ident;
+                type ReprType = #self_ty;
             }
 
-            impl<V, T> ::core::convert::From<#validated_ident<V>> for ::ingot_types::Packet<T, #validated_ident<V>> {
+            impl<V> ::core::convert::From<#validated_ident<V>> for #pkt_ident<V> {
                 fn from(value: #validated_ident<V>) -> Self {
                     ::ingot_types::Packet::Raw(value)
                 }
             }
 
-            impl<T> ::core::convert::From<#ident> for ::ingot_types::Packet<#ident, T> {
-                fn from(value: #ident) -> Self {
+            impl<V> ::core::convert::From<#self_ty> for #pkt_ident<V> {
+                fn from(value: #self_ty) -> Self {
                     ::ingot_types::Packet::Repr(value)
                 }
             }
-
-            #parse_impl
 
             #next_layer
         });
