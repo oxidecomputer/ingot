@@ -7,6 +7,8 @@ use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
 #[cfg(not(feature = "alloc"))]
 use heapless::Vec;
+use zerocopy::ByteSlice;
+use zerocopy::ByteSliceMut;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -91,6 +93,26 @@ where
         match self {
             Packet::Repr(o) => o.len(),
             Packet::Raw(b) => b.len(),
+        }
+    }
+}
+
+impl<V: ByteSlice> AsRef<[u8]> for VarBytes<V> {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Packet::Repr(o) => o.as_ref(),
+            Packet::Raw(b) => b.as_ref(),
+        }
+    }
+}
+
+impl<V: ByteSliceMut> AsMut<[u8]> for VarBytes<V> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [u8] {
+        match self {
+            Packet::Repr(o) => o.as_mut(),
+            Packet::Raw(b) => b.as_mut(),
         }
     }
 }

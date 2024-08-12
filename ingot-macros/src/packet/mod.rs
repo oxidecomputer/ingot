@@ -65,7 +65,7 @@ pub struct FieldArgs {
 }
 
 #[derive(Clone, Debug)]
-struct ValidField2 {
+struct ValidField {
     /// The name of this field.
     ident: Ident,
     /// The index of this field.
@@ -80,7 +80,7 @@ struct ValidField2 {
     state: FieldState,
 }
 
-impl ValidField2 {
+impl ValidField {
     fn getter_name(&self) -> &Ident {
         &self.ident
     }
@@ -305,7 +305,7 @@ impl ChunkState {
                     fields.iter().map(|v| ctx.validated.get(v).unwrap())
                 {
                     let select_field = select_field.borrow();
-                    let ValidField2 { ref user_ty, .. } = *select_field;
+                    let ValidField { ref user_ty, .. } = *select_field;
                     let get_name = select_field.getter_name();
                     let mut_name = select_field.setter_name();
 
@@ -364,8 +364,8 @@ struct StructParseDeriveCtx {
     generics: Generics,
     data: Fields<FieldArgs>,
 
-    validated: HashMap<Ident, Shared<ValidField2>>,
-    validated_order: Vec<Shared<ValidField2>>,
+    validated: HashMap<Ident, Shared<ValidField>>,
+    validated_order: Vec<Shared<ValidField>>,
     chunk_layout: Vec<ChunkState>,
 
     nominated_next_header: Option<Ident>,
@@ -376,7 +376,7 @@ impl StructParseDeriveCtx {
         let IngotArgs { ident, data, generics } = input;
         let field_data = data.take_struct().unwrap();
         let mut validated = HashMap::new();
-        let validated_order: RefCell<Vec<Shared<ValidField2>>> = vec![].into();
+        let validated_order: RefCell<Vec<Shared<ValidField>>> = vec![].into();
         let mut nominated_next_header = None;
         let mut chunk_layout = vec![];
 
@@ -504,7 +504,7 @@ impl StructParseDeriveCtx {
                 }
             };
 
-            let valid_field = ValidField2 {
+            let valid_field = ValidField {
                 ident: field_ident.clone(),
                 idx,
                 user_ty,
@@ -841,7 +841,7 @@ impl StructParseDeriveCtx {
             let mut_name = field.setter_name();
             let field_ref = field.ref_name();
             let field_mut = field.mut_name();
-            let ValidField2 {
+            let ValidField {
                 ref ident,
                 ref user_ty,
                 ref state,
@@ -1048,7 +1048,7 @@ impl StructParseDeriveCtx {
             let mut_name = field.setter_name();
             let field_ref = field.ref_name();
             let field_mut = field.mut_name();
-            let ValidField2 { ref ident, ref user_ty, ref state, .. } = *field;
+            let ValidField { ref ident, ref user_ty, ref state, .. } = *field;
 
             match state {
                 FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
@@ -1124,7 +1124,7 @@ impl StructParseDeriveCtx {
             let mut_name = field.setter_name();
             let field_ref = field.ref_name();
             let field_mut = field.mut_name();
-            let ValidField2 { ref ident, ref user_ty, ref state, .. } = *field;
+            let ValidField { ref ident, ref user_ty, ref state, .. } = *field;
 
             match state {
                 FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
@@ -1394,45 +1394,6 @@ struct Bitfield {
     ident: Ident,
     n_bits: usize,
     first_bit: usize,
-}
-
-struct ValidField {
-    repr: Type,
-    ident: Ident,
-    user_ty: Type,
-
-    first_bit: usize,
-    analysis: Analysed,
-
-    /// indicates child field of the
-    sub_ref_idx: usize,
-    hybrid: Option<PrimitiveInBitfield>,
-}
-
-impl ValidField {
-    fn getter_name(&self) -> &Ident {
-        &self.ident
-    }
-
-    fn ref_name(&self) -> Ident {
-        Ident::new(&format!("{}_ref", self.ident), self.ident.span())
-    }
-
-    fn mut_name(&self) -> Ident {
-        Ident::new(&format!("{}_mut", self.ident), self.ident.span())
-    }
-
-    fn setter_name(&self) -> Ident {
-        Ident::new(&format!("set_{}", self.ident), self.ident.span())
-    }
-
-    fn is_primitive(&self) -> bool {
-        if let Analysed::FixedWidth(fw) = &self.analysis {
-            matches!(fw.ty, ReprType::Primitive { .. })
-        } else {
-            false
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -32,7 +32,7 @@ impl PrimitiveInBitfield {
         whole_bytes + if self.n_bits % 8 != 0 { 1 } else { 0 }
     }
 
-    fn get_set_body(&self, field: &ValidField2, op: FieldOp) -> TokenStream {
+    fn get_set_body(&self, field: &ValidField, op: FieldOp) -> TokenStream {
         let FieldState::FixedWidth { underlying_ty, .. } = &field.state else {
             panic!(
                 "tried to compute bitfield get/set on non-fixedwidth field."
@@ -318,11 +318,11 @@ impl PrimitiveInBitfield {
         }
     }
 
-    pub fn get(&self, field: &ValidField2) -> TokenStream {
+    pub fn get(&self, field: &ValidField) -> TokenStream {
         self.get_set_body(field, FieldOp::Get)
     }
 
-    pub fn set(&self, field: &ValidField2) -> TokenStream {
+    pub fn set(&self, field: &ValidField) -> TokenStream {
         self.get_set_body(field, FieldOp::Set)
     }
 

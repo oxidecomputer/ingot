@@ -1,6 +1,7 @@
 use darling::ast::NestedMeta;
 use darling::Error as DarlingError;
 use darling::FromMeta;
+use darling::FromVariant;
 use proc_macro2::Ident;
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -11,6 +12,13 @@ use syn::Path;
 #[derive(FromMeta)]
 struct ChoiceArgs {
     on: Path,
+}
+
+#[derive(FromVariant)]
+#[darling(attributes(ingot))]
+struct VariantArgs {
+    #[darling(default)]
+    generic: bool,
 }
 
 pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
@@ -46,7 +54,13 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
     let mut unpacks: Vec<TokenStream> = vec![];
 
+    let mut needs_generic = false;
+
     for var in item.variants {
+        let state = VariantArgs::from_variant(&var).unwrap();
+
+        needs_generic |= state.generic;
+
         let Some((_, disc)) = var.discriminant else {
             return Error::new(
                 var.span(),
@@ -56,35 +70,40 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             .into();
         };
 
-        let field_ident = var.ident;
-        let valid_field_ident =
-            Ident::new(&format!("Valid{field_ident}"), ident.span());
+        let id = var.ident;
+        let field_ident = if state.generic {
+            quote! {#id<V>}
+        } else {
+            quote! {#id}
+        };
 
-        top_vars.push(quote!{
-            #field_ident(::ingot_types::Packet<#field_ident, #valid_field_ident<V>>)
+        let valid_field_ident = Ident::new(&format!("Valid{id}"), ident.span());
+
+        top_vars.push(quote! {
+            #id(::ingot_types::Packet<#field_ident, #valid_field_ident<V>>)
         });
 
         validated_vars.push(quote! {
-            #field_ident(#valid_field_ident<V>)
+            #id(#valid_field_ident<V>)
         });
 
         repr_vars.push(quote! {
-            #field_ident(#field_ident)
+            #id(#field_ident)
         });
 
         match_arms.push(quote! {
             v if v == #disc => {
                 #valid_field_ident::parse(data)
-                    .map(|(pkt, rest)| (#validated_ident::#field_ident(pkt), rest))
+                    .map(|(pkt, rest)| (#validated_ident::#id(pkt), rest))
             }
         });
 
         parse_match_arms.push(quote! {
-            #validated_ident::#field_ident(v) => #ident::#field_ident(::ingot_types::Packet::Raw(v))
+            #validated_ident::#id(v) => #ident::#id(::ingot_types::Packet::Raw(v))
         });
 
         repr_match_arms.push(quote! {
-            #repr_ident::#field_ident(v) => #ident::#field_ident(::ingot_types::Packet::Repr(v))
+            #repr_ident::#id(v) => #ident::#id(::ingot_types::Packet::Repr(v))
         });
 
         next_layer_wheres.push(quote! {
@@ -92,7 +111,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         });
 
         next_layer_match_arms.push(quote! {
-            #validated_ident::#field_ident(v) => v.next_layer()
+            #validated_ident::#id(v) => v.next_layer()
         });
 
         unpacks.push(quote! {
@@ -101,7 +120,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
                 fn try_from(value: #ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
-                        #ident::#field_ident(v) => Ok(v),
+                        #ident::#id(v) => Ok(v),
                         _ => ::core::result::Result::Err(ParseError::Unwanted),
                     }
                 }
@@ -112,13 +131,19 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
                 fn try_from(value: #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
-                        #validated_ident::#field_ident(v) => Ok(v.into()),
+                        #validated_ident::#id(v) => Ok(v.into()),
                         _ => ::core::result::Result::Err(ParseError::Unwanted),
                     }
                 }
             }
         });
     }
+
+    let repr_head = if needs_generic {
+        quote! {#repr_ident<V>}
+    } else {
+        quote! {#repr_ident}
+    };
 
     quote! {
         pub enum #ident<V> {
@@ -129,7 +154,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #( #validated_vars ),*
         }
 
-        pub enum #repr_ident {
+        pub enum #repr_head {
             #( #repr_vars ),*
         }
 
@@ -154,9 +179,9 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V> ::core::convert::From<#repr_ident> for #ident<V> {
+        impl<V> ::core::convert::From<#repr_head> for #ident<V> {
             #[inline]
-            fn from(value: #repr_ident) -> Self {
+            fn from(value: #repr_head) -> Self {
                 match value {
                     #( #repr_match_arms ),*
                 }

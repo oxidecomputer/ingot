@@ -24,7 +24,9 @@ fn are_my_fragment_traits_sane() {
 
 #[test]
 fn does_this_chain_stuff_compile() {
-    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
+    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
+        + Ipv4::<&[u8]>::MINIMUM_LENGTH
+        + Udp::MINIMUM_LENGTH];
 
     // set up stack as Ipv4, UDP
     {
@@ -52,6 +54,70 @@ fn does_this_chain_stuff_compile() {
         mystack.stack.0.eth.source(),
         MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
     );
+}
+
+#[test]
+fn variable_len_fields_in_chain() {
+    const V4_EXTRA: usize = 12;
+    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
+        + Ipv4::<&[u8]>::MINIMUM_LENGTH
+        + V4_EXTRA
+        + Udp::MINIMUM_LENGTH];
+
+    // set up stack as Ipv4, UDP
+    {
+        let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
+        let (mut ipv4, rest) = ValidIpv4::parse(rest).unwrap();
+
+        eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
+        eth.set_destination(MacAddr6::broadcast());
+        eth.set_ethertype(0x0800);
+        ipv4.set_protocol(0x11);
+        ipv4.set_source(Ipv4Addr::from([192, 168, 0, 1]));
+        ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
+        ipv4.set_ihl(5 + (V4_EXTRA as u8 / 4));
+
+        for (i, b) in (&mut rest[..V4_EXTRA]).iter_mut().enumerate() {
+            *b = i as u8;
+        }
+    }
+
+    {
+        let l = buf2.len();
+        let (mut udp, rest) =
+            ValidUdp::parse(&mut buf2[l - Udp::MINIMUM_LENGTH..]).unwrap();
+        assert_eq!(rest.len(), 0);
+        udp.set_source(6082);
+        udp.set_destination(6081);
+        udp.set_length(0);
+        udp.set_checksum(0xffff);
+    }
+
+    let mystack = Parsed2::newy(OneChunk::from(&buf2[..])).unwrap();
+
+    assert_eq!(
+        mystack.stack.0.eth.source(),
+        MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
+    );
+    assert_eq!(mystack.stack.0.eth.destination(), MacAddr6::broadcast());
+    assert_eq!(mystack.stack.0.eth.ethertype(), 0x0800);
+
+    let L3::Ipv4(v4) = mystack.stack.0.l3 else {
+        panic!("did not parse IPv4...");
+    };
+    assert_eq!(v4.protocol(), 0x11);
+    assert_eq!(v4.source(), Ipv4Addr::from([192, 168, 0, 1]));
+    assert_eq!(v4.destination(), Ipv4Addr::from([192, 168, 0, 255]));
+    assert_eq!(v4.ihl(), 8);
+    assert_eq!(
+        v4.options_ref().as_ref(),
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    );
+
+    assert_eq!(mystack.stack.0.l4.source(), 6082);
+    assert_eq!(mystack.stack.0.l4.destination(), 6081);
+    assert_eq!(mystack.stack.0.l4.length(), 0);
+    assert_eq!(mystack.stack.0.l4.checksum(), 0xffff);
 }
 
 #[test]
