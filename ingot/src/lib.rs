@@ -28,36 +28,6 @@ extern crate alloc;
 #[macro_use]
 extern crate std;
 
-#[derive(Ingot)]
-pub struct TestFunFields {
-    pub fine: u8,
-    pub memcpy_be: u24be,
-    pub memcpy_le: u24le,
-    pub still_fine: u8,
-
-    pub tricky_be0: u9be,
-    pub tricky_be1: u9be,
-    pub tricky_be2: u14be,
-
-    pub trickier_be0: u1,
-    pub trickier_be1: u30be,
-    pub trickier_be2: u1,
-
-    pub tricky_le0: u9le,
-    pub tricky_le1: u9le,
-    pub tricky_le2: u14le,
-
-    pub trickier_le0: u1,
-    pub trickier_le1: u30le,
-    pub trickier_le2: u1,
-
-    pub tricky_he0: u9he,
-    pub tricky_he1: u9he,
-    pub tricky_he2: u14he,
-
-    pub also_fine: u32be,
-}
-
 // types we want to use in packet bodies.
 
 #[derive(Clone, Copy, Default)]
@@ -194,7 +164,7 @@ pub struct VlanBody {
     pub priority: u3,
     pub dei: u1,
     pub vid: u12be,
-    #[ingot(is = "u16be", next_layer())]
+    #[ingot(next_layer())]
     pub ethertype: u16be,
     // #[ingot(extension)]
     // pub vlans: ???
@@ -324,8 +294,7 @@ pub struct Udp {
 }
 
 #[derive(Ingot)]
-// pub struct Geneve<V> {
-pub struct Geneve {
+pub struct Geneve<V> {
     // #[ingot(valid = 0)]
     pub version: u2,
     pub opt_len: u6,
@@ -336,10 +305,8 @@ pub struct Geneve {
     pub vni: u24be,
     // #[ingot(valid = 0)]
     pub reserved: u8,
-    // #[ingot(var_len = "opt_len * 4")]
-    // pub options: VarBytes<V>,
-    // #[ingot(extension)]
-    // pub tunnel_opts: ???
+    #[ingot(var_len = "(opt_len as usize) * 4")]
+    pub options: VarBytes<V>,
 }
 
 trait Quack<T> {

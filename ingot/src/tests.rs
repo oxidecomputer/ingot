@@ -1,9 +1,39 @@
+use alloc::collections::LinkedList;
 use ingot_types::Header;
 use ingot_types::HeaderParse;
 use ingot_types::OneChunk;
 
 use super::*;
-// use ingot_types::PacketParse;
+
+#[derive(Ingot)]
+pub struct TestFunFields {
+    pub fine: u8,
+    pub memcpy_be: u24be,
+    pub memcpy_le: u24le,
+    pub still_fine: u8,
+
+    pub tricky_be0: u9be,
+    pub tricky_be1: u9be,
+    pub tricky_be2: u14be,
+
+    pub trickier_be0: u1,
+    pub trickier_be1: u30be,
+    pub trickier_be2: u1,
+
+    pub tricky_le0: u9le,
+    pub tricky_le1: u9le,
+    pub tricky_le2: u14le,
+
+    pub trickier_le0: u1,
+    pub trickier_le1: u30le,
+    pub trickier_le2: u1,
+
+    pub tricky_he0: u9he,
+    pub tricky_he1: u9he,
+    pub tricky_he2: u14he,
+
+    pub also_fine: u32be,
+}
 
 #[test]
 fn are_my_fragment_traits_sane() {
@@ -24,9 +54,7 @@ fn are_my_fragment_traits_sane() {
 
 #[test]
 fn does_this_chain_stuff_compile() {
-    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
-        + Ipv4::<&[u8]>::MINIMUM_LENGTH
-        + Udp::MINIMUM_LENGTH];
+    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv4::<&[u8]>::MINIMUM_LENGTH + Udp::MINIMUM_LENGTH];
 
     // set up stack as Ipv4, UDP
     {
@@ -59,10 +87,7 @@ fn does_this_chain_stuff_compile() {
 #[test]
 fn variable_len_fields_in_chain() {
     const V4_EXTRA: usize = 12;
-    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
-        + Ipv4::<&[u8]>::MINIMUM_LENGTH
-        + V4_EXTRA
-        + Udp::MINIMUM_LENGTH];
+    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv4::<&[u8]>::MINIMUM_LENGTH + V4_EXTRA + Udp::MINIMUM_LENGTH];
 
     // set up stack as Ipv4, UDP
     {
@@ -84,8 +109,7 @@ fn variable_len_fields_in_chain() {
 
     {
         let l = buf2.len();
-        let (mut udp, rest) =
-            ValidUdp::parse(&mut buf2[l - Udp::MINIMUM_LENGTH..]).unwrap();
+        let (mut udp, rest) = ValidUdp::parse(&mut buf2[l - Udp::MINIMUM_LENGTH..]).unwrap();
         assert_eq!(rest.len(), 0);
         udp.set_source(6082);
         udp.set_destination(6081);
@@ -99,8 +123,14 @@ fn variable_len_fields_in_chain() {
         mystack.stack.0.eth.source(),
         MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
     );
-    assert_eq!(mystack.stack.0.eth.destination(), MacAddr6::broadcast());
-    assert_eq!(mystack.stack.0.eth.ethertype(), 0x0800);
+    assert_eq!(
+        mystack.stack.0.eth.destination(),
+        MacAddr6::broadcast()
+    );
+    assert_eq!(
+        mystack.stack.0.eth.ethertype(),
+        0x0800
+    );
 
     let L3::Ipv4(v4) = mystack.stack.0.l3 else {
         panic!("did not parse IPv4...");
@@ -109,15 +139,28 @@ fn variable_len_fields_in_chain() {
     assert_eq!(v4.source(), Ipv4Addr::from([192, 168, 0, 1]));
     assert_eq!(v4.destination(), Ipv4Addr::from([192, 168, 0, 255]));
     assert_eq!(v4.ihl(), 8);
-    assert_eq!(
-        v4.options_ref().as_ref(),
-        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
-    );
+    assert_eq!(v4.options_ref().as_ref(), &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
     assert_eq!(mystack.stack.0.l4.source(), 6082);
     assert_eq!(mystack.stack.0.l4.destination(), 6081);
     assert_eq!(mystack.stack.0.l4.length(), 0);
     assert_eq!(mystack.stack.0.l4.checksum(), 0xffff);
+}
+
+#[test]
+fn parse_multichunk() {
+    // #[derive(Parse)]
+    // pub struct Geneva<V> {
+    //     pub eth: EthernetPacket<V>,
+    //     pub l3: L3<V>,
+    //     #[oxpopt(from = "L4<V>")]
+    //     pub l4: UdpPacket<V>,
+    //     // pub geneve: Geneve<V>,
+    // }
+
+    let mut my_multi: LinkedList<Vec<u8>> = LinkedList::new();
+
+    let mystack = Parsed2::newy(&my_multi).unwrap();
 }
 
 #[test]

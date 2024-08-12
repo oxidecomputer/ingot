@@ -202,6 +202,15 @@ impl<'a> Read for OneChunk<&'a mut [u8]> {
     }
 }
 
+// #[cfg(feature = "alloc")]
+// impl Read for alloc::collections::linked_list::LinkedList<Vec<u8>> {
+//     type Chunk = &[u8];
+
+//     fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
+//         todo!()
+//     }
+// }
+
 // pub trait Emit {
 //     fn emit()
 // }
