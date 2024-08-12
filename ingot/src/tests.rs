@@ -149,18 +149,66 @@ fn variable_len_fields_in_chain() {
 
 #[test]
 fn parse_multichunk() {
-    // #[derive(Parse)]
-    // pub struct Geneva<V> {
-    //     pub eth: EthernetPacket<V>,
-    //     pub l3: L3<V>,
-    //     #[oxpopt(from = "L4<V>")]
-    //     pub l4: UdpPacket<V>,
-    //     // pub geneve: Geneve<V>,
-    // }
+    let mut eth_bytes = vec![0u8; Ethernet::MINIMUM_LENGTH];
+    let mut v6_bytes = vec![0u8; Ipv6::MINIMUM_LENGTH];
+    let mut udp_bytes = vec![0u8; Udp::MINIMUM_LENGTH];
+    let mut body_bytes = vec![0u8; 128];
+    {
+        let (mut eth, _) = ValidEthernet::parse(&mut eth_bytes[..]).unwrap();
+        let (mut ipv6, _) = ValidIpv6::parse(&mut v6_bytes[..]).unwrap();
+        let (mut udp, _) = ValidUdp::parse(&mut udp_bytes[..]).unwrap();
+
+        eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
+        eth.set_destination(MacAddr6::broadcast());
+        eth.set_ethertype(0x86DD);
+
+        ipv6.set_next_header(0x11);
+        ipv6.set_source(Ipv6Addr::LOCALHOST);
+        ipv6.set_destination(Ipv6Addr::UNSPECIFIED);
+
+        udp.set_source(6082);
+        udp.set_destination(6081);
+        udp.set_length(body_bytes.len().try_into().unwrap());
+        udp.set_checksum(0xffff);
+    }
 
     let mut my_multi: LinkedList<Vec<u8>> = LinkedList::new();
 
-    let mystack = Parsed2::newy(&my_multi).unwrap();
+    my_multi.push_back(eth_bytes);
+    my_multi.push_back(v6_bytes);
+    my_multi.push_back(udp_bytes);
+    my_multi.push_back(body_bytes);
+
+    let mystack = Parsed2::newy(my_multi.iter_mut()).unwrap();
+
+    assert_eq!(
+        mystack.stack.0.eth.source(),
+        MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
+    );
+    assert_eq!(
+        mystack.stack.0.eth.destination(),
+        MacAddr6::broadcast()
+    );
+    assert_eq!(
+        mystack.stack.0.eth.ethertype(),
+        0x86DD
+    );
+
+    let L3::Ipv6(mut v6) = mystack.stack.0.l3 else {
+        panic!("did not parse IPv4...");
+    };
+    v6.set_version(6);
+    assert_eq!(v6.version(), 6);
+    assert_eq!(v6.next_header(), 0x11);
+    assert_eq!(v6.source(), Ipv6Addr::LOCALHOST);
+    assert_eq!(v6.destination(), Ipv6Addr::UNSPECIFIED);
+    // assert_eq!(v6.ihl(), 8);
+    // assert_eq!(v6.options_ref().as_ref(), &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+
+    assert_eq!(mystack.stack.0.l4.source(), 6082);
+    assert_eq!(mystack.stack.0.l4.destination(), 6081);
+    assert_eq!(mystack.stack.0.l4.length(), 128);
+    assert_eq!(mystack.stack.0.l4.checksum(), 0xffff);
 }
 
 #[test]

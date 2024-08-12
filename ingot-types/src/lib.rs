@@ -202,18 +202,92 @@ impl<'a> Read for OneChunk<&'a mut [u8]> {
     }
 }
 
-// #[cfg(feature = "alloc")]
-// impl Read for alloc::collections::linked_list::LinkedList<Vec<u8>> {
-//     type Chunk = &[u8];
+#[cfg(feature = "alloc")]
+impl<'a> Read for alloc::collections::linked_list::Iter<'a, Vec<u8>> {
+    type Chunk = &'a [u8];
 
-//     fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
-//         todo!()
-//     }
-// }
+    fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
+        self.next().ok_or(ParseError::TooSmall).map(|v| v.as_ref())
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
+    type Chunk = &'a mut [u8];
+
+    fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
+        self.next().ok_or(ParseError::TooSmall).map(|v| v.as_mut())
+    }
+}
 
 // pub trait Emit {
 //     fn emit()
 // }
+
+/// Thinking about what we'll need for more generic emit tracking.
+///
+/// # SAFETY
+/// * Pointers must refer to the same allocation.
+/// * The region `valid_start[..valid_sz]` must be contained entirely
+///   within `alloc_start[..alloc_sz]`.
+pub unsafe trait BufHeadroom {
+    fn alloc_start(&self) -> *const u8;
+    fn alloc_sz(&self) -> usize;
+
+    fn valid_start(&self) -> *const u8;
+    fn valid_sz(&self) -> usize;
+
+    fn headroom(&self) -> usize {
+        let a = self.alloc_start();
+        let b = self.valid_start();
+        assert!(b >= a);
+        unsafe { b.offset_from(a) as usize }
+    }
+}
+
+unsafe impl BufHeadroom for &[u8] {
+    #[inline]
+    fn alloc_start(&self) -> *const u8 {
+        self.as_ptr()
+    }
+
+    #[inline]
+    fn alloc_sz(&self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn valid_start(&self) -> *const u8 {
+        self.alloc_start()
+    }
+
+    #[inline]
+    fn valid_sz(&self) -> usize {
+        self.alloc_sz()
+    }
+}
+
+unsafe impl BufHeadroom for &mut [u8] {
+    #[inline]
+    fn alloc_start(&self) -> *const u8 {
+        self.as_ptr()
+    }
+
+    #[inline]
+    fn alloc_sz(&self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn valid_start(&self) -> *const u8 {
+        self.alloc_start()
+    }
+
+    #[inline]
+    fn valid_sz(&self) -> usize {
+        self.alloc_sz()
+    }
+}
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
