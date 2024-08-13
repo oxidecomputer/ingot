@@ -54,7 +54,9 @@ fn are_my_fragment_traits_sane() {
 
 #[test]
 fn does_this_chain_stuff_compile() {
-    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv4::<&[u8]>::MINIMUM_LENGTH + Udp::MINIMUM_LENGTH];
+    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
+        + Ipv4::<&[u8]>::MINIMUM_LENGTH
+        + Udp::MINIMUM_LENGTH];
 
     // set up stack as Ipv4, UDP
     {
@@ -70,8 +72,8 @@ fn does_this_chain_stuff_compile() {
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
     }
 
-    let mystack = Parsed2::newy(OneChunk::from(&mut buf2[..])).unwrap();
-    let mystack = Parsed2::newy(OneChunk::from(&buf2[..])).unwrap();
+    let mystack = Parsed::newy(OneChunk::from(&mut buf2[..])).unwrap();
+    let mystack = Parsed::newy(OneChunk::from(&buf2[..])).unwrap();
 
     match mystack.stack.0.l3 {
         L3::Ipv4(v) => v.hop_limit(),
@@ -87,7 +89,10 @@ fn does_this_chain_stuff_compile() {
 #[test]
 fn variable_len_fields_in_chain() {
     const V4_EXTRA: usize = 12;
-    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv4::<&[u8]>::MINIMUM_LENGTH + V4_EXTRA + Udp::MINIMUM_LENGTH];
+    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
+        + Ipv4::<&[u8]>::MINIMUM_LENGTH
+        + V4_EXTRA
+        + Udp::MINIMUM_LENGTH];
 
     // set up stack as Ipv4, UDP
     {
@@ -109,7 +114,8 @@ fn variable_len_fields_in_chain() {
 
     {
         let l = buf2.len();
-        let (mut udp, rest) = ValidUdp::parse(&mut buf2[l - Udp::MINIMUM_LENGTH..]).unwrap();
+        let (mut udp, rest) =
+            ValidUdp::parse(&mut buf2[l - Udp::MINIMUM_LENGTH..]).unwrap();
         assert_eq!(rest.len(), 0);
         udp.set_source(6082);
         udp.set_destination(6081);
@@ -117,20 +123,14 @@ fn variable_len_fields_in_chain() {
         udp.set_checksum(0xffff);
     }
 
-    let mystack = Parsed2::newy(OneChunk::from(&buf2[..])).unwrap();
+    let mystack = Parsed::newy(OneChunk::from(&buf2[..])).unwrap();
 
     assert_eq!(
         mystack.stack.0.eth.source(),
         MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
     );
-    assert_eq!(
-        mystack.stack.0.eth.destination(),
-        MacAddr6::broadcast()
-    );
-    assert_eq!(
-        mystack.stack.0.eth.ethertype(),
-        0x0800
-    );
+    assert_eq!(mystack.stack.0.eth.destination(), MacAddr6::broadcast());
+    assert_eq!(mystack.stack.0.eth.ethertype(), 0x0800);
 
     let L3::Ipv4(v4) = mystack.stack.0.l3 else {
         panic!("did not parse IPv4...");
@@ -139,7 +139,10 @@ fn variable_len_fields_in_chain() {
     assert_eq!(v4.source(), Ipv4Addr::from([192, 168, 0, 1]));
     assert_eq!(v4.destination(), Ipv4Addr::from([192, 168, 0, 255]));
     assert_eq!(v4.ihl(), 8);
-    assert_eq!(v4.options_ref().as_ref(), &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert_eq!(
+        v4.options_ref().as_ref(),
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    );
 
     assert_eq!(mystack.stack.0.l4.source(), 6082);
     assert_eq!(mystack.stack.0.l4.destination(), 6081);
@@ -152,7 +155,7 @@ fn parse_multichunk() {
     let mut eth_bytes = vec![0u8; Ethernet::MINIMUM_LENGTH];
     let mut v6_bytes = vec![0u8; Ipv6::MINIMUM_LENGTH];
     let mut udp_bytes = vec![0u8; Udp::MINIMUM_LENGTH];
-    let mut body_bytes = vec![0u8; 128];
+    let body_bytes = vec![0xaau8; 128];
     {
         let (mut eth, _) = ValidEthernet::parse(&mut eth_bytes[..]).unwrap();
         let (mut ipv6, _) = ValidIpv6::parse(&mut v6_bytes[..]).unwrap();
@@ -179,22 +182,15 @@ fn parse_multichunk() {
     my_multi.push_back(udp_bytes);
     my_multi.push_back(body_bytes);
 
-    let mystack = Parsed2::newy(my_multi.iter_mut()).unwrap();
+    let mut mystack = Parsed::newy(my_multi.iter_mut()).unwrap();
 
-    assert_eq!(
-        mystack.stack.0.eth.source(),
-        MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
-    );
-    assert_eq!(
-        mystack.stack.0.eth.destination(),
-        MacAddr6::broadcast()
-    );
-    assert_eq!(
-        mystack.stack.0.eth.ethertype(),
-        0x86DD
-    );
+    let hdr = mystack.headers_mut();
 
-    let L3::Ipv6(mut v6) = mystack.stack.0.l3 else {
+    assert_eq!(hdr.eth.source(), MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
+    assert_eq!(hdr.eth.destination(), MacAddr6::broadcast());
+    assert_eq!(hdr.eth.ethertype(), 0x86DD);
+
+    let L3::Ipv6(ref mut v6) = hdr.l3 else {
         panic!("did not parse IPv4...");
     };
     v6.set_version(6);
@@ -205,10 +201,18 @@ fn parse_multichunk() {
     // assert_eq!(v6.ihl(), 8);
     // assert_eq!(v6.options_ref().as_ref(), &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
-    assert_eq!(mystack.stack.0.l4.source(), 6082);
-    assert_eq!(mystack.stack.0.l4.destination(), 6081);
-    assert_eq!(mystack.stack.0.l4.length(), 128);
-    assert_eq!(mystack.stack.0.l4.checksum(), 0xffff);
+    assert_eq!(hdr.l4.source(), 6082);
+    assert_eq!(hdr.l4.destination(), 6081);
+    assert_eq!(hdr.l4.length(), 128);
+    assert_eq!(hdr.l4.checksum(), 0xffff);
+
+    let b = mystack.body().unwrap();
+
+    assert_eq!(b.len(), 128);
+    assert!(b.iter().all(|v| *v == 0xaa));
+
+    let b = mystack.body_mut().unwrap();
+    b.iter_mut().step_by(2).for_each(|v| *v = 0xbb);
 }
 
 #[test]

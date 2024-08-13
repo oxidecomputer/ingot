@@ -148,16 +148,23 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     quote! {
-        impl<Q: ::ingot_types::Read> Parsed2<#ident<Q::Chunk>, Q> {
+        impl<Q: ::ingot_types::Read> Parsed<#ident<Q::Chunk>, Q> {
             pub fn newy(mut data: Q) -> ::ingot_types::ParseResult<Self> {
                 let slice = data.next_chunk()?;
 
                 #( #parse_points )*
 
+                let last_chunk = match remainder.len() {
+                    // Attempt to pull another slice out.
+                    0 => data.next_chunk().ok(),
+                    _ => Some(remainder),
+                };
+
                 ::core::result::Result::Ok(Self {
                     stack: HeaderStack(#ctor),
                     data,
-                    _self_referential: PhantomPinned,
+                    last_chunk,
+                    // _self_referential: PhantomPinned,
                 })
             }
         }

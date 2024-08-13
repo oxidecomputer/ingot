@@ -18,6 +18,7 @@ use ingot_types::ParseError;
 use ingot_types::VarBytes;
 use macaddr::MacAddr6;
 use pnet_macros_support::types::*;
+use zerocopy::ByteSliceMut;
 
 #[cfg(feature = "alloc")]
 #[allow(unused)]
@@ -309,16 +310,6 @@ pub struct Geneve<V> {
     pub options: VarBytes<V>,
 }
 
-trait Quack<T> {
-    fn b(&self) -> &VarBytes<T>;
-}
-
-impl<T> Quack<T> for Ipv4<T> {
-    fn b(&self) -> &VarBytes<T> {
-        &self.options
-    }
-}
-
 // #[derive(Ingot)]
 // pub struct GeneveOpt {
 //     pub class: u16be,
@@ -368,8 +359,8 @@ fn test() {
 
 pub fn parse_q<'a>(
     a: &'a [u8],
-) -> Parsed2<UltimateChain<&'a [u8]>, OneChunk<&'a [u8]>> {
-    Parsed2::newy(OneChunk::from(a)).unwrap()
+) -> Parsed<UltimateChain<&'a [u8]>, OneChunk<&'a [u8]>> {
+    Parsed::newy(OneChunk::from(a)).unwrap()
 }
 
 // Now how do we do these? unsafe trait?
@@ -415,7 +406,7 @@ impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
     }
 }
 
-pub struct Parsed2<Stack, RawPkt: ingot_types::Read> {
+pub struct Parsed<Stack, RawPkt: ingot_types::Read> {
     // this needs to be a struct with all the right names.
     stack: HeaderStack<Stack>,
     // want generic data type here:
@@ -427,9 +418,40 @@ pub struct Parsed2<Stack, RawPkt: ingot_types::Read> {
     // need to wrap in a cursor, kinda.
     data: RawPkt,
 
+    last_chunk: Option<RawPkt::Chunk>,
     // Not yet, but soon.
-    _self_referential: PhantomPinned,
+    // _self_referential: PhantomPinned,
 }
+
+impl<Stack, RawPkt: ingot_types::Read> Parsed<Stack, RawPkt> {
+    pub fn headers(&self) -> &Stack {
+        &self.stack.0
+    }
+
+    pub fn body(&self) -> Option<&RawPkt::Chunk> {
+        self.last_chunk.as_ref()
+    }
+}
+
+impl<Stack, RawPkt: ingot_types::Read> Parsed<Stack, RawPkt>
+where
+    RawPkt::Chunk: ByteSliceMut,
+{
+    pub fn headers_mut(&mut self) -> &mut Stack {
+        &mut self.stack.0
+    }
+
+    pub fn body_mut(&mut self) -> Option<&mut RawPkt::Chunk> {
+        self.last_chunk.as_mut()
+    }
+}
+
+// NEED:
+// * access to all remaining slices
+// * A way to specify 'next header check' on packet types without one
+//   - Part of `Chain`.
+// * Remove this bloody HeaderStack type.
+// * To
 
 // REALLY NEED TO THINK ABOUT HOW/WHEN TO COMBINE PARSEDs
 // - should always be possible to combine dyn with anything that can be expanded.
