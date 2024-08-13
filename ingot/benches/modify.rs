@@ -6,7 +6,6 @@ use ingot::UdpRef;
 use ingot::UltimateChain;
 use ingot::ValidUdp;
 use ingot_types::HeaderParse;
-use ingot_types::OneChunk;
 use std::collections::LinkedList;
 use std::hint::black_box;
 
@@ -71,7 +70,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let (mut hdrs, _body) =
                 UltimateChain::parse(black_box(&mut pkt_body_v4[..])).unwrap();
-            hdrs.l4.set_destination(hdrs.l4.destination() - 1);
+            black_box(hdrs.l4.set_destination(hdrs.l4.destination() - 1));
         })
     });
     c.bench_function("parse-stack-v6", |b| {

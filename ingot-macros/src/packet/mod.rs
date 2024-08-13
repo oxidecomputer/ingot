@@ -1263,7 +1263,7 @@ impl StructParseDeriveCtx {
         for (i, chunk) in self.chunk_layout.iter().enumerate() {
             let val_ident = Ident::new(&format!("v{i}"), Span::call_site());
             match chunk {
-                ChunkState::FixedWidth { size_bytes, .. } => {
+                ChunkState::FixedWidth { .. } => {
                     let ch_ty = chunk.chunk_ty_name(&self.ident).unwrap();
                     // This is like 15% slower without LTO.
                     // With LTO, it's 20--40% faster than splitting first
