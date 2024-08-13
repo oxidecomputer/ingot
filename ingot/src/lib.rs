@@ -2,7 +2,6 @@
 
 use alloc::vec::Vec;
 use bitflags::bitflags;
-use core::marker::PhantomPinned;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
 use ingot_macros::Ingot;
@@ -12,15 +11,12 @@ use ingot_types::HasView;
 use ingot_types::HeaderParse;
 use ingot_types::NetworkRepr;
 use ingot_types::NextLayer;
-use ingot_types::OneChunk;
 use ingot_types::ParseChoice;
 use ingot_types::ParseError;
-use ingot_types::Parsed;
 use ingot_types::Read;
 use ingot_types::VarBytes;
 use macaddr::MacAddr6;
 use pnet_macros_support::types::*;
-use zerocopy::ByteSliceMut;
 
 pub use ingot_macros::*;
 
@@ -352,7 +348,7 @@ pub struct UltimateChain<Q> {
 }
 
 fn test() {
-    let mut buf = [0u8; 1024];
+    let buf = [0u8; 1024];
     let a: Option<UltimateChain<&mut [u8]>> = None;
     let b: Option<UltimateChain<&[u8]>> = None;
     let b: Option<UltimateChain<Vec<u8>>> = None;
