@@ -1,7 +1,7 @@
 use alloc::collections::LinkedList;
+use alloc::vec::Vec;
 use ingot_types::Header;
 use ingot_types::HeaderParse;
-use ingot_types::OneChunk;
 
 use super::*;
 
@@ -40,7 +40,7 @@ fn are_my_fragment_traits_sane() {
     let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
     // let mut eth = EthernetView::
     let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
-    let (mut v6, rest) = ValidIpv6::parse(&mut rest[..]).unwrap();
+    let (_v6, rest) = ValidIpv6::parse(&mut rest[..]).unwrap();
     assert_eq!(rest.len(), 0);
     assert_eq!(eth.source(), MacAddr6::nil());
     eth.set_source(MacAddr6::broadcast());
@@ -62,7 +62,7 @@ fn does_this_chain_stuff_compile() {
     {
         let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
         let (mut ipv4, rest) = ValidIpv4::parse(rest).unwrap();
-        let (mut udp, rest) = ValidUdp::parse(rest).unwrap();
+        let (_udp, _rest) = ValidUdp::parse(rest).unwrap();
 
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
@@ -72,7 +72,7 @@ fn does_this_chain_stuff_compile() {
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
     }
 
-    let (mystack, _) = UltimateChain::parse(&mut buf2[..]).unwrap();
+    let (_mystack, _) = UltimateChain::parse(&mut buf2[..]).unwrap();
     let (mystack, _) = UltimateChain::parse(&buf2[..]).unwrap();
 
     match mystack.l3 {

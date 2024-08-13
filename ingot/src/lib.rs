@@ -1,19 +1,14 @@
 #![no_std]
 
-use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
-use ingot_macros::Ingot;
-use ingot_macros::Parse;
-use ingot_types::Chunk;
 use ingot_types::HasView;
 use ingot_types::HeaderParse;
 use ingot_types::NetworkRepr;
 use ingot_types::NextLayer;
 use ingot_types::ParseChoice;
 use ingot_types::ParseError;
-use ingot_types::Read;
 use ingot_types::VarBytes;
 use macaddr::MacAddr6;
 use pnet_macros_support::types::*;
@@ -21,8 +16,6 @@ use pnet_macros_support::types::*;
 pub use ingot_macros::*;
 
 #[cfg(feature = "alloc")]
-#[allow(unused)]
-#[macro_use]
 extern crate alloc;
 
 #[cfg(test)]
@@ -347,17 +340,7 @@ pub struct UltimateChain<Q> {
     pub l4: UdpPacket<Q>,
 }
 
-fn test() {
-    let buf = [0u8; 1024];
-    let a: Option<UltimateChain<&mut [u8]>> = None;
-    let b: Option<UltimateChain<&[u8]>> = None;
-    let b: Option<UltimateChain<Vec<u8>>> = None;
-
-    struct A(u8, u8, u8, u8);
-    A { 0: 1, 1: 2, 3: 3, 2: 2 };
-}
-
-pub fn parse_q<'a>(a: &'a [u8]) -> UltimateChain<&'a [u8]> {
+pub fn parse_q(a: &[u8]) -> UltimateChain<&[u8]> {
     let (o, _) = UltimateChain::parse(a).unwrap();
     o
 }

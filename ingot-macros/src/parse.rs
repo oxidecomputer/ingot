@@ -1,4 +1,3 @@
-use darling::usage::GenericsExt;
 use darling::FromDeriveInput;
 use darling::FromField;
 use proc_macro2::Ident;
@@ -29,15 +28,14 @@ struct LayerArgs {
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     // TODO: enforce no lifetimes, one type param.
 
-    let DeriveInput { ref ident, ref data, ref generics, .. } = input;
+    let DeriveInput { ref ident, ref data, .. } = input;
 
     let Data::Struct(data) = data else {
         return Error::new(
             input.span(),
             "packet parsing must be derived on a struct",
         )
-        .into_compile_error()
-        .into();
+        .into_compile_error();
     };
 
     let mut parse_points: Vec<TokenStream> = vec![];
@@ -48,7 +46,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     for (i, field) in data.fields.iter().enumerate() {
         let args = match LayerArgs::from_field(field) {
             Ok(o) => o,
-            Err(e) => return e.write_errors().into(),
+            Err(e) => return e.write_errors(),
         };
 
         let Type::Path(ref ty) = field.ty else { panic!() };
@@ -163,8 +161,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 input.span(),
                 "packet parsing must be derived on a non-unit struct",
             )
-            .into_compile_error()
-            .into();
+            .into_compile_error();
         }
     };
 
@@ -205,5 +202,4 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         }
     }
-    .into()
 }

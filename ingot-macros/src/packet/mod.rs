@@ -65,6 +65,7 @@ pub struct FieldArgs {
 }
 
 #[derive(Clone, Debug)]
+#[allow(unused)]
 struct ValidField {
     /// The name of this field.
     ident: Ident,
@@ -98,16 +99,16 @@ impl ValidField {
     }
 
     fn is_in_bitfield(&self) -> bool {
-        match self.state {
-            FieldState::FixedWidth { bitfield_info: Some(_), .. } => true,
-            _ => false,
-        }
+        matches!(
+            self.state,
+            FieldState::FixedWidth { bitfield_info: Some(_), .. }
+        )
     }
 
     fn length_fn(&self) -> Option<&Expr> {
         match &self.state {
             FieldState::FixedWidth { .. } => None,
-            FieldState::VarWidth { length_fn } => Some(&length_fn),
+            FieldState::VarWidth { length_fn } => Some(length_fn),
             FieldState::Parsable { length_fn } => length_fn.as_ref(),
         }
     }
@@ -132,12 +133,12 @@ impl ValidField {
         }
 
         let mut vis = IdentVisitor::default();
-        vis.visit_expr(&length_fn);
+        vis.visit_expr(length_fn);
 
         let defns = vis
             .0
             .iter()
-            .filter_map(|id| ctx.validated.get(&id).map(|v| (id, v)))
+            .filter_map(|id| ctx.validated.get(id).map(|v| (id, v)))
             .filter(|(_, v)| v.borrow().sub_field_idx < self.sub_field_idx)
             .map(|(id, v)| {
                 let field = v.borrow();
@@ -309,41 +310,39 @@ impl ChunkState {
                     let get_name = select_field.getter_name();
                     let mut_name = select_field.setter_name();
 
-                    match &select_field.state {
-                        FieldState::FixedWidth {
-                            underlying_ty,
-                            bitfield_info: Some(bf),
-                            ..
-                        } => {
-                            let do_into = user_ty == underlying_ty;
-                            let (get_conv, set_conv) = if do_into {
-                                (quote! {val.into()}, quote! {val})
-                            } else {
-                                (
-                                    quote! {::ingot_types::NetworkRepr::from_network(val)},
-                                    quote! {::ingot_types::NetworkRepr::to_network(val)},
-                                )
-                            };
+                    if let FieldState::FixedWidth {
+                        underlying_ty,
+                        bitfield_info: Some(bf),
+                        ..
+                    } = &select_field.state
+                    {
+                        let do_into = user_ty == underlying_ty;
+                        let (get_conv, set_conv) = if do_into {
+                            (quote! {val.into()}, quote! {val})
+                        } else {
+                            (
+                                quote! {::ingot_types::NetworkRepr::from_network(val)},
+                                quote! {::ingot_types::NetworkRepr::to_network(val)},
+                            )
+                        };
 
-                            let subty_get = bf.get(&select_field);
-                            fns.push(quote! {
-                                #[inline]
-                                pub fn #get_name(&self) -> #user_ty {
-                                    #subty_get
-                                    #get_conv
-                                }
-                            });
+                        let subty_get = bf.get(&select_field);
+                        fns.push(quote! {
+                            #[inline]
+                            pub fn #get_name(&self) -> #user_ty {
+                                #subty_get
+                                #get_conv
+                            }
+                        });
 
-                            let subty_set = bf.set(&select_field);
-                            fns.push(quote! {
-                                #[inline]
-                                pub fn #mut_name(&mut self, val: #user_ty) {
-                                    let val_raw = #set_conv;
-                                    #subty_set
-                                }
-                            });
-                        }
-                        _ => {}
+                        let subty_set = bf.set(&select_field);
+                        fns.push(quote! {
+                            #[inline]
+                            pub fn #mut_name(&mut self, val: #user_ty) {
+                                let val_raw = #set_conv;
+                                #subty_set
+                            }
+                        });
                     }
                 }
 
@@ -362,6 +361,7 @@ impl ChunkState {
 struct StructParseDeriveCtx {
     ident: Ident,
     generics: Generics,
+    #[allow(unused)]
     data: Fields<FieldArgs>,
 
     validated: HashMap<Ident, Shared<ValidField>>,
@@ -631,7 +631,7 @@ impl StructParseDeriveCtx {
             &self.nominated_next_header
         {
             let user_ty =
-                &self.validated.get(&field_ident).unwrap().borrow().user_ty;
+                &self.validated.get(field_ident).unwrap().borrow().user_ty;
             (
                 quote! {#user_ty},
                 quote! {::core::result::Result::Ok(self.#field_ident())},
@@ -1444,12 +1444,6 @@ impl ReprType {
     }
 }
 
-enum Analysed {
-    FixedWidth(FixedWidthAnalysis),
-    VarWidth(Expr),
-    Parsable,
-}
-
 #[derive(Clone, Debug)]
 struct FixedWidthAnalysis {
     cached_bits: usize,
@@ -1492,6 +1486,7 @@ impl FixedWidthAnalysis {
             e @ Type::Array(TypeArray{ .. })  => {
                 Err(Error::new(e.span(), "array length must be an integer literal"))
             }
+            #[allow(unreachable_code)]
             Type::Tuple(a) => {
                 // TODO: outlaw this while I work on more big-ticket issues.
                 return Err(Error::new(a.span(), "tuple types are not currently allowed as reprs"));

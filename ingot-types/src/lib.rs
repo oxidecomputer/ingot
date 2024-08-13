@@ -226,7 +226,7 @@ impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
 
 /// Thinking about what we'll need for more generic emit tracking.
 ///
-/// # SAFETY
+/// # Safety
 /// * Pointers must refer to the same allocation.
 /// * The region `valid_start[..valid_sz]` must be contained entirely
 ///   within `alloc_start[..alloc_sz]`.
@@ -431,7 +431,7 @@ impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
     type Error = ();
 
     fn try_from(
-        value: HeaderStack<(Option<T>, U)>,
+        _value: HeaderStack<(Option<T>, U)>,
     ) -> Result<Self, Self::Error> {
         todo!()
     }

@@ -70,26 +70,13 @@ impl PrimitiveInBitfield {
         let little_endian =
             self.endianness.map(|v| v.is_little_endian()).unwrap_or_default();
 
-        let (general_shift_amt, general_mask, last_mask, last_shift) =
-            if !little_endian {
-                let shift_amt = (8 - right_overspill) % 8;
-                let other_shift_amt = (8 - left_overspill) % 8;
-                (
-                    shift_amt,
-                    right_include_mask,
-                    left_include_mask,
-                    other_shift_amt,
-                )
-            } else {
-                let shift_amt = (8 - left_overspill) % 8;
-                let other_shift_amt = (8 - right_overspill) % 8;
-                (
-                    shift_amt,
-                    left_exclude_mask,
-                    right_exclude_mask,
-                    other_shift_amt,
-                )
-            };
+        let (general_shift_amt, last_mask) = if !little_endian {
+            let shift_amt = (8 - right_overspill) % 8;
+            (shift_amt, left_include_mask)
+        } else {
+            let shift_amt = (8 - left_overspill) % 8;
+            (shift_amt, right_exclude_mask)
+        };
 
         let needed_bytes = repr_sz / 8;
         // let spare_bits = self.n_bits as u32 % 8;
@@ -235,7 +222,6 @@ impl PrimitiveInBitfield {
             (false, false, FieldOp::Set) => {
                 let n_repr_bytes =
                     (self.n_bits / 8) + ((self.n_bits % 8) != 0) as usize;
-                let bs_len = self.byteslice_len();
                 byte_stores.push(quote! {
                     let last_el = slice.len() - 1;
                 });
@@ -258,8 +244,6 @@ impl PrimitiveInBitfield {
                 for (i, src_byte) in
                     (needed_bytes - n_repr_bytes..needed_bytes).enumerate()
                 {
-                    let dst_byte = first_byte + i;
-
                     // first byte and left overspill: be careful on first set
                     byte_stores.push(quote! {
                         let b = val_as_bytes[#src_byte];
@@ -284,17 +268,15 @@ impl PrimitiveInBitfield {
                     }
                 }
             }
-            (false, false, FieldOp::Set) => {
-                // TODO
-                byte_stores.push(quote! {
-                    todo!()
-                });
-            }
             (true, false, _) => {
                 // TODO
                 // byte_reads.push(quote! {
                 //     todo!()
                 // });
+
+                byte_stores.push(quote! {
+                    todo!()
+                });
             }
         }
 

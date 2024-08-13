@@ -22,17 +22,17 @@ struct VariantArgs {
 }
 
 pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
-    let attr_args = match NestedMeta::parse_meta_list(attr.into()) {
+    let attr_args = match NestedMeta::parse_meta_list(attr) {
         Ok(v) => v,
         Err(e) => {
-            return DarlingError::from(e).write_errors().into();
+            return DarlingError::from(e).write_errors();
         }
     };
 
     let ChoiceArgs { on } = match ChoiceArgs::from_list(&attr_args) {
         Ok(v) => v,
         Err(e) => {
-            return e.write_errors().into();
+            return e.write_errors();
         }
     };
 
@@ -66,8 +66,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
                 var.span(),
                 "variant must have a valid discriminant",
             )
-            .into_compile_error()
-            .into();
+            .into_compile_error();
         };
 
         let id = var.ident;
