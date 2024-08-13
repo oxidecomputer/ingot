@@ -367,3 +367,72 @@ impl NetworkRepr<[u8; 6]> for macaddr::MacAddr6 {
         macaddr::MacAddr6::from(val)
     }
 }
+
+pub struct Parsed<Stack, RawPkt: Read> {
+    // this needs to be a struct with all the right names.
+    pub stack: HeaderStack<Stack>,
+    // want generic data type here:
+    // can be:
+    //  ref or owned
+    //  contig or chunked
+    //  can be optional iff the proto stack is all dynamic!
+    // what is right emit API?
+    // need to wrap in a cursor, kinda.
+    pub data: RawPkt,
+
+    pub last_chunk: Option<RawPkt::Chunk>,
+    // Not yet, but soon.
+    // _self_referential: PhantomPinned,
+}
+
+impl<Stack, RawPkt: Read> Parsed<Stack, RawPkt> {
+    pub fn headers(&self) -> &Stack {
+        &self.stack.0
+    }
+
+    pub fn body(&self) -> Option<&RawPkt::Chunk> {
+        self.last_chunk.as_ref()
+    }
+}
+
+impl<Stack, RawPkt: Read> Parsed<Stack, RawPkt>
+where
+    RawPkt::Chunk: ByteSliceMut,
+{
+    pub fn headers_mut(&mut self) -> &mut Stack {
+        &mut self.stack.0
+    }
+
+    pub fn body_mut(&mut self) -> Option<&mut RawPkt::Chunk> {
+        self.last_chunk.as_mut()
+    }
+}
+
+pub struct HeaderStack<T>(pub T);
+
+// idea:
+// Each layer is parse.
+// Each stack is parse.
+// Tuples of stacks are parse.
+
+// impl<T, U> Parse for (T, U)
+// where
+//     HeaderStack<T>: Parse,
+//     HeaderStack<U>: Parse,
+// {
+//     fn parse(data: &mut Cursor<Data<'b>>) -> ParseResult<Self>
+//     where
+//         Self: Sized {
+//         todo!()
+//     }
+// }
+
+impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
+    type Error = ();
+
+    fn try_from(
+        value: HeaderStack<(Option<T>, U)>,
+    ) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}

@@ -1,3 +1,4 @@
+use darling::usage::GenericsExt;
 use darling::FromDeriveInput;
 use darling::FromField;
 use proc_macro2::Ident;
@@ -26,6 +27,8 @@ struct LayerArgs {
 }
 
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
+    // TODO: enforce no lifetimes, one type param.
+
     let DeriveInput { ref ident, ref data, ref generics, .. } = input;
 
     let Data::Struct(data) = data else {
@@ -38,6 +41,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     let mut parse_points: Vec<TokenStream> = vec![];
+    let mut onechunk_parse_points: Vec<TokenStream> = vec![];
     let mut fnames: Vec<Ident> = vec![];
 
     let n_fields = data.fields.len();
@@ -87,7 +91,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         };
 
-        let contents = if i == 0 {
+        let (contents, ns_contents) = if i == 0 {
             // Hacky generic handling.
             let mut local_ty = first_ty.clone();
             local_ty.qself = None;
@@ -95,12 +99,20 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 el.arguments = PathArguments::None;
             }
 
-            quote! {
-                let (#fname, remainder) = #local_ty::parse(slice)?;
-                #hint_frag
-                #slice_frag
-                #conv_frag
-            }
+            (
+                quote! {
+                    let (#fname, remainder) = #local_ty::parse(slice)?;
+                    #hint_frag
+                    #slice_frag
+                    #conv_frag
+                },
+                quote! {
+                    let (#fname, remainder) = #local_ty::parse(slice)?;
+                    #hint_frag
+                    let slice = remainder;
+                    #conv_frag
+                },
+            )
         } else {
             // Hackier generic handling.
             let mut local_ty = first_ty.clone();
@@ -122,15 +134,24 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 }
             }
 
-            quote! {
-                let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
-                #hint_frag
-                #slice_frag
-                #conv_frag
-            }
+            (
+                quote! {
+                    let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                    #hint_frag
+                    #slice_frag
+                    #conv_frag
+                },
+                quote! {
+                    let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                    #hint_frag
+                    let slice = remainder;
+                    #conv_frag
+                },
+            )
         };
 
         parse_points.push(contents);
+        onechunk_parse_points.push(ns_contents);
         fnames.push(fname);
     }
 
@@ -148,8 +169,23 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     quote! {
-        impl<Q: ::ingot_types::Read> Parsed<#ident<Q::Chunk>, Q> {
-            pub fn newy(mut data: Q) -> ::ingot_types::ParseResult<Self> {
+        impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #ident<V> {
+            type BufType = V;
+        }
+
+        impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #ident<V> {
+            type Target = Self;
+            fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
+                let slice = from;
+
+                #( #onechunk_parse_points )*
+
+                Ok((#ctor, slice))
+            }
+        }
+
+        impl<V: ::ingot_types::Chunk> #ident<V> {
+            pub fn parse_read<Q: ::ingot_types::Read<Chunk = V>>(mut data: Q) -> ::ingot_types::ParseResult<::ingot_types::Parsed<#ident<Q::Chunk>, Q>> {
                 let slice = data.next_chunk()?;
 
                 #( #parse_points )*
@@ -160,8 +196,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     _ => Some(remainder),
                 };
 
-                ::core::result::Result::Ok(Self {
-                    stack: HeaderStack(#ctor),
+                ::core::result::Result::Ok(::ingot_types::Parsed {
+                    stack: ::ingot_types::HeaderStack(#ctor),
                     data,
                     last_chunk,
                     // _self_referential: PhantomPinned,

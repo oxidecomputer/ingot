@@ -72,16 +72,16 @@ fn does_this_chain_stuff_compile() {
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
     }
 
-    let mystack = Parsed::newy(OneChunk::from(&mut buf2[..])).unwrap();
-    let mystack = Parsed::newy(OneChunk::from(&buf2[..])).unwrap();
+    let (mystack, _) = UltimateChain::parse(&mut buf2[..]).unwrap();
+    let (mystack, _) = UltimateChain::parse(&buf2[..]).unwrap();
 
-    match mystack.stack.0.l3 {
+    match mystack.l3 {
         L3::Ipv4(v) => v.hop_limit(),
         L3::Ipv6(v) => v.hop_limit(),
     };
 
     assert_eq!(
-        mystack.stack.0.eth.source(),
+        mystack.eth.source(),
         MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
     );
 }
@@ -123,16 +123,16 @@ fn variable_len_fields_in_chain() {
         udp.set_checksum(0xffff);
     }
 
-    let mystack = Parsed::newy(OneChunk::from(&buf2[..])).unwrap();
+    let (mystack, _) = UltimateChain::parse(&buf2[..]).unwrap();
 
     assert_eq!(
-        mystack.stack.0.eth.source(),
+        mystack.eth.source(),
         MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
     );
-    assert_eq!(mystack.stack.0.eth.destination(), MacAddr6::broadcast());
-    assert_eq!(mystack.stack.0.eth.ethertype(), 0x0800);
+    assert_eq!(mystack.eth.destination(), MacAddr6::broadcast());
+    assert_eq!(mystack.eth.ethertype(), 0x0800);
 
-    let L3::Ipv4(v4) = mystack.stack.0.l3 else {
+    let L3::Ipv4(v4) = mystack.l3 else {
         panic!("did not parse IPv4...");
     };
     assert_eq!(v4.protocol(), 0x11);
@@ -144,10 +144,10 @@ fn variable_len_fields_in_chain() {
         &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     );
 
-    assert_eq!(mystack.stack.0.l4.source(), 6082);
-    assert_eq!(mystack.stack.0.l4.destination(), 6081);
-    assert_eq!(mystack.stack.0.l4.length(), 0);
-    assert_eq!(mystack.stack.0.l4.checksum(), 0xffff);
+    assert_eq!(mystack.l4.source(), 6082);
+    assert_eq!(mystack.l4.destination(), 6081);
+    assert_eq!(mystack.l4.length(), 0);
+    assert_eq!(mystack.l4.checksum(), 0xffff);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn parse_multichunk() {
     my_multi.push_back(udp_bytes);
     my_multi.push_back(body_bytes);
 
-    let mut mystack = Parsed::newy(my_multi.iter_mut()).unwrap();
+    let mut mystack = UltimateChain::parse_read(my_multi.iter_mut()).unwrap();
 
     let hdr = mystack.headers_mut();
 

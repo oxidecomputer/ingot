@@ -1265,11 +1265,16 @@ impl StructParseDeriveCtx {
             match chunk {
                 ChunkState::FixedWidth { size_bytes, .. } => {
                     let ch_ty = chunk.chunk_ty_name(&self.ident).unwrap();
+                    // If on first, we already checked against min size.
+                    // This covers any case with one chunk and no varwidth bits.
+                    if i != 0 {
+                        segment_fragments.push(quote! {
+                            if from.as_ref().len() < #size_bytes {
+                                return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
+                            }
+                        });
+                    }
                     segment_fragments.push(quote! {
-                        if from.as_ref().len() < #size_bytes {
-                            return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
-                        }
-
                         let (l, from) = from.split_at(#size_bytes);
                         let #val_ident: ::zerocopy::Ref<_, #ch_ty> = ::zerocopy::Ref::from_bytes(l)
                             .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
