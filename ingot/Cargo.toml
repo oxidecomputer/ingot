@@ -16,3 +16,10 @@ pnet_packet.workspace = true
 pnet_macros.workspace = true
 pnet_macros_support.workspace = true
 zerocopy.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "modify"
+harness = false

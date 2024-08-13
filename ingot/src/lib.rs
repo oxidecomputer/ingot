@@ -408,7 +408,7 @@ impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
 
 pub struct Parsed<Stack, RawPkt: ingot_types::Read> {
     // this needs to be a struct with all the right names.
-    stack: HeaderStack<Stack>,
+    pub stack: HeaderStack<Stack>,
     // want generic data type here:
     // can be:
     //  ref or owned
@@ -416,9 +416,9 @@ pub struct Parsed<Stack, RawPkt: ingot_types::Read> {
     //  can be optional iff the proto stack is all dynamic!
     // what is right emit API?
     // need to wrap in a cursor, kinda.
-    data: RawPkt,
+    pub data: RawPkt,
 
-    last_chunk: Option<RawPkt::Chunk>,
+    pub last_chunk: Option<RawPkt::Chunk>,
     // Not yet, but soon.
     // _self_referential: PhantomPinned,
 }
