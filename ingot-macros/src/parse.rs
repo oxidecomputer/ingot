@@ -8,6 +8,7 @@ use syn::spanned::Spanned;
 use syn::Data;
 use syn::DeriveInput;
 use syn::Error;
+use syn::Field;
 use syn::GenericArgument;
 use syn::PathArguments;
 use syn::Token;
@@ -16,13 +17,19 @@ use syn::TypeInfer;
 use syn::TypePath;
 
 #[derive(FromDeriveInput)]
-#[darling(attributes(oxp), supports(struct_named, struct_tuple))]
+#[darling(supports(struct_named, struct_tuple))]
 pub struct ParserArgs {}
 
 #[derive(FromField)]
-#[darling(attributes(oxpopt, ingot))]
+#[darling(attributes(ingot))]
 struct LayerArgs {
     from: Option<syn::Path>,
+}
+
+struct AnalysedField {
+    args: LayerArgs,
+    field: Field,
+    first_ty: TypePath,
 }
 
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
@@ -42,12 +49,29 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     let mut onechunk_parse_points: Vec<TokenStream> = vec![];
     let mut fnames: Vec<Ident> = vec![];
 
-    let n_fields = data.fields.len();
-    for (i, field) in data.fields.iter().enumerate() {
+    let mut analysed = vec![];
+    for field in &data.fields {
         let args = match LayerArgs::from_field(field) {
             Ok(o) => o,
             Err(e) => return e.write_errors(),
         };
+
+        let Type::Path(ref ty) = field.ty else { panic!() };
+
+        let first_ty = if let Some(a) = &args.from {
+            TypePath { qself: None, path: a.clone() }
+        } else {
+            ty.clone()
+        };
+
+        analysed.push(AnalysedField { args, field: field.clone(), first_ty });
+    }
+
+    let n_fields = data.fields.len();
+    for (i, AnalysedField { args, field, first_ty }) in
+        analysed.iter().enumerate()
+    {
+        let next = analysed.get(i + 1);
 
         let Type::Path(ref ty) = field.ty else { panic!() };
 
@@ -57,18 +81,14 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             format_ident!("f_{i}")
         };
 
-        let hint_frag = if i != n_fields - 1 {
+        let hint_frag = if let Some(next) = next {
+            // next.ty
+            // let first_ty = next.first_ty
             quote! {
                 let hint = #fname.next_layer()?;
             }
         } else {
             quote! {}
-        };
-
-        let first_ty = if let Some(a) = args.from {
-            &TypePath { qself: None, path: a }
-        } else {
-            ty
         };
 
         let conv_frag = quote! {

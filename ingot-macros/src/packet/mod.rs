@@ -1312,9 +1312,13 @@ impl StructParseDeriveCtx {
                 fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
                     use ::ingot_types::Header;
 
-                    if from.as_ref().len() < Self::MINIMUM_LENGTH {
-                        return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
-                    }
+                    // TODO: This is technically repeating part of the prefix check on
+                    // a fixed width.
+                    // Double check if this makes nested & varlen parses faster/slower.
+
+                    // if from.as_ref().len() < Self::MINIMUM_LENGTH {
+                    //     return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
+                    // }
 
                     #( #segment_fragments )*
 

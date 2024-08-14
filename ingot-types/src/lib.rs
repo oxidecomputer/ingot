@@ -54,6 +54,14 @@ impl<O, B> Packet<O, B> {
     }
 }
 
+impl<O, B> HasView for Packet<O, B> {
+    type ViewType = B;
+}
+
+impl<T: HasView> HasView for Option<T> {
+    type ViewType = T;
+}
+
 #[cfg(feature = "alloc")]
 pub type VarBytes<V> = Packet<Vec<u8>, V>;
 #[cfg(not(feature = "alloc"))]
@@ -295,6 +303,11 @@ pub trait NextLayer {
     type Denom: Copy;
 
     fn next_layer(&self) -> ParseResult<Self::Denom>;
+
+    // #[inline]
+    // fn nl2(&self) -> ParseResult<Option<Self::Denom>> {
+
+    // }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -319,6 +332,18 @@ pub trait ParseChoice<V: Chunk>: Sized {
     type Denom: Copy;
 
     fn parse_choice(data: V, hint: Self::Denom) -> ParseResult<(Self, V)>;
+}
+
+impl<T: HeaderParse<Target = T> + HasBuf> ParseChoice<T::BufType> for T {
+    type Denom = ();
+
+    #[inline]
+    fn parse_choice(
+        data: T::BufType,
+        _hint: Self::Denom,
+    ) -> ParseResult<(Self, T::BufType)> {
+        T::parse(data)
+    }
 }
 
 pub enum ParseControl<Denom: Copy> {
