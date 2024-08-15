@@ -157,11 +157,13 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #( #repr_vars ),*
         }
 
-        impl<V: ::ingot_types::Chunk> ::ingot_types::ParseChoice<V> for #validated_ident<V> {
-            type Denom = #on;
-
+        impl<V: ::ingot_types::Chunk> ::ingot_types::ParseChoice<V, #on> for #validated_ident<V> {
             #[inline]
-            fn parse_choice(data: V, hint: Self::Denom) -> ::ingot_types::ParseResult<(Self, V)> {
+            fn parse_choice(data: V, hint: ::core::option::Option<#on>) -> ::ingot_types::ParseResult<(Self, V)> {
+                let ::core::option::Option::Some(hint) = hint else {
+                    return ::core::result::Result::Err(::ingot_types::ParseError::NeedsHint);
+                };
+
                 match hint {
                     #( #match_arms ),*
                     _ => ::core::result::Result::Err(::ingot_types::ParseError::Unwanted)
@@ -193,7 +195,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             type Denom = T;
 
             #[inline]
-            fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+            fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
                 match self {
                     #( #next_layer_match_arms ),*
                 }

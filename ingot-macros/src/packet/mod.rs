@@ -627,20 +627,19 @@ impl StructParseDeriveCtx {
         let ident = &self.ident;
         let validated_ident = self.validated_ident();
 
-        let (denom, ref_body, owned_body) = if let Some(field_ident) =
-            &self.nominated_next_header
-        {
-            let user_ty =
-                &self.validated.get(field_ident).unwrap().borrow().user_ty;
-            (
-                quote! {#user_ty},
-                quote! {::core::result::Result::Ok(self.#field_ident())},
-                quote! {::core::result::Result::Ok(self.#field_ident)},
-            )
-        } else {
-            let no_val = quote! {::core::result::Result::Err(::ingot_types::ParseError::NoHint)};
-            (quote! {()}, no_val.clone(), no_val)
-        };
+        let (denom, ref_body, owned_body) =
+            if let Some(field_ident) = &self.nominated_next_header {
+                let user_ty =
+                    &self.validated.get(field_ident).unwrap().borrow().user_ty;
+                (
+                    quote! {#user_ty},
+                    quote! {::core::option::Option::Some(self.#field_ident())},
+                    quote! {::core::option::Option::Some(self.#field_ident)},
+                )
+            } else {
+                let no_val = quote! {::core::option::Option::None};
+                (quote! {()}, no_val.clone(), no_val)
+            };
 
         let owned_impl = if let Some(g) = self.my_explicit_generic() {
             quote! {
@@ -648,7 +647,7 @@ impl StructParseDeriveCtx {
                     type Denom = #denom;
 
                     #[inline]
-                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                    fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
                         #owned_body
                     }
                 }
@@ -659,7 +658,7 @@ impl StructParseDeriveCtx {
                     type Denom = #denom;
 
                     #[inline]
-                    fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                    fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
                         #owned_body
                     }
                 }
@@ -671,7 +670,7 @@ impl StructParseDeriveCtx {
                 type Denom = #denom;
 
                 #[inline]
-                fn next_layer(&self) -> ::ingot_types::ParseResult<Self::Denom> {
+                fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
                     #ref_body
                 }
             }

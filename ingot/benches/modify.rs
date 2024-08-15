@@ -1,6 +1,7 @@
 use criterion::criterion_group;
 use criterion::criterion_main;
 use criterion::Criterion;
+use ingot::OpteIn;
 use ingot::UdpMut;
 use ingot::UdpRef;
 use ingot::UltimateChain;
@@ -54,6 +55,77 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         // body
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
     ];
+    #[rustfmt::skip]
+    let opte_in_pkt = [
+        // ---OUTER ETH---
+        // dst
+        0xA8, 0x40, 0x25, 0x77, 0x77, 0x76,
+        // src
+        0xA8, 0x40, 0x25, 0x77, 0x77, 0x77,
+        // ethertype
+        0x86, 0xdd,
+
+        // ---OUTER v6---
+        // v6
+        0x60, 0x00, 0x00, 0x00,
+        0x00, 0x10, 0x11, 0xf0,
+        // v6src
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+        // v6dst
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+
+        // ---OUTER UDP---
+        // source
+        0x1E, 0x61,
+        // dest
+        0x17, 0xC1,
+        // length
+        0x00, 0x14,
+        // csum
+        0x00, 0x00,
+
+        // ---GENEVE WITH OPT---
+        // ver + opt len
+        0x01,
+        // flags
+        0x00,
+        // proto
+        0x65, 0x58,
+        // vni + reserved
+        0x00, 0x04, 0xD2, 0x00,
+
+        // option class
+        0x01, 0x29,
+        // crt + type
+        0x00,
+        // rsvd + len
+        0x00,
+
+        // ---INNER ETH---
+        // dst (guest)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x10,
+        // src (gateway)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01,
+        // ethertype (v4)
+        0x08, 0x00,
+
+        // ---INNER v4---
+        0x45, 0x00, 0x00, 28 + 8,
+        0x00, 0x00, 0x00, 0x00,
+        0xf0, 0x11, 0x00, 0x00,
+        8, 8, 8, 8,
+        192, 168, 0, 5,
+
+        // ---INNER UDP---
+        0x00, 0x80, 0x00, 53,
+        0x00, 0x08, 0x00, 0x00,
+
+        // ---INNER BODY---
+        0x00, 0x01, 0x02, 0x03,
+        0x04, 0x05, 0x06, 0x07,
+    ];
     let mut actual_chain_v4 = LinkedList::new();
     actual_chain_v4.push_front(pkt_body_v4[42..].to_vec());
     actual_chain_v4.push_front(pkt_body_v4[34..42].to_vec());
@@ -81,6 +153,9 @@ pub fn criterion_benchmark(c: &mut Criterion) {
             UltimateChain::parse_read(black_box(actual_chain_v4.iter()))
                 .unwrap()
         })
+    });
+    c.bench_function("parse-stack-opte-in", |b| {
+        b.iter(|| OpteIn::parse(black_box(&opte_in_pkt[..])).unwrap())
     });
 }
 

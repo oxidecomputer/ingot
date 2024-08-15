@@ -27,6 +27,7 @@ struct LayerArgs {
 }
 
 struct AnalysedField {
+    #[allow(unused)]
     args: LayerArgs,
     field: Field,
     first_ty: TypePath,
@@ -68,24 +69,20 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     }
 
     let n_fields = data.fields.len();
-    for (i, AnalysedField { args, field, first_ty }) in
+    for (i, AnalysedField { field, first_ty, .. }) in
         analysed.iter().enumerate()
     {
-        let next = analysed.get(i + 1);
-
-        let Type::Path(ref ty) = field.ty else { panic!() };
-
         let fname = if let Some(ref v) = field.ident {
             v.clone()
         } else {
             format_ident!("f_{i}")
         };
 
-        let hint_frag = if let Some(next) = next {
+        let hint_frag = if i < n_fields {
             // next.ty
             // let first_ty = next.first_ty
             quote! {
-                let hint = #fname.next_layer()?;
+                let hint = #fname.next_layer();
             }
         } else {
             quote! {}

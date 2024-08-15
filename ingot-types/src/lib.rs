@@ -170,7 +170,7 @@ where
     type Denom = O::Denom;
 
     #[inline]
-    fn next_layer(&self) -> ParseResult<Self::Denom> {
+    fn next_layer(&self) -> Option<Self::Denom> {
         match self {
             Packet::Repr(v) => v.next_layer(),
             Packet::Raw(v) => v.next_layer(),
@@ -302,12 +302,7 @@ pub type ParseResult<T> = Result<T, ParseError>;
 pub trait NextLayer {
     type Denom: Copy;
 
-    fn next_layer(&self) -> ParseResult<Self::Denom>;
-
-    // #[inline]
-    // fn nl2(&self) -> ParseResult<Option<Self::Denom>> {
-
-    // }
+    fn next_layer(&self) -> Option<Self::Denom>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -328,25 +323,24 @@ impl From<Infallible> for ParseError {
     }
 }
 
-pub trait ParseChoice<V: Chunk>: Sized {
-    type Denom: Copy;
-
-    fn parse_choice(data: V, hint: Self::Denom) -> ParseResult<(Self, V)>;
+pub trait ParseChoice<V: Chunk, Denom: Copy + Eq>: Sized {
+    fn parse_choice(data: V, hint: Option<Denom>) -> ParseResult<(Self, V)>;
 }
 
-impl<T: HeaderParse<Target = T> + HasBuf> ParseChoice<T::BufType> for T {
-    type Denom = ();
-
+// Allow unconditional parsing of any valid standalone header in a #choice.
+impl<T: HeaderParse<Target = T> + HasBuf, AnyDenom: Copy + Eq>
+    ParseChoice<T::BufType, AnyDenom> for T
+{
     #[inline]
     fn parse_choice(
         data: T::BufType,
-        _hint: Self::Denom,
+        _hint: Option<AnyDenom>,
     ) -> ParseResult<(Self, T::BufType)> {
         T::parse(data)
     }
 }
 
-pub enum ParseControl<Denom: Copy> {
+pub enum ParseControl<Denom: Copy + Eq> {
     Continue(Denom),
     Reject,
     Accept,
