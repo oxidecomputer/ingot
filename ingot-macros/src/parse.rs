@@ -10,6 +10,7 @@ use syn::DeriveInput;
 use syn::Error;
 use syn::Field;
 use syn::GenericArgument;
+use syn::Path;
 use syn::PathArguments;
 use syn::Token;
 use syn::Type;
@@ -23,7 +24,8 @@ pub struct ParserArgs {}
 #[derive(FromField)]
 #[darling(attributes(ingot))]
 struct LayerArgs {
-    from: Option<syn::Path>,
+    from: Option<Path>,
+    control: Option<Path>,
 }
 
 struct AnalysedField {
@@ -98,18 +100,20 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     }
 
     // handle the case where we have a sled of Option<>s at the end
-    let mut terminate_allowed_after = analysed.len();
+    let mut accept_allowed_from = analysed.len();
     for (i, AnalysedField { optional, .. }) in analysed.iter().enumerate().rev()
     {
         if optional.is_some() {
-            terminate_allowed_after = i;
+            accept_allowed_from = i - 1;
         } else {
             break;
         }
     }
+    let any_options = analysed.iter().any(|v| v.optional.is_some());
+    let any_controls = analysed.iter().any(|v| v.args.control.is_some());
 
     let n_fields = data.fields.len();
-    for (i, AnalysedField { field, first_ty, optional, .. }) in
+    for (i, AnalysedField { field, first_ty, optional, args, .. }) in
         analysed.iter().enumerate()
     {
         let fname = if let Some(ref v) = field.ident {
@@ -128,8 +132,14 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             quote! {}
         };
 
-        let conv_frag = quote! {
-            let #fname = #fname.try_into()?;
+        let conv_frag = if optional.is_none() {
+            quote! {
+                let #fname = #fname.try_into()?;
+            }
+        } else {
+            quote! {
+                let #fname = #fname.map(|v| v.try_into()).transpose()?;
+            }
         };
 
         // panic!("{first_ty}, {conv_frag}");
@@ -146,14 +156,109 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         };
 
+        if any_options && any_controls && i == accept_allowed_from {
+            let allow = quote! {
+                can_accept = true;
+            };
+            parse_points.push(allow.clone());
+            onechunk_parse_points.push(allow);
+        }
+
+        let ctl_fn_chunk = if let Some(ctl_fn) = &args.control {
+            Some(quote! {
+                match #ctl_fn(&#fname) {
+                    ::ingot_types::ParseControl::Continue => {},
+                    ::ingot_types::ParseControl::Accept if can_accept => {
+                        accepted = true;
+                    },
+                    ::ingot_types::ParseControl::Accept => {
+                        return ::core::result::Result::Err(
+                            ::ingot_types::ParseError::CannotAccept
+                        );
+                    }
+                    ::ingot_types::ParseControl::Reject => {
+                        return ::core::result::Result::Err(
+                            ::ingot_types::ParseError::Reject
+                        );
+                    },
+                }
+            })
+        } else {
+            None
+        };
+
         let mut local_ty = match optional {
             Some(ty) => ty.clone(),
             None => syn::Type::Path(first_ty.clone()),
         };
 
-        if let Some(optional) = optional {
+        if i == 0 {
+            // Hacky generic handling.
+            if let Type::Path(ref mut t) = local_ty {
+                t.qself = None;
+                if let Some(el) = t.path.segments.last_mut() {
+                    el.arguments = PathArguments::None;
+                }
+            }
         } else {
+            // Hackier generic handling.
+            // let mut local_ty = first_ty.clone();
+            if let Type::Path(ref mut t) = local_ty {
+                t.qself = None;
+                if let Some(el) = t.path.segments.last_mut() {
+                    // replace all generic args with inferred.
+                    match &mut el.arguments {
+                        PathArguments::AngleBracketed(args) => {
+                            for arg in args.args.iter_mut() {
+                                if let GenericArgument::Type(t) = arg {
+                                    *t = Type::Infer(TypeInfer {
+                                        underscore_token: Token![_](t.span()),
+                                    })
+                                }
+                            }
+                        }
+                        PathArguments::None => todo!(),
+                        PathArguments::Parenthesized(_) => todo!(),
+                    }
+                }
+            }
         }
+
+        // TODO: implement and figure in conditions (when/skip_if)
+        let (parse_chunk, parse_choice) = if let Some(optional) = optional {
+            (
+                quote! {
+                    let (#fname, remainder, hint) = if accepted {
+                        (::core::option::Option::None, slice, None)
+                    } else {
+                        let (#fname, remainder) = #local_ty::parse(slice)?;
+                        #hint_frag
+                        (::core::option::Option::Some(#fname), remainder)
+                    };
+                },
+                quote! {
+                    let (#fname, remainder, hint) = if accepted {
+                        // should this be last??
+                        (::core::option::Option::None, slice, None)
+                    } else {
+                        let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                        #hint_frag
+                        (::core::option::Option::Some(#fname), remainder, hint)
+                    };
+                },
+            )
+        } else {
+            (
+                quote! {
+                    let (#fname, remainder) = #local_ty::parse(slice)?;
+                    #hint_frag
+                },
+                quote! {
+                    let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                    #hint_frag
+                },
+            )
+        };
 
         let (contents, ns_contents) = if i == 0 {
             // Hacky generic handling.
@@ -166,14 +271,16 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
             (
                 quote! {
-                    let (#fname, remainder) = #local_ty::parse(slice)?;
-                    #hint_frag
+                    #parse_chunk
+                    #ctl_fn_chunk
+                    // #hint_frag
                     #slice_frag
                     #conv_frag
                 },
                 quote! {
-                    let (#fname, remainder) = #local_ty::parse(slice)?;
-                    #hint_frag
+                    #parse_chunk
+                    #ctl_fn_chunk
+                    // #hint_frag
                     let slice = remainder;
                     #conv_frag
                 },
@@ -203,14 +310,16 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
             (
                 quote! {
-                    let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
-                    #hint_frag
+                    #parse_choice
+                    #ctl_fn_chunk
+                    // #hint_frag
                     #slice_frag
                     #conv_frag
                 },
                 quote! {
-                    let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
-                    #hint_frag
+                    #parse_choice
+                    #ctl_fn_chunk
+                    // #hint_frag
                     let slice = remainder;
                     #conv_frag
                 },
@@ -234,6 +343,11 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         }
     };
 
+    let accept_state = quote! {
+        let mut can_accept = false;
+        let mut accepted = false;
+    };
+
     quote! {
         impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #ident<V> {
             type BufType = V;
@@ -243,6 +357,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             type Target = Self;
             fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
                 let slice = from;
+                #accept_state
 
                 #( #onechunk_parse_points )*
 
@@ -253,6 +368,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         impl<V: ::ingot_types::Chunk> #ident<V> {
             pub fn parse_read<Q: ::ingot_types::Read<Chunk = V>>(mut data: Q) -> ::ingot_types::ParseResult<::ingot_types::Parsed<#ident<Q::Chunk>, Q>> {
                 let slice = data.next_chunk()?;
+                #accept_state
 
                 #( #parse_points )*
 
@@ -266,7 +382,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     stack: ::ingot_types::HeaderStack(#ctor),
                     data,
                     last_chunk,
-                    // _self_referential: PhantomPinned,
                 })
             }
         }

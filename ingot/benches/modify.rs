@@ -137,7 +137,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     actual_chain_v4.push_front(pkt_body_v4[0..14].to_vec());
 
     c.bench_function("parse-udp", |b| {
-        b.iter(|| parse_udp(black_box(&pkt_body_v4[34..42])))
+        b.iter(|| black_box(parse_udp(black_box(&pkt_body_v4[34..42]))))
     });
     c.bench_function("parse-stack-v4", |b| {
         b.iter(|| UltimateChain::parse(black_box(&pkt_body_v4[..])).unwrap())

@@ -286,8 +286,9 @@ pub enum ParseError {
     Unspec,
     Unwanted,
     NeedsHint,
-    NoHint,
     TooSmall,
+    CannotAccept,
+    Reject,
 }
 
 impl From<Infallible> for ParseError {
@@ -316,10 +317,10 @@ impl<T: HeaderParse<Target = T> + HasBuf, AnyDenom: Copy + Eq>
     }
 }
 
-pub enum ParseControl<Denom: Copy + Eq> {
-    Continue(Denom),
-    Reject,
+pub enum ParseControl {
     Accept,
+    Continue,
+    Reject,
 }
 
 pub trait NetworkRepr<U: Copy> {

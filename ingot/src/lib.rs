@@ -8,12 +8,18 @@ use ingot_types::HeaderParse;
 use ingot_types::NetworkRepr;
 use ingot_types::NextLayer;
 use ingot_types::ParseChoice;
+use ingot_types::ParseControl;
 use ingot_types::ParseError;
 use ingot_types::VarBytes;
 use macaddr::MacAddr6;
 use pnet_macros_support::types::*;
+use zerocopy::ByteSlice;
 
 pub use ingot_macros::*;
+pub use ingot_types as types;
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -356,9 +362,134 @@ pub struct OpteIn<Q> {
     pub outer_udp: UdpPacket<Q>,
     pub outer_encap: GenevePacket<Q>,
 
+    #[ingot(control = exit_on_arp)]
     pub inner_eth: EthernetPacket<Q>,
-    // pub inner_l3: Option<L3<Q>>,
-    // pub inner_ulp: Option<L4<Q>>,
+    pub inner_l3: Option<L3<Q>>,
+    pub inner_ulp: Option<L4<Q>>,
+}
+
+// impl<V: ::ingot_types::Chunk> OpteIn<V> {
+//     pub fn parse_ready<Q: ::ingot_types::Read<Chunk = V>>(
+//         mut data: Q,
+//     ) -> ::ingot_types::ParseResult<::ingot_types::Parsed<OpteIn<Q::Chunk>, Q>> {
+//         let slice = data.next_chunk()?;
+//         let mut can_accept = false;
+//         let mut accepted = false;
+//         let (outer_eth, remainder) = EthernetPacket::parse(slice)?;
+//         let hint = outer_eth.next_layer();
+//         let slice = if remainder.as_ref().is_empty() {
+//             data.next_chunk()?
+//         } else {
+//             remainder
+//         };
+//         let outer_eth = outer_eth.try_into()?;
+//         let (outer_v6, remainder) = <L3<
+//             _,
+//         > as HasView>::ViewType::parse_choice(slice, hint)?;
+//         let hint = outer_v6.next_layer();
+//         let slice = if remainder.as_ref().is_empty() {
+//             data.next_chunk()?
+//         } else {
+//             remainder
+//         };
+//         let outer_v6 = outer_v6.try_into()?;
+//         let (outer_udp, remainder) = <L4<
+//             _,
+//         > as HasView>::ViewType::parse_choice(slice, hint)?;
+//         let hint = outer_udp.next_layer();
+//         let slice = if remainder.as_ref().is_empty() {
+//             data.next_chunk()?
+//         } else {
+//             remainder
+//         };
+//         let outer_udp = outer_udp.try_into()?;
+//         let (outer_encap, remainder) = <GenevePacket<
+//             _,
+//         > as HasView>::ViewType::parse_choice(slice, hint)?;
+//         let hint = outer_encap.next_layer();
+//         let slice = if remainder.as_ref().is_empty() {
+//             data.next_chunk()?
+//         } else {
+//             remainder
+//         };
+//         let outer_encap = outer_encap.try_into()?;
+//         can_accept = true;
+//         let (inner_eth, remainder) = <EthernetPacket<
+//             _,
+//         > as HasView>::ViewType::parse_choice(slice, hint)?;
+//         let hint = inner_eth.next_layer();
+//         match exit_on_arp(&inner_eth) {
+//             ::ingot_types::ParseControl::Continue => {}
+//             ::ingot_types::ParseControl::Accept if can_accept => {
+//                 accepted = true;
+//             }
+//             ::ingot_types::ParseControl::Accept => {
+//                 return ::core::result::Result::Err(
+//                     ::ingot_types::ParseError::CannotAccept,
+//                 );
+//             }
+//             ::ingot_types::ParseControl::Reject => {
+//                 return ::core::result::Result::Err(::ingot_types::ParseError::Reject);
+//             }
+//         }
+//         let slice = if remainder.as_ref().is_empty() {
+//             data.next_chunk()?
+//         } else {
+//             remainder
+//         };
+//         let inner_eth = inner_eth.try_into()?;
+//         let (inner_l3, remainder, hint) = if accepted {
+//             (::core::option::Option::None, slice, None)
+//         } else {
+//             let (inner_l3, remainder) = <L3<
+//                 _,
+//             > as HasView>::ViewType::parse_choice(slice, hint)?;
+//             let hint = inner_l3.next_layer();
+//             (::core::option::Option::Some(inner_l3), remainder, hint)
+//         };
+//         let slice = if remainder.as_ref().is_empty() {
+//             data.next_chunk()?
+//         } else {
+//             remainder
+//         };
+//         let inner_l3 = inner_l3.map(TryInto::try_into).transpose()?;
+//         let (inner_ulp, remainder, hint) = if accepted {
+//             (::core::option::Option::None, slice, None)
+//         } else {
+//             let (inner_ulp, remainder) = <L4<
+//                 _,
+//             > as HasView>::ViewType::parse_choice(slice, hint)?;
+//             let hint = inner_ulp.next_layer();
+//             (::core::option::Option::Some(inner_ulp), remainder, hint)
+//         };
+//         let inner_ulp = inner_ulp.try_into()?;
+//         let last_chunk = match remainder.len() {
+//             0 => data.next_chunk().ok(),
+//             _ => Some(remainder),
+//         };
+//         ::core::result::Result::Ok(::ingot_types::Parsed {
+//             stack: ::ingot_types::HeaderStack(OpteIn {
+//                 outer_eth,
+//                 outer_v6,
+//                 outer_udp,
+//                 outer_encap,
+//                 inner_eth,
+//                 inner_l3,
+//                 inner_ulp,
+//             }),
+//             data,
+//             last_chunk,
+//         })
+//     }
+// }
+
+#[inline]
+fn exit_on_arp<V: ByteSlice>(eth: &ValidEthernet<V>) -> ParseControl {
+    if eth.ethertype() == 0x0806 {
+        ParseControl::Accept
+    } else {
+        ParseControl::Continue
+    }
 }
 
 #[derive(Parse)]
@@ -468,6 +599,3 @@ pub fn parse_q(a: &[u8]) -> UltimateChain<&[u8]> {
 //
 // These fall into the HeaderAction camp.
 // Mods are specifically field subsets.
-
-#[cfg(test)]
-mod tests;

@@ -708,7 +708,7 @@ impl StructParseDeriveCtx {
                 let ref_field = self.validated.get(i).expect("reference to a non-existent field").borrow();
                 let ty = &ref_field.user_ty;
 
-                quote! {#ty}
+                quote! {pub #ty}
             },
         });
 
