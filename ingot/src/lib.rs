@@ -361,41 +361,6 @@ pub struct OpteIn<Q> {
     // pub inner_ulp: Option<L4<Q>>,
 }
 
-// impl<V: ::ingot_types::Chunk> OpteIn<V> {
-//     fn parse2(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
-//         let slice = from;
-//         let (outer_eth, remainder) = EthernetPacket::parse(slice)?;
-//         let hint = outer_eth.next_layer()?;
-//         let slice = remainder;
-//         let outer_eth = outer_eth.try_into()?;
-//         let (outer_v6, remainder) =
-//             <L3<_> as HasView>::ViewType::parse_choice(slice, hint)?;
-//         let hint = outer_v6.next_layer()?;
-//         let slice = remainder;
-//         let outer_v6 = outer_v6.try_into()?;
-//         let (outer_udp, remainder) =
-//             <L4<_> as HasView>::ViewType::parse_choice(slice, hint)?;
-//         let hint = outer_udp.next_layer()?;
-//         let slice = remainder;
-//         let outer_udp = outer_udp.try_into()?;
-//         let (outer_encap, remainder) =
-//             <GenevePacket<_> as HasView>::ViewType::parse_choice(slice, hint)?;
-//         let hint = outer_encap.next_layer()?;
-//         let slice = remainder;
-//         let outer_encap = outer_encap.try_into()?;
-//         let (inner_eth, remainder) =
-//             <EthernetPacket<_> as HasView>::ViewType::parse_choice(
-//                 slice, hint,
-//             )?;
-//         let slice = remainder;
-//         let inner_eth = inner_eth.try_into()?;
-//         Ok((
-//             OpteIn { outer_eth, outer_v6, outer_udp, outer_encap, inner_eth },
-//             slice,
-//         ))
-//     }
-// }
-
 #[derive(Parse)]
 pub struct OpteOut<Q> {
     pub inner_eth: EthernetPacket<Q>,

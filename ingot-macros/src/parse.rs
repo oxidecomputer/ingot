@@ -31,6 +31,8 @@ struct AnalysedField {
     args: LayerArgs,
     field: Field,
     first_ty: TypePath,
+    // holds an inner type
+    optional: Option<Type>,
 }
 
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
@@ -65,11 +67,49 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             ty.clone()
         };
 
-        analysed.push(AnalysedField { args, field: field.clone(), first_ty });
+        let optional = match (ty.path.segments.len(), ty.path.segments.first())
+        {
+            (1, Some(el)) if el.ident == "Option" => {
+                if let PathArguments::AngleBracketed(args) = &el.arguments {
+                    if args.args.len() != 1 {
+                        None
+                    } else {
+                        if let Some(GenericArgument::Type(t)) =
+                            args.args.first()
+                        {
+                            Some(t.clone())
+                        } else {
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        analysed.push(AnalysedField {
+            args,
+            field: field.clone(),
+            first_ty,
+            optional,
+        });
+    }
+
+    // handle the case where we have a sled of Option<>s at the end
+    let mut terminate_allowed_after = analysed.len();
+    for (i, AnalysedField { optional, .. }) in analysed.iter().enumerate().rev()
+    {
+        if optional.is_some() {
+            terminate_allowed_after = i;
+        } else {
+            break;
+        }
     }
 
     let n_fields = data.fields.len();
-    for (i, AnalysedField { field, first_ty, .. }) in
+    for (i, AnalysedField { field, first_ty, optional, .. }) in
         analysed.iter().enumerate()
     {
         let fname = if let Some(ref v) = field.ident {
@@ -106,12 +146,22 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         };
 
+        let mut local_ty = match optional {
+            Some(ty) => ty.clone(),
+            None => syn::Type::Path(first_ty.clone()),
+        };
+
+        if let Some(optional) = optional {
+        } else {
+        }
+
         let (contents, ns_contents) = if i == 0 {
             // Hacky generic handling.
-            let mut local_ty = first_ty.clone();
-            local_ty.qself = None;
-            if let Some(el) = local_ty.path.segments.last_mut() {
-                el.arguments = PathArguments::None;
+            if let Type::Path(ref mut t) = local_ty {
+                t.qself = None;
+                if let Some(el) = t.path.segments.last_mut() {
+                    el.arguments = PathArguments::None;
+                }
             }
 
             (
@@ -130,22 +180,24 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             )
         } else {
             // Hackier generic handling.
-            let mut local_ty = first_ty.clone();
-            local_ty.qself = None;
-            if let Some(el) = local_ty.path.segments.last_mut() {
-                // replace all generic args with inferred.
-                match &mut el.arguments {
-                    PathArguments::AngleBracketed(args) => {
-                        for arg in args.args.iter_mut() {
-                            if let GenericArgument::Type(t) = arg {
-                                *t = Type::Infer(TypeInfer {
-                                    underscore_token: Token![_](t.span()),
-                                })
+            // let mut local_ty = first_ty.clone();
+            if let Type::Path(ref mut t) = local_ty {
+                t.qself = None;
+                if let Some(el) = t.path.segments.last_mut() {
+                    // replace all generic args with inferred.
+                    match &mut el.arguments {
+                        PathArguments::AngleBracketed(args) => {
+                            for arg in args.args.iter_mut() {
+                                if let GenericArgument::Type(t) = arg {
+                                    *t = Type::Infer(TypeInfer {
+                                        underscore_token: Token![_](t.span()),
+                                    })
+                                }
                             }
                         }
+                        PathArguments::None => todo!(),
+                        PathArguments::Parenthesized(_) => todo!(),
                     }
-                    PathArguments::None => todo!(),
-                    PathArguments::Parenthesized(_) => todo!(),
                 }
             }
 
