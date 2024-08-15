@@ -10,6 +10,10 @@ use ingot_types::HeaderParse;
 use std::collections::LinkedList;
 use std::hint::black_box;
 
+fn parse_udp(buf: &[u8]) -> ValidUdp<&[u8]> {
+    ValidUdp::parse(buf).unwrap().0
+}
+
 pub fn criterion_benchmark(c: &mut Criterion) {
     #[rustfmt::skip]
     let pkt_body_v4: &mut[u8] = &mut [
