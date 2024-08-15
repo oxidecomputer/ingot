@@ -10,7 +10,6 @@ use ingot_types::HeaderParse;
 use std::collections::LinkedList;
 use std::hint::black_box;
 
-#[no_mangle]
 fn parse_udp(bytes: &[u8]) -> ValidUdp<&[u8]> {
     ValidUdp::parse(bytes).unwrap().0
 }
