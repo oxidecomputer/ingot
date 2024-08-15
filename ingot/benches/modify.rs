@@ -10,6 +10,11 @@ use ingot_types::HeaderParse;
 use std::collections::LinkedList;
 use std::hint::black_box;
 
+#[no_mangle]
+fn parse_udp(bytes: &[u8]) -> ValidUdp<&[u8]> {
+    ValidUdp::parse(bytes).unwrap().0
+}
+
 pub fn criterion_benchmark(c: &mut Criterion) {
     #[rustfmt::skip]
     let pkt_body_v4: &mut[u8] = &mut [
@@ -133,7 +138,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     actual_chain_v4.push_front(pkt_body_v4[0..14].to_vec());
 
     c.bench_function("parse-udp", |b| {
-        b.iter(|| ValidUdp::parse(black_box(&pkt_body_v4[34..42])).unwrap())
+        b.iter(|| parse_udp(black_box(&pkt_body_v4[34..42])))
     });
     c.bench_function("parse-stack-v4", |b| {
         b.iter(|| UltimateChain::parse(black_box(&pkt_body_v4[..])).unwrap())

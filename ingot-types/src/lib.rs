@@ -186,30 +186,6 @@ pub trait Read {
 
 pub use zerocopy::SplitByteSlice as Chunk;
 
-pub struct OneChunk<V>(Option<V>);
-
-impl<V> From<V> for OneChunk<V> {
-    fn from(value: V) -> Self {
-        OneChunk(Some(value))
-    }
-}
-
-impl<'a> Read for OneChunk<&'a [u8]> {
-    type Chunk = &'a [u8];
-
-    fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
-        self.0.take().ok_or(ParseError::TooSmall)
-    }
-}
-
-impl<'a> Read for OneChunk<&'a mut [u8]> {
-    type Chunk = &'a mut [u8];
-
-    fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
-        self.0.take().ok_or(ParseError::TooSmall)
-    }
-}
-
 #[cfg(feature = "alloc")]
 impl<'a> Read for alloc::collections::linked_list::Iter<'a, Vec<u8>> {
     type Chunk = &'a [u8];

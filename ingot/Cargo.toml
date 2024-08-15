@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 alloc = []
-default = ["alloc"]
+default = ["alloc", "ingot-types/alloc"]
 
 [dependencies]
 bitflags.workspace = true
