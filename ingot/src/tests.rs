@@ -312,7 +312,7 @@ fn field_accesses_of_all_kinds() {
 #[test]
 fn test_opte_unconditionals() {
     #[rustfmt::skip]
-    let pkt = [
+    let mut pkt = [
         // ---OUTER ETH---
         // dst
         0xA8, 0x40, 0x25, 0x77, 0x77, 0x76,
@@ -383,8 +383,16 @@ fn test_opte_unconditionals() {
         0x04, 0x05, 0x06, 0x07,
     ];
 
-    let (opte_in, _unparsed) = OpteIn::parse(&pkt[..]).unwrap();
+    let (mut opte_in, _unparsed) = OpteIn::parse(&mut pkt[..]).unwrap();
 
     assert_eq!(opte_in.outer_encap.options_ref().as_ref().len(), 4);
     assert_eq!(opte_in.inner_eth.ethertype(), 0x0800);
+    assert!(opte_in.inner_l3.is_some());
+    assert!(opte_in.inner_ulp.is_some());
+
+    // Now, try out pretending we're ARP and early exiting.
+    opte_in.inner_eth.set_ethertype(0x0806);
+    let (opte_in, _unparsed) = OpteIn::parse(&pkt[..]).unwrap();
+    assert!(opte_in.inner_l3.is_none());
+    assert!(opte_in.inner_ulp.is_none());
 }

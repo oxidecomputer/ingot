@@ -102,7 +102,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         });
 
         repr_match_arms.push(quote! {
-            #repr_ident::#id(v) => #ident::#id(::ingot_types::Packet::Repr(v))
+            #repr_ident::#id(v) => #ident::#id(::ingot_types::Packet::Repr(v.into()))
         });
 
         next_layer_wheres.push(quote! {

@@ -1381,7 +1381,8 @@ impl ToTokens for StructParseDeriveCtx {
 
             impl<V> ::core::convert::From<#self_ty> for #pkt_ident<V> {
                 fn from(value: #self_ty) -> Self {
-                    ::ingot_types::Packet::Repr(value)
+                    // into used to paper over boxing / in-place.
+                    ::ingot_types::Packet::Repr(value.into())
                 }
             }
 
