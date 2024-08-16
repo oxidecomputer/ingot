@@ -182,13 +182,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     //     })
     // });
 
-    let mut opte_in_pkt2 = opte_in_pkt;
-    let (mut opte_in, _unparsed) =
-        OpteIn::parse(&mut opte_in_pkt2[..]).unwrap();
-    opte_in.inner_eth.set_ethertype(0x0806);
-    c.bench_function("parse-stack-opte-in-arp", |b| {
-        b.iter(|| OpteIn::parse(black_box(&opte_in_pkt2[..])).unwrap())
-    });
+    // let mut opte_in_pkt2 = opte_in_pkt;
+    // let (mut opte_in, _unparsed) =
+    //     OpteIn::parse(&mut opte_in_pkt2[..]).unwrap();
+    // opte_in.inner_eth.set_ethertype(0x0806);
+    // c.bench_function("parse-stack-opte-in-arp", |b| {
+    //     b.iter(|| OpteIn::parse(black_box(&opte_in_pkt2[..])).unwrap())
+    // });
 }
 
 criterion_group!(benches, criterion_benchmark);

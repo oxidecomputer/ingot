@@ -346,6 +346,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         onechunk_parse_points.push(ns_contents);
     }
 
+    // maybe worthwhile to recast with smarter return logic?
     let define_all_optionals = all_optional_fnames
         .map(|n| {
             quote! {

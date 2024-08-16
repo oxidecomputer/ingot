@@ -7,10 +7,12 @@ use alloc::vec::Vec;
 use core::convert::Infallible;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
+use core::ops::Deref;
 #[cfg(not(feature = "alloc"))]
 use heapless::Vec;
 use zerocopy::ByteSlice;
 use zerocopy::ByteSliceMut;
+use zerocopy::SplitByteSlice;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
