@@ -1,6 +1,8 @@
 #![no_std]
 
 #[cfg(feature = "alloc")]
+use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::convert::Infallible;
 use core::net::Ipv4Addr;
@@ -18,6 +20,10 @@ pub mod primitives {
 }
 
 pub enum Packet<O, B> {
+    #[cfg(feature = "alloc")]
+    // /// Owned, in-memory representation of a ...
+    // Repr(Box<O>),
+    // #[cfg(not(feature = "alloc"))]
     /// Owned, in-memory representation of a ...
     Repr(O),
     /// Packed representation of a ...

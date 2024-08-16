@@ -136,6 +136,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     actual_chain_v4.push_front(pkt_body_v4[14..34].to_vec());
     actual_chain_v4.push_front(pkt_body_v4[0..14].to_vec());
 
+    println!("size is {}", core::mem::size_of::<OpteIn<&[u8]>>());
+
     c.bench_function("parse-udp", |b| {
         b.iter(|| black_box(parse_udp(black_box(&pkt_body_v4[34..42]))))
     });
@@ -160,6 +162,17 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
     c.bench_function("parse-stack-opte-in", |b| {
         b.iter(|| OpteIn::parse(black_box(&opte_in_pkt[..])).unwrap())
+    });
+    // c.bench_function("parsy-stack-opte-in", |b| {
+    //     b.iter(|| OpteIn::parsy(black_box(&opte_in_pkt[..])).unwrap())
+    // });
+    c.bench_function("parsy-stack-opte-in", |b| {
+        b.iter(|| {
+            let mut slot = None;
+            let _rem =
+                OpteIn::parsy(black_box(&opte_in_pkt[..]), &mut slot).unwrap();
+            black_box(slot)
+        })
     });
 }
 

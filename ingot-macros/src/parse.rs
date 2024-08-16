@@ -35,6 +35,7 @@ struct AnalysedField {
     first_ty: TypePath,
     // holds an inner type
     optional: Option<Type>,
+    fname: Ident,
 }
 
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
@@ -52,10 +53,9 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
     let mut parse_points: Vec<TokenStream> = vec![];
     let mut onechunk_parse_points: Vec<TokenStream> = vec![];
-    let mut fnames: Vec<Ident> = vec![];
 
     let mut analysed = vec![];
-    for field in &data.fields {
+    for (i, field) in data.fields.iter().enumerate() {
         let args = match LayerArgs::from_field(field) {
             Ok(o) => o,
             Err(e) => return e.write_errors(),
@@ -91,11 +91,18 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             _ => None,
         };
 
+        let fname = if let Some(ref v) = field.ident {
+            v.clone()
+        } else {
+            format_ident!("f_{i}")
+        };
+
         analysed.push(AnalysedField {
             args,
             field: field.clone(),
             first_ty,
             optional,
+            fname,
         });
     }
 
@@ -111,17 +118,26 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     }
     let any_options = analysed.iter().any(|v| v.optional.is_some());
     let any_controls = analysed.iter().any(|v| v.args.control.is_some());
+    let all_optional_fnames =
+        analysed.iter().filter_map(|v| v.optional.as_ref().map(|_| &v.fname));
+    let all_fnames = analysed.iter().map(|v| &v.fname).collect::<Vec<_>>();
+
+    let ctor = match data.fields {
+        syn::Fields::Named(_) => quote! { #ident{ #( #all_fnames ),* } },
+        syn::Fields::Unnamed(_) => quote! { #ident( #( #all_fnames ),* ) },
+        syn::Fields::Unit => {
+            return Error::new(
+                input.span(),
+                "packet parsing must be derived on a non-unit struct",
+            )
+            .into_compile_error();
+        }
+    };
 
     let n_fields = data.fields.len();
-    for (i, AnalysedField { field, first_ty, optional, args, .. }) in
+    for (i, AnalysedField { field, first_ty, optional, fname, args, .. }) in
         analysed.iter().enumerate()
     {
-        let fname = if let Some(ref v) = field.ident {
-            v.clone()
-        } else {
-            format_ident!("f_{i}")
-        };
-
         let hint_frag = if i < n_fields {
             // next.ty
             // let first_ty = next.first_ty
@@ -328,20 +344,15 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         parse_points.push(contents);
         onechunk_parse_points.push(ns_contents);
-        fnames.push(fname);
     }
 
-    let ctor = match data.fields {
-        syn::Fields::Named(_) => quote! { #ident{ #( #fnames ),* } },
-        syn::Fields::Unnamed(_) => quote! { #ident( #( #fnames ),* ) },
-        syn::Fields::Unit => {
-            return Error::new(
-                input.span(),
-                "packet parsing must be derived on a non-unit struct",
-            )
-            .into_compile_error();
-        }
-    };
+    let define_all_optionals = all_optional_fnames
+        .map(|n| {
+            quote! {
+                let #n = None;
+            }
+        })
+        .collect::<Vec<_>>();
 
     let accept_state = quote! {
         let mut can_accept = false;
@@ -356,6 +367,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #ident<V> {
             type Target = Self;
             fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
+                // #( #define_all_optionals )*
+
                 let slice = from;
                 #accept_state
 
@@ -367,6 +380,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         impl<V: ::ingot_types::Chunk> #ident<V> {
             pub fn parse_read<Q: ::ingot_types::Read<Chunk = V>>(mut data: Q) -> ::ingot_types::ParseResult<::ingot_types::Parsed<#ident<Q::Chunk>, Q>> {
+                // #( #define_all_optionals )*
+
                 let slice = data.next_chunk()?;
                 #accept_state
 
