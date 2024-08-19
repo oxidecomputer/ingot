@@ -280,7 +280,7 @@ pub struct IcmpV6 {
 // }
 
 #[derive(Ingot)]
-pub struct Tcp {
+pub struct Tcp<V> {
     pub source: u16be,
     pub destination: u16be,
 
@@ -294,11 +294,13 @@ pub struct Tcp {
     #[ingot(is = "u8")]
     pub flags: TcpFlags,
     pub window_size: u16be,
-    // #[ingot(payload_len() + 8)]
-    pub length: u16be,
+
+    pub checksum: u16be,
     pub urgent_ptr: u16be,
     // #[ingot(extension)]
     // pub tcp_opts: ???
+    #[ingot(var_len = "(data_offset * 4).saturating_sub(20)")]
+    pub options: VarBytes<V>,
 }
 
 #[derive(Ingot)]
@@ -357,12 +359,14 @@ pub enum L32 {
 
 #[choice(on = u8)]
 pub enum L4 {
+    #[ingot(generic)]
     Tcp = 0x06,
     Udp = 0x11,
 }
 
 #[choice(on = u8)]
 pub enum Ulp {
+    #[ingot(generic)]
     Tcp = 0x06,
     Udp = 0x11,
     IcmpV4 = 1,

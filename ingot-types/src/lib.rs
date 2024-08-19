@@ -7,12 +7,10 @@ use alloc::vec::Vec;
 use core::convert::Infallible;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
-use core::ops::Deref;
 #[cfg(not(feature = "alloc"))]
 use heapless::Vec;
 use zerocopy::ByteSlice;
 use zerocopy::ByteSliceMut;
-use zerocopy::SplitByteSlice;
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -303,8 +301,10 @@ impl From<Infallible> for ParseError {
     fn from(_: Infallible) -> Self {
         // XXX: benchmark this one.
         //      `cargo asm` suggests the compiler is smart enough.
-        // unsafe { core::hint::unreachable_unchecked() }
-        unreachable!()
+        //      some benchmark runs suggest marginal improvement on
+        //      longer chains?
+        unsafe { core::hint::unreachable_unchecked() }
+        // unreachable!()
     }
 }
 

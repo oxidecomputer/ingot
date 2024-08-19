@@ -1,7 +1,6 @@
 use criterion::criterion_group;
 use criterion::criterion_main;
 use criterion::Criterion;
-use ingot::EthernetMut;
 use ingot::OpteIn;
 use ingot::OpteOut;
 use ingot::UdpMut;
