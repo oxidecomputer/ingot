@@ -20,7 +20,7 @@ ingot-types = { path = "ingot-types", default-features = false }
 bitflags = "2"
 darling = "0.20"
 heapless = "0.8"
-macaddr = "1"
+macaddr = { version = "1", default-features = false }
 prettyplease = "0.2"
 proc-macro2 = { version = "1" }
 quote = "1.0"
