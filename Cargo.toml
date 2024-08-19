@@ -29,7 +29,7 @@ syn = { version = "2", features = ["visit"] }
 zerocopy = { version = "0.8.0-alpha.16", features = ["derive"] }
 
 # temp external
-pnet_packet = "0.35"
+pnet_packet = { version = "0.35", default-features = false }
 pnet_macros = "0.35"
 pnet_macros_support = "0.35"
 
