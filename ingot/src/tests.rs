@@ -396,3 +396,110 @@ fn test_opte_unconditionals() {
     assert!(opte_in.inner_l3.is_none());
     assert!(opte_in.inner_ulp.is_none());
 }
+
+#[test]
+fn varlen_geneve() {
+    #[rustfmt::skip]
+    let g_no_opt = [
+        // ---GENEVE WITH OPT---
+        // ver + opt len
+        0x00,
+        // flags
+        0x00,
+        // proto
+        0x65, 0x58,
+        // vni + reserved
+        0x00, 0x04, 0xD2, 0x00,
+    ];
+
+    #[rustfmt::skip]
+    let g_opt = [
+        // ---GENEVE WITH OPT---
+        // ver + opt len
+        0x01,
+        // flags
+        0x00,
+        // proto
+        0x65, 0x58,
+        // vni + reserved
+        0x00, 0x04, 0xD2, 0x00,
+
+        // option class
+        0x01, 0x29,
+        // crt + type
+        0x00,
+        // rsvd + len
+        0x00,
+    ];
+
+    let (g, _) = ValidGeneve::parse(&g_no_opt[..]).unwrap();
+    assert_eq!(g.packet_length(), 8);
+
+    let (g, _) = ValidGeneve::parse(&g_opt[..]).unwrap();
+    assert_eq!(g.packet_length(), 12);
+}
+
+#[test]
+fn ipv6_bitset() {
+    let golden = [0x6A, 0x61, 0xe2, 0x40];
+    #[rustfmt::skip]
+    let mut pkt = [
+        // ---OUTER v6---
+        // v6
+        0x6A, 0x61, 0xe2, 0x40,
+        0x00, 0x10, 0x11, 0xf0,
+        // v6src
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+        // v6dst
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    ];
+
+    let (mut v6, _rest) = ValidIpv6::parse(&mut pkt[..]).unwrap();
+
+    for i in 0..5 {
+        match i {
+            1 => {
+                v6.set_version(6);
+            }
+            2 => {
+                v6.set_dscp(41);
+            }
+            3 => {
+                v6.set_ecn(Ecn::Capable1);
+            }
+            4 => v6.set_flow_label(123456),
+            _ => {}
+        }
+
+        assert_eq!(
+            v6.version(),
+            6,
+            "version mismatch in iter {} (golden {golden:x?}, saw {:x?})",
+            i,
+            &pkt[..4]
+        );
+        assert_eq!(
+            v6.dscp(),
+            41,
+            "dscp mismatch in iter {} (golden {golden:x?}, saw {:x?})",
+            i,
+            &pkt[..4]
+        );
+        assert_eq!(
+            v6.ecn(),
+            Ecn::Capable1,
+            "ecn mismatch in iter {} (golden {golden:x?}, saw {:x?})",
+            i,
+            &pkt[..4]
+        );
+        assert_eq!(
+            v6.flow_label(),
+            123456,
+            "flow mismatch in iter {} (golden {golden:x?}, saw {:x?})",
+            i,
+            &pkt[..4]
+        );
+    }
+}

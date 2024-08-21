@@ -24,7 +24,9 @@ impl PrimitiveInBitfield {
     }
 
     fn last_byte_exclusive(&self) -> usize {
-        self.first_byte() + self.byteslice_len()
+        let last_bit_inner = self.first_bit_inner + self.n_bits;
+        let whole_bytes = last_bit_inner / 8;
+        whole_bytes + if last_bit_inner % 8 != 0 { 1 } else { 0 }
     }
 
     fn byteslice_len(&self) -> usize {
@@ -52,6 +54,7 @@ impl PrimitiveInBitfield {
         } else {
             next_int_sz
         };
+        let short_bits = ((8 - (self.n_bits % 8)) % 8) as u32;
 
         // Straddle over byte boundaries, where applicable.
         let left_to_lose = self.first_bit_inner as u32 % 8;
@@ -63,6 +66,8 @@ impl PrimitiveInBitfield {
             0xffu8.wrapping_shl(left_to_lose).wrapping_shr(left_to_lose);
         let right_include_mask =
             0xffu8.wrapping_shr(right_to_lose).wrapping_shl(right_to_lose);
+        let spare_bits_mask =
+            0xffu8.wrapping_shl(short_bits).wrapping_shr(short_bits);
 
         let left_exclude_mask = !left_include_mask;
         let right_exclude_mask = !right_include_mask;
@@ -151,29 +156,34 @@ impl PrimitiveInBitfield {
                 for (i, src_byte) in
                     (first_byte..last_byte_ex).rev().enumerate()
                 {
-                    let write_this_cycle =
-                        (src_byte - first_byte).min(needed_bytes - 1);
+                    let write_this_cycle: isize =
+                        (needed_bytes as isize - i as isize) - 1;
+                    let read_this_cycle = (last_byte_ex - first_byte) - i - 1;
 
                     byte_reads.push(quote! {
-                        let b = slice[#write_this_cycle];
+                        let b = slice[#read_this_cycle];
                     });
 
                     // don't carry the masked portion of this byte
                     // back into the previous one if we're the first.
                     if i != 0 {
+                        let wrote_last_cycle = (write_this_cycle + 1) as usize;
                         byte_reads.push(quote! {
-                            // let m = b & #general_mask;
-                            in_bytes[(#write_this_cycle + 1)] |= (b << (#right_overspill));
+                            in_bytes[#wrote_last_cycle] |= (b << (#right_overspill));
                         });
                     }
 
-                    if i != self.byteslice_len() - 1 || last_mask == 0 {
+                    if write_this_cycle >= 0 {
+                        let write_this_cycle = write_this_cycle as usize;
                         byte_reads.push(quote! {
                             in_bytes[#write_this_cycle] = (b >> #general_shift_amt);
                         });
-                    } else {
+                    }
+
+                    if src_byte == first_byte && last_mask != 0 {
+                        let capped_min = write_this_cycle.max(0) as usize;
                         byte_reads.push(quote! {
-                            in_bytes[#write_this_cycle] = (b & #last_mask) >> #general_shift_amt;
+                            in_bytes[#capped_min] &= #spare_bits_mask;
                         });
                     }
                 }
@@ -251,7 +261,7 @@ impl PrimitiveInBitfield {
                         let rem = b >> ((8 - #shift) % 8);
                     });
 
-                    if i == 0 && left_overspill == 0 {
+                    if i == 0 && left_overspill == 0 && self.n_bits >= 8 {
                         byte_stores.push(quote! {
                             slice[#i] = base;
                         });

@@ -31,7 +31,7 @@ extern crate std;
 
 // types we want to use in packet bodies.
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 #[repr(u8)]
 pub enum Ecn {
     #[default]
