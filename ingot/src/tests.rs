@@ -467,7 +467,15 @@ fn ipv6_bitset() {
                 v6.set_dscp(41);
             }
             3 => {
+                eprintln!(
+                    "(golden {golden:x?}, saw {:x?})",
+                    &v6.0.bytes()[..4]
+                );
                 v6.set_ecn(Ecn::Capable1);
+                eprintln!(
+                    "(golden {golden:x?}, saw {:x?})",
+                    &v6.0.bytes()[..4]
+                );
             }
             4 => v6.set_flow_label(123456),
             _ => {}

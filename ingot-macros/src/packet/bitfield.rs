@@ -84,7 +84,6 @@ impl PrimitiveInBitfield {
         };
 
         let needed_bytes = repr_sz / 8;
-        // let spare_bits = self.n_bits as u32 % 8;
         let first_byte = self.first_byte();
         let last_byte_ex = self.last_byte_exclusive();
 
@@ -232,27 +231,41 @@ impl PrimitiveInBitfield {
             (false, false, FieldOp::Set) => {
                 let n_repr_bytes =
                     (self.n_bits / 8) + ((self.n_bits % 8) != 0) as usize;
+                let last_el = last_byte_ex - first_byte - 1;
+                // byte_stores.push(quote! {
+                //     let last_el = slice.len() - 1;
+                // });
+
+                if last_el == 0 {
+                    byte_stores.push(quote! {
+                        slice[0] &= #left_exclude_mask | #right_exclude_mask;
+                    });
+                } else {
+                    if left_overspill != 0 {
+                        byte_stores.push(quote! {
+                            slice[0] &= #left_exclude_mask;
+                        });
+                    }
+
+                    if right_overspill != 0 {
+                        byte_stores.push(quote! {
+                            slice[#last_el] &= #right_exclude_mask;
+                        });
+                    }
+                }
+
+                let first_data_byte = needed_bytes - n_repr_bytes;
+
+                // mask out any old bits of the value we're copying in.
                 byte_stores.push(quote! {
-                    let last_el = slice.len() - 1;
+                    val_as_bytes[#first_data_byte] &= #spare_bits_mask;
                 });
-
-                if left_overspill != 0 {
-                    byte_stores.push(quote! {
-                        slice[0] &= #left_exclude_mask;
-                    });
-                }
-
-                if right_overspill != 0 {
-                    byte_stores.push(quote! {
-                        slice[last_el] &= #right_exclude_mask;
-                    });
-                }
 
                 // let shift = right_overspill;
                 let shift = general_shift_amt;
 
-                for (i, src_byte) in
-                    (needed_bytes - n_repr_bytes..needed_bytes).enumerate()
+                let mut writing_byte = first_byte;
+                for (i, src_byte) in (first_data_byte..needed_bytes).enumerate()
                 {
                     // first byte and left overspill: be careful on first set
                     byte_stores.push(quote! {
@@ -261,19 +274,22 @@ impl PrimitiveInBitfield {
                         let rem = b >> ((8 - #shift) % 8);
                     });
 
+                    let dst_byte = i
+                        + (n_repr_bytes < (last_byte_ex - first_byte)) as usize;
+
                     if i == 0 && left_overspill == 0 && self.n_bits >= 8 {
                         byte_stores.push(quote! {
-                            slice[#i] = base;
+                            slice[#dst_byte] = base;
                         });
                     } else {
                         byte_stores.push(quote! {
-                            slice[#i] |= base;
+                            slice[#dst_byte] |= base;
                         });
                     }
 
-                    if i > 0 {
+                    if dst_byte > 0 {
                         byte_stores.push(quote! {
-                            slice[#i - 1] |= rem;
+                            slice[#dst_byte - 1] |= rem;
                         });
                     }
                 }
@@ -302,7 +318,7 @@ impl PrimitiveInBitfield {
                 let val = #conv_frag;
             },
             FieldOp::Set => quote! {
-                let val_as_bytes = #conv_frag;
+                let mut val_as_bytes = #conv_frag;
                 let slice: &mut [u8] = &mut self.#read_from[#first_byte..#last_byte_ex];
 
                 #( #byte_stores )*;
