@@ -1,26 +1,15 @@
 // TODO: uncork later.
 
 use crate::{
-    ethernet::{
-        Ethernet, EthernetMut, EthernetPacket, EthernetRef, Ethertype2,
-        ValidEthernet,
-    },
-    geneve::{Geneve, GeneveMut, GenevePacket, GeneveRef, ValidGeneve},
-    icmp::{
-        IcmpV4, IcmpV4Mut, IcmpV4Ref, IcmpV6, IcmpV6Mut, IcmpV6Ref,
-        ValidIcmpV4, ValidIcmpV6,
-    },
-    ip::{
-        Ecn, Ipv4, Ipv4Mut, Ipv4Ref, Ipv6, Ipv6Mut, Ipv6Packet, Ipv6Ref,
-        ValidIpv4, ValidIpv6,
-    },
-    tcp::{Tcp, TcpMut, TcpRef, ValidTcp},
-    udp::{Udp, UdpMut, UdpPacket, UdpRef, ValidUdp},
+    ethernet::{EthernetPacket, EthernetRef, Ethertype2, ValidEthernet},
+    geneve::GenevePacket,
+    icmp::{IcmpV4, IcmpV6, ValidIcmpV4, ValidIcmpV6},
+    ip::{Ipv4, Ipv6, Ipv6Packet, ValidIpv4, ValidIpv6},
+    tcp::{Tcp, ValidTcp},
+    udp::{Udp, UdpPacket, ValidUdp},
 };
-use alloc::{collections::LinkedList, vec::Vec};
 use ingot_macros::{choice, Parse};
-use ingot_types::{primitives::*, Header, HeaderParse, ParseControl};
-use macaddr::MacAddr6;
+use ingot_types::{primitives::*, HeaderParse, ParseControl};
 use zerocopy::ByteSlice;
 
 #[choice(on = u16be)]

@@ -263,7 +263,6 @@ impl PrimitiveInBitfield {
                 // let shift = right_overspill;
                 let shift = general_shift_amt;
 
-                let mut writing_byte = first_byte;
                 for (i, src_byte) in (first_data_byte..needed_bytes).enumerate()
                 {
                     // first byte and left overspill: be careful on first set

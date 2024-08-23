@@ -43,18 +43,18 @@ pub fn choice(
 }
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-enum IntClass {
-    BigEndian,
-    LittleEndian,
-    HostEndian,
+enum IntEndianClass {
+    Big,
+    Little,
+    Host,
 }
 
-impl IntClass {
+impl IntEndianClass {
     pub fn suffix(&self) -> &str {
         match self {
-            IntClass::BigEndian => "be",
-            IntClass::LittleEndian => "le",
-            IntClass::HostEndian => "he",
+            IntEndianClass::Big => "be",
+            IntEndianClass::Little => "le",
+            IntEndianClass::Host => "he",
         }
     }
 }
@@ -67,7 +67,7 @@ pub fn define_primitive_types(
     let prefixes = ["u"];
     let bitwidths = 9..=128usize;
     let suffixes =
-        [IntClass::BigEndian, IntClass::LittleEndian, IntClass::HostEndian];
+        [IntEndianClass::Big, IntEndianClass::Little, IntEndianClass::Host];
 
     let mut body = vec![];
     for (prefix, width, suffix) in

@@ -17,8 +17,8 @@ struct LayerArgs {
     control: Option<Path>,
 }
 
+#[allow(unused)]
 struct AnalysedField {
-    #[allow(unused)]
     args: LayerArgs,
     field: Field,
     first_ty: TypePath,
@@ -64,14 +64,12 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 if let PathArguments::AngleBracketed(args) = &el.arguments {
                     if args.args.len() != 1 {
                         None
+                    } else if let Some(GenericArgument::Type(t)) =
+                        args.args.first()
+                    {
+                        Some(t.clone())
                     } else {
-                        if let Some(GenericArgument::Type(t)) =
-                            args.args.first()
-                        {
-                            Some(t.clone())
-                        } else {
-                            None
-                        }
+                        None
                     }
                 } else {
                     None
@@ -107,8 +105,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     }
     let any_options = analysed.iter().any(|v| v.optional.is_some());
     let any_controls = analysed.iter().any(|v| v.args.control.is_some());
-    let all_optional_fnames =
-        analysed.iter().filter_map(|v| v.optional.as_ref().map(|_| &v.fname));
     let all_fnames = analysed.iter().map(|v| &v.fname).collect::<Vec<_>>();
 
     let ctor = match data.fields {
@@ -124,7 +120,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     let n_fields = data.fields.len();
-    for (i, AnalysedField { field, first_ty, optional, fname, args, .. }) in
+    for (i, AnalysedField { first_ty, optional, fname, args, .. }) in
         analysed.iter().enumerate()
     {
         let hint_frag = if i < n_fields {
@@ -169,8 +165,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             onechunk_parse_points.push(allow);
         }
 
-        let ctl_fn_chunk = if let Some(ctl_fn) = &args.control {
-            Some(quote! {
+        let ctl_fn_chunk = args.control.as_ref().map(|ctl_fn| {
+            quote! {
                 match #ctl_fn(&#fname) {
                     ::ingot_types::ParseControl::Continue => {},
                     ::ingot_types::ParseControl::Accept if can_accept => {
@@ -187,10 +183,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                         );
                     },
                 }
-            })
-        } else {
-            None
-        };
+            }
+        });
 
         let mut local_ty = match optional {
             Some(ty) => ty.clone(),
@@ -230,7 +224,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         }
 
         // TODO: implement and figure in conditions (when/skip_if)
-        let (parse_chunk, parse_choice) = if let Some(optional) = optional {
+        let (parse_chunk, parse_choice) = if optional.is_some() {
             (
                 quote! {
                     let (#fname, remainder, hint) = if accepted {
@@ -334,15 +328,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         parse_points.push(contents);
         onechunk_parse_points.push(ns_contents);
     }
-
-    // maybe worthwhile to recast with smarter return logic?
-    let define_all_optionals = all_optional_fnames
-        .map(|n| {
-            quote! {
-                let #n = None;
-            }
-        })
-        .collect::<Vec<_>>();
 
     let accept_state = quote! {
         let mut can_accept = false;
