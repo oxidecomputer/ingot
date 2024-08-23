@@ -311,8 +311,8 @@ impl ChunkState {
                             (quote! {val.into()}, quote! {val})
                         } else {
                             (
-                                quote! {::ingot_types::NetworkRepr::from_network(val)},
-                                quote! {::ingot_types::NetworkRepr::to_network(val)},
+                                quote! {::ingot::types::NetworkRepr::from_network(val)},
+                                quote! {::ingot::types::NetworkRepr::to_network(val)},
                             )
                         };
 
@@ -633,7 +633,7 @@ impl StructParseDeriveCtx {
 
         let owned_impl = if let Some(g) = self.my_explicit_generic() {
             quote! {
-                impl<#g> ::ingot_types::NextLayer for #ident<#g> {
+                impl<#g> ::ingot::types::NextLayer for #ident<#g> {
                     type Denom = #denom;
 
                     #[inline]
@@ -644,7 +644,7 @@ impl StructParseDeriveCtx {
             }
         } else {
             quote! {
-                impl ::ingot_types::NextLayer for #ident {
+                impl ::ingot::types::NextLayer for #ident {
                     type Denom = #denom;
 
                     #[inline]
@@ -656,7 +656,7 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            impl<V: ::zerocopy::ByteSlice> ::ingot_types::NextLayer for #validated_ident<V> {
+            impl<V: ::zerocopy::ByteSlice> ::ingot::types::NextLayer for #validated_ident<V> {
                 type Denom = #denom;
 
                 #[inline]
@@ -719,7 +719,7 @@ impl StructParseDeriveCtx {
         }
     }
 
-    /// Generate implementations of `ingot_types::Header` for the user-
+    /// Generate implementations of `ingot::types::Header` for the user-
     /// provided owned type and the generated `xxxValid` type.
     pub fn gen_header_impls(&self) -> TokenStream {
         let ident = &self.ident;
@@ -757,7 +757,7 @@ impl StructParseDeriveCtx {
         // TODO: assuming at most one generic
         let owned_impl = if let Some(g) = self.my_explicit_generic() {
             quote! {
-                impl<#g: ::ingot_types::Chunk> ::ingot_types::Header for #ident<#g> {
+                impl<#g: ::ingot::types::Chunk> ::ingot::types::Header for #ident<#g> {
                     const MINIMUM_LENGTH: usize = #base_bytes;
 
                     fn packet_length(&self) -> usize {
@@ -767,7 +767,7 @@ impl StructParseDeriveCtx {
             }
         } else {
             quote! {
-                impl ::ingot_types::Header for #ident {
+                impl ::ingot::types::Header for #ident {
                     const MINIMUM_LENGTH: usize = #base_bytes;
 
                     fn packet_length(&self) -> usize {
@@ -778,7 +778,7 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            impl<V: ::ingot_types::Chunk> ::ingot_types::Header for #validated_ident<V> {
+            impl<V: ::ingot::types::Chunk> ::ingot::types::Header for #validated_ident<V> {
                 const MINIMUM_LENGTH: usize = #base_bytes;
 
                 fn packet_length(&self) -> usize {
@@ -904,13 +904,13 @@ impl StructParseDeriveCtx {
                         trait_impls.push(quote! {
                             #[inline]
                             fn #get_name(&self) -> #user_ty {
-                                ::ingot_types::NetworkRepr::from_network(self.#sub_field_idx.#ident)
+                                ::ingot::types::NetworkRepr::from_network(self.#sub_field_idx.#ident)
                             }
                         });
                         trait_mut_impls.push(quote! {
                             #[inline]
                             fn #mut_name(&mut self, val: #user_ty) {
-                                self.#sub_field_idx.#ident = ::ingot_types::NetworkRepr::to_network(val);
+                                self.#sub_field_idx.#ident = ::ingot::types::NetworkRepr::to_network(val);
                             }
                         });
                     }
@@ -1121,8 +1121,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #get_name(&self) -> #user_ty {
                             match self {
-                                ::ingot_types::Packet::Repr(o) => o.#get_name(),
-                                ::ingot_types::Packet::Raw(b) => b.#get_name(),
+                                ::ingot::types::Packet::Repr(o) => o.#get_name(),
+                                ::ingot::types::Packet::Raw(b) => b.#get_name(),
                             }
                         }
                     });
@@ -1130,8 +1130,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #mut_name(&mut self, val: #user_ty) {
                             match self {
-                                ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
-                                ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
+                                ::ingot::types::Packet::Repr(o) => o.#mut_name(val),
+                                ::ingot::types::Packet::Raw(b) => b.#mut_name(val),
                             };
                         }
                     });
@@ -1146,8 +1146,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #ident(&self) -> #user_ty {
                             match self {
-                                ::ingot_types::Packet::Repr(o) => o.#ident(),
-                                ::ingot_types::Packet::Raw(b) => b.#ident(),
+                                ::ingot::types::Packet::Repr(o) => o.#ident(),
+                                ::ingot::types::Packet::Raw(b) => b.#ident(),
                             }
                         }
                     });
@@ -1155,8 +1155,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #mut_name(&mut self, val: #user_ty) {
                             match self {
-                                ::ingot_types::Packet::Repr(o) => o.#mut_name(val),
-                                ::ingot_types::Packet::Raw(b) => b.#mut_name(val),
+                                ::ingot::types::Packet::Repr(o) => o.#mut_name(val),
+                                ::ingot::types::Packet::Raw(b) => b.#mut_name(val),
                             };
                         }
                     });
@@ -1166,8 +1166,8 @@ impl StructParseDeriveCtx {
                             #[inline]
                             fn #field_ref(&self) -> &#user_ty {
                                 match self {
-                                    ::ingot_types::Packet::Repr(o) => o.#field_ref(),
-                                    ::ingot_types::Packet::Raw(b) => b.#field_ref(),
+                                    ::ingot::types::Packet::Repr(o) => o.#field_ref(),
+                                    ::ingot::types::Packet::Raw(b) => b.#field_ref(),
                                 }
                             }
                         });
@@ -1175,8 +1175,8 @@ impl StructParseDeriveCtx {
                             #[inline]
                             fn #field_mut(&mut self) -> &mut #user_ty {
                                 match self {
-                                    ::ingot_types::Packet::Repr(o) => o.#field_mut(),
-                                    ::ingot_types::Packet::Raw(b) => b.#field_mut(),
+                                    ::ingot::types::Packet::Repr(o) => o.#field_mut(),
+                                    ::ingot::types::Packet::Raw(b) => b.#field_mut(),
                                 }
                             }
                         });
@@ -1192,8 +1192,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #field_ref(&self) -> &#user_ty {
                             match self {
-                                ::ingot_types::Packet::Repr(o) => o.#field_ref(),
-                                ::ingot_types::Packet::Raw(b) => b.#field_ref(),
+                                ::ingot::types::Packet::Repr(o) => o.#field_ref(),
+                                ::ingot::types::Packet::Raw(b) => b.#field_ref(),
                             }
                         }
                     });
@@ -1201,8 +1201,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #field_mut(&mut self) -> &mut #user_ty {
                             match self {
-                                ::ingot_types::Packet::Repr(o) => o.#field_mut(),
-                                ::ingot_types::Packet::Raw(b) => b.#field_mut(),
+                                ::ingot::types::Packet::Repr(o) => o.#field_mut(),
+                                ::ingot::types::Packet::Raw(b) => b.#field_mut(),
                             }
                         }
                     });
@@ -1215,13 +1215,13 @@ impl StructParseDeriveCtx {
         {
             // (quote!{impl<#a> #ref_def for #ident<#a>}, quote!{impl<#a> #mut_def for #ident<#a>})
             (
-                quote! {impl<O, B, #a> #ref_def for ::ingot_types::Packet<O, B>},
-                quote! {impl<O, B, #a> #mut_def for ::ingot_types::Packet<O, B>},
+                quote! {impl<O, B, #a> #ref_def for ::ingot::types::Packet<O, B>},
+                quote! {impl<O, B, #a> #mut_def for ::ingot::types::Packet<O, B>},
             )
         } else {
             (
-                quote! {impl<O, B> #ref_def for ::ingot_types::Packet<O, B>},
-                quote! {impl<O, B> #mut_def for ::ingot_types::Packet<O, B>},
+                quote! {impl<O, B> #ref_def for ::ingot::types::Packet<O, B>},
+                quote! {impl<O, B> #mut_def for ::ingot::types::Packet<O, B>},
             )
         };
 
@@ -1259,7 +1259,7 @@ impl StructParseDeriveCtx {
                     // before handing the bytes over.
                     segment_fragments.push(quote! {
                         let (#val_ident, from): (::zerocopy::Ref<_, #ch_ty>, _) = ::zerocopy::Ref::from_prefix(from)
-                            .map_err(|_| ::ingot_types::ParseError::TooSmall)?;
+                            .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
                     });
                 }
                 ChunkState::VarWidth(id) => {
@@ -1273,11 +1273,11 @@ impl StructParseDeriveCtx {
 
                         let chunk_len = (#len_expr) as usize;
                         if from.as_ref().len() < chunk_len {
-                            return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
+                            return ::core::result::Result::Err(::ingot::types::ParseError::TooSmall);
                         }
 
                         let (varlen, from) = from.split_at(chunk_len);
-                        let #val_ident = ::ingot_types::Packet::Raw(varlen);
+                        let #val_ident = ::ingot::types::Packet::Raw(varlen);
                     });
                 }
                 ChunkState::Parsable(id) => {
@@ -1296,17 +1296,17 @@ impl StructParseDeriveCtx {
         }
 
         quote! {
-            impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #validated_ident<V> {
+            impl<V: ::ingot::types::Chunk> ::ingot::types::HeaderParse for #validated_ident<V> {
                 type Target = Self;
-                fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
-                    use ::ingot_types::Header;
+                fn parse(from: V) -> ::ingot::types::ParseResult<(Self, V)> {
+                    use ::ingot::types::Header;
 
                     // TODO: This is technically repeating part of the prefix check on
                     // a fixed width.
                     // Double check if this makes nested & varlen parses faster/slower.
 
                     // if from.as_ref().len() < Self::MINIMUM_LENGTH {
-                    //     return ::core::result::Result::Err(::ingot_types::ParseError::TooSmall);
+                    //     return ::core::result::Result::Err(::ingot::types::ParseError::TooSmall);
                     // }
 
                     #( #segment_fragments )*
@@ -1353,26 +1353,26 @@ impl ToTokens for StructParseDeriveCtx {
 
             #ingot_pkt_impls
 
-            pub type #pkt_ident<V> = ::ingot_types::Packet<#self_ty, #validated_ident<V>>;
+            pub type #pkt_ident<V> = ::ingot::types::Packet<#self_ty, #validated_ident<V>>;
 
-            impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #validated_ident<V> {
+            impl<V: ::ingot::types::Chunk> ::ingot::types::HasBuf for #validated_ident<V> {
                 type BufType = V;
             }
 
-            impl<V> ::ingot_types::HasRepr for #validated_ident<V> {
+            impl<V> ::ingot::types::HasRepr for #validated_ident<V> {
                 type ReprType = #self_ty;
             }
 
             impl<V> ::core::convert::From<#validated_ident<V>> for #pkt_ident<V> {
                 fn from(value: #validated_ident<V>) -> Self {
-                    ::ingot_types::Packet::Raw(value)
+                    ::ingot::types::Packet::Raw(value)
                 }
             }
 
             impl<V> ::core::convert::From<#self_ty> for #pkt_ident<V> {
                 fn from(value: #self_ty) -> Self {
                     // into used to paper over boxing / in-place.
-                    ::ingot_types::Packet::Repr(value.into())
+                    ::ingot::types::Packet::Repr(value.into())
                 }
             }
 

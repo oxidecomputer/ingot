@@ -168,18 +168,18 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         let ctl_fn_chunk = args.control.as_ref().map(|ctl_fn| {
             quote! {
                 match #ctl_fn(&#fname) {
-                    ::ingot_types::ParseControl::Continue => {},
-                    ::ingot_types::ParseControl::Accept if can_accept => {
+                    ::ingot::types::ParseControl::Continue => {},
+                    ::ingot::types::ParseControl::Accept if can_accept => {
                         accepted = true;
                     },
-                    ::ingot_types::ParseControl::Accept => {
+                    ::ingot::types::ParseControl::Accept => {
                         return ::core::result::Result::Err(
-                            ::ingot_types::ParseError::CannotAccept
+                            ::ingot::types::ParseError::CannotAccept
                         );
                     }
-                    ::ingot_types::ParseControl::Reject => {
+                    ::ingot::types::ParseControl::Reject => {
                         return ::core::result::Result::Err(
-                            ::ingot_types::ParseError::Reject
+                            ::ingot::types::ParseError::Reject
                         );
                     },
                 }
@@ -342,13 +342,13 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     quote! {
-        impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #ident<V> {
+        impl<V: ::ingot::types::Chunk> ::ingot::types::HasBuf for #ident<V> {
             type BufType = V;
         }
 
-        impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #ident<V> {
+        impl<V: ::ingot::types::Chunk> ::ingot::types::HeaderParse for #ident<V> {
             type Target = Self;
-            fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
+            fn parse(from: V) -> ::ingot::types::ParseResult<(Self, V)> {
                 #imports
                 // #( #define_all_optionals )*
 
@@ -361,8 +361,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         }
 
-        impl<V: ::ingot_types::Chunk> #ident<V> {
-            pub fn parse_read<Q: ::ingot_types::Read<Chunk = V>>(mut data: Q) -> ::ingot_types::ParseResult<::ingot_types::Parsed<#ident<Q::Chunk>, Q>> {
+        impl<V: ::ingot::types::Chunk> #ident<V> {
+            pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#ident<Q::Chunk>, Q>> {
                 #imports
                 // #( #define_all_optionals )*
 
@@ -377,8 +377,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     _ => Some(remainder),
                 };
 
-                ::core::result::Result::Ok(::ingot_types::Parsed {
-                    stack: ::ingot_types::HeaderStack(#ctor),
+                ::core::result::Result::Ok(::ingot::types::Parsed {
+                    stack: ::ingot::types::HeaderStack(#ctor),
                     data,
                     last_chunk,
                 })

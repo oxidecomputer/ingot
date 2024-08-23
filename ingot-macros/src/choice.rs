@@ -73,7 +73,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         let valid_field_ident = Ident::new(&format!("Valid{id}"), ident.span());
 
         top_vars.push(quote! {
-            #id(::ingot_types::Packet<#field_ident, #valid_field_ident<V>>)
+            #id(::ingot::types::Packet<#field_ident, #valid_field_ident<V>>)
         });
 
         validated_vars.push(quote! {
@@ -92,15 +92,15 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         });
 
         parse_match_arms.push(quote! {
-            #validated_ident::#id(v) => #ident::#id(::ingot_types::Packet::Raw(v))
+            #validated_ident::#id(v) => #ident::#id(::ingot::types::Packet::Raw(v))
         });
 
         repr_match_arms.push(quote! {
-            #repr_ident::#id(v) => #ident::#id(::ingot_types::Packet::Repr(v.into()))
+            #repr_ident::#id(v) => #ident::#id(::ingot::types::Packet::Repr(v.into()))
         });
 
         next_layer_wheres.push(quote! {
-            #valid_field_ident<V>: ::ingot_types::NextLayer<Denom=T>
+            #valid_field_ident<V>: ::ingot::types::NextLayer<Denom=T>
         });
 
         next_layer_match_arms.push(quote! {
@@ -108,24 +108,24 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         });
 
         unpacks.push(quote! {
-            impl<V> ::core::convert::TryFrom<#ident<V>> for ::ingot_types::Packet<#field_ident, #valid_field_ident<V>> {
-                type Error = ::ingot_types::ParseError;
+            impl<V> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
+                type Error = ::ingot::types::ParseError;
 
                 fn try_from(value: #ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
                         #ident::#id(v) => Ok(v),
-                        _ => ::core::result::Result::Err(::ingot_types::ParseError::Unwanted),
+                        _ => ::core::result::Result::Err(::ingot::types::ParseError::Unwanted),
                     }
                 }
             }
 
-            impl<V> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot_types::Packet<#field_ident, #valid_field_ident<V>> {
-                type Error = ::ingot_types::ParseError;
+            impl<V> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
+                type Error = ::ingot::types::ParseError;
 
                 fn try_from(value: #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
                         #validated_ident::#id(v) => Ok(v.into()),
-                        _ => ::core::result::Result::Err(::ingot_types::ParseError::Unwanted),
+                        _ => ::core::result::Result::Err(::ingot::types::ParseError::Unwanted),
                     }
                 }
             }
@@ -151,16 +151,16 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #( #repr_vars ),*
         }
 
-        impl<V: ::ingot_types::Chunk> ::ingot_types::ParseChoice<V, #on> for #validated_ident<V> {
+        impl<V: ::ingot::types::Chunk> ::ingot::types::ParseChoice<V, #on> for #validated_ident<V> {
             #[inline]
-            fn parse_choice(data: V, hint: ::core::option::Option<#on>) -> ::ingot_types::ParseResult<(Self, V)> {
+            fn parse_choice(data: V, hint: ::core::option::Option<#on>) -> ::ingot::types::ParseResult<(Self, V)> {
                 let ::core::option::Option::Some(hint) = hint else {
-                    return ::core::result::Result::Err(::ingot_types::ParseError::NeedsHint);
+                    return ::core::result::Result::Err(::ingot::types::ParseError::NeedsHint);
                 };
 
                 match hint {
                     #( #match_arms ),*
-                    _ => ::core::result::Result::Err(::ingot_types::ParseError::Unwanted)
+                    _ => ::core::result::Result::Err(::ingot::types::ParseError::Unwanted)
                 }
             }
         }
@@ -183,7 +183,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V: ::zerocopy::ByteSlice, T: Copy> ::ingot_types::NextLayer for #validated_ident<V>
+        impl<V: ::zerocopy::ByteSlice, T: Copy> ::ingot::types::NextLayer for #validated_ident<V>
         where #( #next_layer_wheres ),*
         {
             type Denom = T;
@@ -196,7 +196,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V> ::ingot_types::HasView for #ident<V> {
+        impl<V> ::ingot::types::HasView for #ident<V> {
             type ViewType = #validated_ident<V>;
         }
 

@@ -2,7 +2,7 @@ use core::net::{Ipv4Addr, Ipv6Addr};
 
 use crate::{
     ethernet::{Ethernet, EthernetMut, EthernetRef, ValidEthernet},
-    geneve::{Geneve, GeneveMut, GeneveRef, ValidGeneve},
+    geneve::{GeneveRef, ValidGeneve},
     ip::{
         Ecn, Ipv4, Ipv4Mut, Ipv4Ref, Ipv6, Ipv6Mut, Ipv6Ref, ValidIpv4,
         ValidIpv6,
