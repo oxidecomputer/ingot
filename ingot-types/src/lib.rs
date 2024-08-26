@@ -169,24 +169,35 @@ impl<O, B: HeaderParse> HasBuf for Packet<O, B> {
 }
 
 pub trait HeaderParse {
-    type Target: HasBuf;
+    type Target: HasBuf + NextLayer;
 
     fn parse(
         from: <Self::Target as HasBuf>::BufType,
-    ) -> ParseResult<(Self::Target, <Self::Target as HasBuf>::BufType)>;
+    ) -> ParseResult<Success<Self::Target>>;
 }
 
-impl<B: HeaderParse<Target = B> + HasBuf + HasRepr + Into<Self>> HeaderParse
-    for Packet<B::ReprType, B>
+// allows us to call e.g. Packet<A,ValidA>::parse if ValidA is also Parse
+// and its owned type has a matching next layer Denom.
+impl<
+        B: HeaderParse<Target = B> + HasBuf + HasRepr + NextLayer + Into<Self>,
+    > HeaderParse for Packet<B::ReprType, B>
+where
+    B: NextLayer,
+    B::ReprType: NextLayer<Denom = B::Denom>,
 {
     type Target = Self;
 
     #[inline]
     fn parse(
         from: <Self::Target as HasBuf>::BufType,
-    ) -> ParseResult<(Self::Target, <Self::Target as HasBuf>::BufType)> {
-        <B as HeaderParse>::parse(from)
-            .map(|(header, buf)| (header.into(), buf))
+    ) -> ParseResult<Success<Self::Target>> {
+        <B as HeaderParse>::parse(from).map(
+            |Success { val, hint, remainder }| Success {
+                val: val.into(),
+                hint,
+                remainder,
+            },
+        )
     }
 }
 
@@ -299,16 +310,21 @@ unsafe impl BufHeadroom for &mut [u8] {
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
-pub struct Success<T, H, B> {
-    val: T,
-    hint: Option<H>,
-    remainder: B,
+pub struct BufState<T, H, B> {
+    pub val: T,
+    pub hint: Option<H>,
+    pub remainder: B,
 }
+
+pub type Success<T> =
+    BufState<T, <T as NextLayer>::Denom, <T as HasBuf>::BufType>;
 
 pub trait NextLayer {
     type Denom: Copy;
 
-    fn next_layer(&self) -> Option<Self::Denom>;
+    fn next_layer(&self) -> Option<Self::Denom> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -332,12 +348,15 @@ impl From<Infallible> for ParseError {
     }
 }
 
-pub trait ParseChoice<V: SplitByteSlice, Denom: Copy + Eq>: Sized {
-    fn parse_choice(data: V, hint: Option<Denom>) -> ParseResult<(Self, V)>;
+pub trait ParseChoice<V: SplitByteSlice, Denom: Copy + Eq>:
+    Sized + HasBuf + NextLayer
+{
+    fn parse_choice(data: V, hint: Option<Denom>)
+        -> ParseResult<Success<Self>>;
 }
 
 // Allow unconditional parsing of any valid standalone header in a #choice.
-impl<T: HeaderParse<Target = T> + HasBuf, AnyDenom: Copy + Eq>
+impl<T: HeaderParse<Target = T> + HasBuf + NextLayer, AnyDenom: Copy + Eq>
     ParseChoice<T::BufType, AnyDenom> for T
 where
     <T as HasBuf>::BufType: SplitByteSlice,
@@ -346,7 +365,7 @@ where
     fn parse_choice(
         data: T::BufType,
         _hint: Option<AnyDenom>,
-    ) -> ParseResult<(Self, T::BufType)> {
+    ) -> ParseResult<Success<Self>> {
         T::parse(data)
     }
 }

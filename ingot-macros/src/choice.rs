@@ -90,7 +90,10 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         match_arms.push(quote! {
             v if v == #disc => {
                 #valid_field_ident::parse(data)
-                    .map(|(pkt, rest)| (#validated_ident::#id(pkt), rest))
+                    .map(|::ingot::types::Success{val, hint, remainder}|{
+                        let val = #validated_ident::#id(val);
+                        ::ingot::types::Success{val, hint, remainder}
+                    })
             }
         });
 
@@ -172,7 +175,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
         impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::ParseChoice<V, #on> for #validated_ident<V> {
             #[inline]
-            fn parse_choice(data: V, hint: ::core::option::Option<#on>) -> ::ingot::types::ParseResult<(Self, V)> {
+            fn parse_choice(data: V, hint: ::core::option::Option<#on>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
                 use ::ingot::types::HeaderParse;
                 let ::core::option::Option::Some(hint) = hint else {
                     return ::core::result::Result::Err(::ingot::types::ParseError::NeedsHint);
@@ -230,6 +233,14 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
         impl<V> ::ingot::types::HasView for #ident<V> {
             type ViewType = #validated_ident<V>;
+        }
+
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasBuf for #ident<V> {
+            type BufType = V;
+        }
+
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasBuf for #validated_ident<V> {
+            type BufType = V;
         }
 
         #( #unpacks )*

@@ -1,7 +1,9 @@
 use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
-use ingot_types::{primitives::*, NetworkRepr, Packet, ParseError, VarBytes};
+use ingot_types::{
+    primitives::*, NetworkRepr, NextLayer, Packet, ParseError, VarBytes,
+};
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct IpProtocol(pub u8);
@@ -152,6 +154,7 @@ impl NetworkRepr<u3> for Ipv4Flags {
 #[derive(Ingot)]
 pub struct Ipv6<V> {
     // pub struct Ipv6 {
+    // pub struct Ipv6 {
     // #[ingot(valid = 6)]
     pub version: u4,
     pub dscp: u6,
@@ -172,7 +175,7 @@ pub struct Ipv6<V> {
     pub destination: Ipv6Addr,
 
     #[ingot(subparse(on_next_layer))]
-    // // pub v6ext: V6Ehs<V>,//<V>,
+    // // // pub v6ext: V6Ehs<V>,//<V>,
     pub v6ext: LowRentV6Eh<V>,
 }
 
@@ -183,15 +186,11 @@ pub enum LowRentV6Eh {
     IpV6Ext6564 = ExtHdrClass::Rfc6564,
 }
 
-// TODO
-pub type V6Ehs<V> = Packet<(), ParseChoiceLoop<V6EhChoice<V>>>;
-
-pub struct ParseChoiceLoop<T> {
-    inner: T,
-}
-
-pub enum V6EhChoice<V> {
-    A(V),
+impl<V> NextLayer for LowRentV6Eh<V> {
+    type Denom = IpProtocol;
+    fn next_layer(&self) -> Option<Self::Denom> {
+        None
+    }
 }
 
 // 0x2c

@@ -673,6 +673,47 @@ impl StructParseDeriveCtx {
         }
     }
 
+    pub fn gen_private_hint_lookup(&self, curr_idx: usize) -> TokenStream {
+        // need to resolve the field's chunk ID, then pull from that/convert.
+        let Some(field_ident) = &self.nominated_next_header else {
+            return quote! {let hint = None;};
+        };
+
+        let field_lk = self.validated.get(&field_ident).unwrap();
+        let field_lk = field_lk.borrow();
+
+        if curr_idx <= field_lk.sub_field_idx {
+            return syn::Error::new(
+                field_lk.ident.span(),
+                "later subparse requires that this hint that appears before extension field"
+            ).into_compile_error();
+        }
+
+        let val_ident = Ident::new(
+            &format!("v{}", field_lk.sub_field_idx),
+            Span::call_site(),
+        );
+
+        let access = match field_lk.state {
+            FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
+                quote! {#field_ident()}
+            }
+            FieldState::FixedWidth { bitfield_info: None, .. } => {
+                quote! {#field_ident}
+            }
+            FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                return syn::Error::new(
+                    field_lk.ident.span(),
+                    "later subparse requires that this hint that appears before extension field"
+                ).into_compile_error();
+            }
+        };
+
+        quote! {
+            let hint = ::core::option::Option::Some(#val_ident.#access);
+        }
+    }
+
     /// Helper to return a generic field to use on borrowed types.
     pub fn my_explicit_generic(&self) -> Option<&TypeParam> {
         self.generics.params.first().and_then(|v| v.as_type_param())
@@ -1288,6 +1329,7 @@ impl StructParseDeriveCtx {
                     let field = self.validated[id].borrow();
                     let user_ty = &field.user_ty;
                     let mut genless_user_ty = user_ty.clone();
+
                     // Hacky generic handling.
                     if let Type::Path(ref mut t) = genless_user_ty {
                         t.qself = None;
@@ -1302,41 +1344,57 @@ impl StructParseDeriveCtx {
                         .map(|(a, b)| (Some(a), Some(b)))
                         .unwrap_or_default();
 
-                    // TODO: probably needs more care around generics.
-                    //       to say nothing of actually calling in `parse_choice`
-                    //       if ext_hdr'd.
-                    segment_fragments.push(quote! {
-                        let (#val_ident, from) = #genless_user_ty::parse()?;
-                    });
+                    let FieldState::Parsable { on_next_layer, .. } =
+                        &field.state
+                    else {
+                        unreachable!()
+                    };
+
+                    if *on_next_layer {
+                        let hint_lkup = self.gen_private_hint_lookup(i);
+                        segment_fragments.push(quote! {
+                            #hint_lkup
+                            let ::ingot::types::Success { val: #val_ident, hint, remainder: from } = #genless_user_ty::parse_choice(hint)?;
+                        });
+                    } else {
+                        segment_fragments.push(quote! {
+                            let ::ingot::types::Success { val: #val_ident, hint, remainder: from } = #genless_user_ty::parse()?;
+                        });
+                    }
                 }
             }
             els.push(val_ident);
         }
 
+        let hint_recheck = if self.nominated_next_header.is_some() {
+            Some(quote! {
+                let hint = hint.or_else(|| val.next_layer());
+            })
+        } else {
+            None
+        };
+
         quote! {
             impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse for #validated_ident<V> {
                 type Target = Self;
-                fn parse(from: V) -> ::ingot::types::ParseResult<(Self, V)> {
+                fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
                     use ::ingot::types::Header;
                     use ::ingot::types::HasView;
                     use ::ingot::types::NextLayer;
                     use ::ingot::types::ParseChoice;
                     use ::ingot::types::HeaderParse;
 
-                    // TODO: This is technically repeating part of the prefix check on
-                    // a fixed width.
-                    // Double check if this makes nested & varlen parses faster/slower.
-
-                    // if from.as_ref().len() < Self::MINIMUM_LENGTH {
-                    //     return ::core::result::Result::Err(::ingot::types::ParseError::TooSmall);
-                    // }
+                    let hint = None;
 
                     #( #segment_fragments )*
 
-                    ::core::result::Result::Ok((
-                        #validated_ident(#( #els ),*),
-                        from,
-                    ))
+                    let val = #validated_ident(#( #els ),*);
+
+                    #hint_recheck
+
+                    ::core::result::Result::Ok(
+                        ::ingot::types::Success { val, hint, remainder: from }
+                    )
                 }
             }
         }

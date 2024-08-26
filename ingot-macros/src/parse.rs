@@ -223,6 +223,10 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         }
 
+        let destructure = quote! {
+            ::ingot::types::Success{val: #fname, hint, remainder}
+        };
+
         // TODO: implement and figure in conditions (when/skip_if)
         let (parse_chunk, parse_choice) = if optional.is_some() {
             (
@@ -230,7 +234,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     let (#fname, remainder, hint) = if accepted {
                         (::core::option::Option::None, slice, None)
                     } else {
-                        let (#fname, remainder) = #local_ty::parse(slice)?;
+                        let #destructure = #local_ty::parse(slice)?;
                         #hint_frag
                         (::core::option::Option::Some(#fname), remainder)
                     };
@@ -240,8 +244,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                         // should this be last??
                         (::core::option::Option::None, slice, None)
                     } else {
-                        let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
-                        #hint_frag
+                        let #destructure = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                        // #hint_frag
                         (::core::option::Option::Some(#fname), remainder, hint)
                     };
                 },
@@ -249,12 +253,12 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         } else {
             (
                 quote! {
-                    let (#fname, remainder) = #local_ty::parse(slice)?;
-                    #hint_frag
+                    let #destructure = #local_ty::parse(slice)?;
+                    // #hint_frag
                 },
                 quote! {
-                    let (#fname, remainder) = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
-                    #hint_frag
+                    let #destructure = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                    // #hint_frag
                 },
             )
         };
@@ -346,9 +350,13 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             type BufType = V;
         }
 
+        impl<V> ::ingot::types::NextLayer for #ident<V> {
+            type Denom = ();
+        }
+
         impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse for #ident<V> {
             type Target = Self;
-            fn parse(from: V) -> ::ingot::types::ParseResult<(Self, V)> {
+            fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
                 #imports
                 // #( #define_all_optionals )*
 
@@ -357,7 +365,11 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
                 #( #onechunk_parse_points )*
 
-                Ok((#ctor, slice))
+                let val = #ctor;
+
+                // Ok((#ctor, slice))
+
+                Ok(::ingot::types::Success{val, hint: None, remainder: slice})
             }
         }
 
