@@ -8,7 +8,7 @@ pub struct Ethernet {
     pub destination: MacAddr6,
     #[ingot(is = "[u8; 6]")]
     pub source: MacAddr6,
-    #[ingot(is = "u16be", next_layer())]
+    #[ingot(is = "u16be", next_layer)]
     // #[ingot(is = "u16be", next_layer(or_extension))]
     pub ethertype: u16be,
     // #[ingot(extension)]
@@ -32,7 +32,7 @@ pub struct VlanBody {
     pub priority: u3,
     pub dei: u1,
     pub vid: u12be,
-    #[ingot(next_layer())]
+    #[ingot(next_layer)]
     pub ethertype: u16be,
     // #[ingot(extension)]
     // pub vlans: ???

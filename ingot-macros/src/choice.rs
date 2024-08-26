@@ -6,6 +6,7 @@ use syn::{spanned::Spanned, Error, Path};
 #[derive(FromMeta)]
 struct ChoiceArgs {
     on: Path,
+    map_on: Option<Path>,
 }
 
 #[derive(FromVariant)]
@@ -23,7 +24,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         }
     };
 
-    let ChoiceArgs { on } = match ChoiceArgs::from_list(&attr_args) {
+    let ChoiceArgs { on, map_on } = match ChoiceArgs::from_list(&attr_args) {
         Ok(v) => v,
         Err(e) => {
             return e.write_errors();
@@ -45,6 +46,8 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
     let mut next_layer_wheres: Vec<TokenStream> = vec![];
     let mut next_layer_match_arms: Vec<TokenStream> = vec![];
+
+    let mut packet_len_arms: Vec<TokenStream> = vec![];
 
     let mut unpacks: Vec<TokenStream> = vec![];
 
@@ -107,6 +110,10 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #validated_ident::#id(v) => v.next_layer()
         });
 
+        packet_len_arms.push(quote! {
+            Self::#id(v) => v.packet_length(),
+        });
+
         unpacks.push(quote! {
             impl<V> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
@@ -138,6 +145,18 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         quote! {#repr_ident}
     };
 
+    let choice_convert = map_on.map(|v| {
+        quote! {
+            let hint2 = #v(hint);
+        }
+    });
+
+    let match_hint = if choice_convert.is_none() {
+        quote! {hint}
+    } else {
+        quote! {hint2}
+    };
+
     quote! {
         pub enum #ident<V> {
             #( #top_vars ),*
@@ -151,14 +170,17 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #( #repr_vars ),*
         }
 
-        impl<V: ::ingot::types::Chunk> ::ingot::types::ParseChoice<V, #on> for #validated_ident<V> {
+        impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::ParseChoice<V, #on> for #validated_ident<V> {
             #[inline]
             fn parse_choice(data: V, hint: ::core::option::Option<#on>) -> ::ingot::types::ParseResult<(Self, V)> {
+                use ::ingot::types::HeaderParse;
                 let ::core::option::Option::Some(hint) = hint else {
                     return ::core::result::Result::Err(::ingot::types::ParseError::NeedsHint);
                 };
 
-                match hint {
+                #choice_convert
+
+                match #match_hint {
                     #( #match_arms ),*
                     _ => ::core::result::Result::Err(::ingot::types::ParseError::Unwanted)
                 }
@@ -192,6 +214,16 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
                 match self {
                     #( #next_layer_match_arms ),*
+                }
+            }
+        }
+
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #ident<V> {
+            const MINIMUM_LENGTH: usize = 0; // TODO
+
+            fn packet_length(&self) -> usize {
+                match self {
+                    #( #packet_len_arms )*
                 }
             }
         }

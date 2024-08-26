@@ -46,13 +46,7 @@ impl PrimitiveInBitfield {
         // NOTE: if we're reading a POT-size int here, we're already unaligned
         // from a byte boundary, so we need to read more bytes than the dtype.
         // Start with a read of the biggest u<x> we can fit.
-        let next_int_sz = self.n_bits.next_power_of_two().max(8);
-        let ceiled_bits = self.n_bits.max(8);
-        let repr_sz = if ceiled_bits.max(8).is_power_of_two() {
-            ceiled_bits
-        } else {
-            next_int_sz
-        };
+        let repr_sz = self.n_bits.next_power_of_two().max(8);
         let short_bits = ((8 - (self.n_bits % 8)) % 8) as u32;
 
         // Straddle over byte boundaries, where applicable.

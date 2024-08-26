@@ -119,7 +119,7 @@ where
 
 impl<V> Header for VarBytes<V>
 where
-    V: Chunk,
+    V: ByteSlice,
 {
     const MINIMUM_LENGTH: usize = 0;
 
@@ -161,7 +161,7 @@ pub trait HasRepr {
 }
 
 pub trait HasBuf: Sized {
-    type BufType: Chunk;
+    type BufType: ByteSlice;
 }
 
 impl<O, B: HeaderParse> HasBuf for Packet<O, B> {
@@ -207,11 +207,9 @@ where
 
 /// Takes contiguous byte slices from a packet.
 pub trait Read {
-    type Chunk: Chunk;
+    type Chunk: SplitByteSlice;
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk>;
 }
-
-pub use zerocopy::SplitByteSlice as Chunk;
 
 #[cfg(feature = "alloc")]
 impl<'a> Read for alloc::collections::linked_list::Iter<'a, Vec<u8>> {
@@ -301,6 +299,11 @@ unsafe impl BufHeadroom for &mut [u8] {
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
+pub struct Success<T, H, B> {
+    val: T,
+    hint: Option<H>,
+    remainder: B,
+}
 
 pub trait NextLayer {
     type Denom: Copy;
@@ -329,13 +332,15 @@ impl From<Infallible> for ParseError {
     }
 }
 
-pub trait ParseChoice<V: Chunk, Denom: Copy + Eq>: Sized {
+pub trait ParseChoice<V: SplitByteSlice, Denom: Copy + Eq>: Sized {
     fn parse_choice(data: V, hint: Option<Denom>) -> ParseResult<(Self, V)>;
 }
 
 // Allow unconditional parsing of any valid standalone header in a #choice.
 impl<T: HeaderParse<Target = T> + HasBuf, AnyDenom: Copy + Eq>
     ParseChoice<T::BufType, AnyDenom> for T
+where
+    <T as HasBuf>::BufType: SplitByteSlice,
 {
     #[inline]
     fn parse_choice(

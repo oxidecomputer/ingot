@@ -12,6 +12,7 @@ use crate::{
 use alloc::{collections::LinkedList, vec::Vec};
 use example_chain::{OpteIn, UltimateChain, L3};
 use ingot_types::{primitives::*, Header, HeaderParse};
+use ip::IpProtocol;
 use macaddr::MacAddr6;
 
 use super::*;
@@ -48,7 +49,8 @@ pub struct TestFunFields {
 
 #[test]
 fn are_my_fragment_traits_sane() {
-    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
+    let mut buf2 =
+        [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::<&[u8]>::MINIMUM_LENGTH];
     // let mut eth = EthernetView::
     let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
     let (_v6, rest) = ValidIpv6::parse(&mut rest[..]).unwrap();
@@ -78,7 +80,7 @@ fn does_this_chain_stuff_compile() {
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
         eth.set_ethertype(0x0800);
-        ipv4.set_protocol(0x11);
+        ipv4.set_protocol(IpProtocol::UDP);
         ipv4.set_source(Ipv4Addr::from([192, 168, 0, 1]));
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
     }
@@ -113,7 +115,7 @@ fn variable_len_fields_in_chain() {
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
         eth.set_ethertype(0x0800);
-        ipv4.set_protocol(0x11);
+        ipv4.set_protocol(IpProtocol::UDP);
         ipv4.set_source(Ipv4Addr::from([192, 168, 0, 1]));
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
         ipv4.set_ihl(5 + (V4_EXTRA as u8 / 4));
@@ -146,7 +148,7 @@ fn variable_len_fields_in_chain() {
     let L3::Ipv4(v4) = mystack.l3 else {
         panic!("did not parse IPv4...");
     };
-    assert_eq!(v4.protocol(), 0x11);
+    assert_eq!(v4.protocol(), IpProtocol::UDP);
     assert_eq!(v4.source(), Ipv4Addr::from([192, 168, 0, 1]));
     assert_eq!(v4.destination(), Ipv4Addr::from([192, 168, 0, 255]));
     assert_eq!(v4.ihl(), 8);
@@ -164,7 +166,7 @@ fn variable_len_fields_in_chain() {
 #[test]
 fn parse_multichunk() {
     let mut eth_bytes = vec![0u8; Ethernet::MINIMUM_LENGTH];
-    let mut v6_bytes = vec![0u8; Ipv6::MINIMUM_LENGTH];
+    let mut v6_bytes = vec![0u8; Ipv6::<&[u8]>::MINIMUM_LENGTH];
     let mut udp_bytes = vec![0u8; Udp::MINIMUM_LENGTH];
     let body_bytes = vec![0xaau8; 128];
     {
@@ -176,7 +178,7 @@ fn parse_multichunk() {
         eth.set_destination(MacAddr6::broadcast());
         eth.set_ethertype(0x86DD);
 
-        ipv6.set_next_header(0x11);
+        ipv6.set_next_header(IpProtocol::UDP);
         ipv6.set_source(Ipv6Addr::LOCALHOST);
         ipv6.set_destination(Ipv6Addr::UNSPECIFIED);
 
@@ -206,7 +208,7 @@ fn parse_multichunk() {
     };
     v6.set_version(6);
     assert_eq!(v6.version(), 6);
-    assert_eq!(v6.next_header(), 0x11);
+    assert_eq!(v6.next_header(), IpProtocol::UDP);
     assert_eq!(v6.source(), Ipv6Addr::LOCALHOST);
     assert_eq!(v6.destination(), Ipv6Addr::UNSPECIFIED);
     // assert_eq!(v6.ihl(), 8);

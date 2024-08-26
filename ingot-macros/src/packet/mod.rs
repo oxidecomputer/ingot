@@ -14,7 +14,7 @@ use std::{
 };
 use syn::{
     parse_quote, spanned::Spanned, visit::Visit, Error, Expr, ExprLit,
-    Generics, Lit, Type, TypeArray, TypeParam,
+    Generics, Lit, PathArguments, Type, TypeArray, TypeParam,
 };
 
 mod bitfield;
@@ -36,19 +36,20 @@ pub struct IngotArgs {
 
 #[derive(Clone, FromMeta, Default, Debug)]
 #[darling(default)]
-pub struct NextLayerSpec {
+pub struct SubparseSpec {
     #[darling(default)]
-    or_extension: bool,
+    on_next_layer: bool,
 }
 
 #[derive(Clone, Debug, FromField)]
 #[darling(attributes(ingot))]
 pub struct FieldArgs {
     is: Option<Type>,
-    next_layer: Option<NextLayerSpec>,
+    #[darling(default)]
+    next_layer: bool,
     var_len: Option<Expr>,
     #[darling(default)]
-    subparse: bool,
+    subparse: Option<SubparseSpec>,
 
     ident: Option<syn::Ident>,
     ty: Type,
@@ -99,7 +100,7 @@ impl ValidField {
         match &self.state {
             FieldState::FixedWidth { .. } => None,
             FieldState::VarWidth { length_fn } => Some(length_fn),
-            FieldState::Parsable { length_fn } => length_fn.as_ref(),
+            FieldState::Parsable { length_fn, .. } => length_fn.as_ref(),
         }
     }
 
@@ -181,8 +182,12 @@ enum FieldState {
     /// capped length assigned.
     Parsable {
         /// Parsable blocks don't *need* to be length delimited,
-        /// but we can occasionally make the guarantee
+        /// but we can occasionally make the guarantee.
         length_fn: Option<Expr>,
+
+        /// Parsable blocks can consume the existing  ext layer hint,
+        /// and emit their own in place of the rest of the block.
+        on_next_layer: bool,
     },
 }
 
@@ -429,19 +434,22 @@ impl StructParseDeriveCtx {
             let user_ty = field.ty.clone();
 
             let state = match (
-                field.subparse,
+                &field.subparse,
                 &field.var_len,
-                &field.next_layer,
+                field.next_layer,
             ) {
-                (true, length_fn, None) => {
+                (Some(SubparseSpec { on_next_layer }), length_fn, false) => {
                     finalize_chunk()?;
-                    FieldState::Parsable { length_fn: length_fn.clone() }
+                    FieldState::Parsable {
+                        length_fn: length_fn.clone(),
+                        on_next_layer: *on_next_layer,
+                    }
                 }
-                (_, Some(length_fn), None) => {
+                (_, Some(length_fn), false) => {
                     finalize_chunk()?;
                     FieldState::VarWidth { length_fn: length_fn.clone() }
                 }
-                (false, None, next_layer) => {
+                (None, None, next_layer) => {
                     let underlying_ty =
                         if let Some(ty) = &field.is { ty } else { &field.ty }
                             .clone();
@@ -464,16 +472,12 @@ impl StructParseDeriveCtx {
                         ));
                     }
 
-                    if let Some(nl) = next_layer {
+                    if next_layer {
                         if nominated_next_header.is_some() {
                             return Err(Error::new(
                                 field_ident.span(),
                                 "only one field can be nominated as a next-header hint",
                             ));
-                        }
-
-                        if nl.or_extension {
-                            todo!("integrated extension parsing not yet ready")
                         }
 
                         nominated_next_header = Some(field_ident.clone());
@@ -757,7 +761,7 @@ impl StructParseDeriveCtx {
         // TODO: assuming at most one generic
         let owned_impl = if let Some(g) = self.my_explicit_generic() {
             quote! {
-                impl<#g: ::ingot::types::Chunk> ::ingot::types::Header for #ident<#g> {
+                impl<#g: ::ingot::types::ByteSlice> ::ingot::types::Header for #ident<#g> {
                     const MINIMUM_LENGTH: usize = #base_bytes;
 
                     fn packet_length(&self) -> usize {
@@ -778,7 +782,7 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            impl<V: ::ingot::types::Chunk> ::ingot::types::Header for #validated_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #validated_ident<V> {
                 const MINIMUM_LENGTH: usize = #base_bytes;
 
                 fn packet_length(&self) -> usize {
@@ -1283,12 +1287,26 @@ impl StructParseDeriveCtx {
                 ChunkState::Parsable(id) => {
                     let field = self.validated[id].borrow();
                     let user_ty = &field.user_ty;
+                    let mut genless_user_ty = user_ty.clone();
+                    // Hacky generic handling.
+                    if let Type::Path(ref mut t) = genless_user_ty {
+                        t.qself = None;
+                        if let Some(el) = t.path.segments.last_mut() {
+                            el.arguments = PathArguments::None;
+                        }
+                    }
+
+                    // TODO: length fn integration
+                    let (preamble, len_expr) = field
+                        .resolved_length_fn(self)
+                        .map(|(a, b)| (Some(a), Some(b)))
+                        .unwrap_or_default();
 
                     // TODO: probably needs more care around generics.
                     //       to say nothing of actually calling in `parse_choice`
                     //       if ext_hdr'd.
                     segment_fragments.push(quote! {
-                        let (#val_ident, from) = #user_ty::parse()?;
+                        let (#val_ident, from) = #genless_user_ty::parse()?;
                     });
                 }
             }
@@ -1296,10 +1314,14 @@ impl StructParseDeriveCtx {
         }
 
         quote! {
-            impl<V: ::ingot::types::Chunk> ::ingot::types::HeaderParse for #validated_ident<V> {
+            impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse for #validated_ident<V> {
                 type Target = Self;
                 fn parse(from: V) -> ::ingot::types::ParseResult<(Self, V)> {
                     use ::ingot::types::Header;
+                    use ::ingot::types::HasView;
+                    use ::ingot::types::NextLayer;
+                    use ::ingot::types::ParseChoice;
+                    use ::ingot::types::HeaderParse;
 
                     // TODO: This is technically repeating part of the prefix check on
                     // a fixed width.
@@ -1355,7 +1377,7 @@ impl ToTokens for StructParseDeriveCtx {
 
             pub type #pkt_ident<V> = ::ingot::types::Packet<#self_ty, #validated_ident<V>>;
 
-            impl<V: ::ingot::types::Chunk> ::ingot::types::HasBuf for #validated_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasBuf for #validated_ident<V> {
                 type BufType = V;
             }
 

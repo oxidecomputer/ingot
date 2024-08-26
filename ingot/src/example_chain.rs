@@ -4,18 +4,19 @@ use crate::{
     ethernet::{EthernetPacket, EthernetRef, Ethertype2, ValidEthernet},
     geneve::GenevePacket,
     icmp::{IcmpV4, IcmpV6, ValidIcmpV4, ValidIcmpV6},
-    ip::{Ipv4, Ipv6, Ipv6Packet, ValidIpv4, ValidIpv6},
+    ip::{IpProtocol, Ipv4, Ipv6, Ipv6Packet, ValidIpv4, ValidIpv6},
     tcp::{Tcp, ValidTcp},
     udp::{Udp, UdpPacket, ValidUdp},
 };
 use ingot_macros::{choice, Parse};
-use ingot_types::{primitives::*, HeaderParse, ParseControl};
+use ingot_types::{primitives::*, ParseControl};
 use zerocopy::ByteSlice;
 
 #[choice(on = u16be)]
 pub enum L3 {
     #[ingot(generic)]
     Ipv4 = 0x0800,
+    #[ingot(generic)]
     Ipv6 = 0x86dd,
 }
 
@@ -23,23 +24,24 @@ pub enum L3 {
 pub enum L32 {
     #[ingot(generic)]
     Ipv4 = Ethertype2::Ipv4,
+    #[ingot(generic)]
     Ipv6 = Ethertype2::Ipv6,
 }
 
-#[choice(on = u8)]
+#[choice(on = IpProtocol)]
 pub enum L4 {
     #[ingot(generic)]
-    Tcp = 0x06,
-    Udp = 0x11,
+    Tcp = IpProtocol::TCP,
+    Udp = IpProtocol::UDP,
 }
 
-#[choice(on = u8)]
+#[choice(on = IpProtocol)]
 pub enum Ulp {
     #[ingot(generic)]
-    Tcp = 0x06,
-    Udp = 0x11,
-    IcmpV4 = 1,
-    IcmpV6 = 58,
+    Tcp = IpProtocol::TCP,
+    Udp = IpProtocol::UDP,
+    IcmpV4 = IpProtocol::ICMP,
+    IcmpV6 = IpProtocol::ICMP_V6,
 }
 
 #[derive(Parse)]
