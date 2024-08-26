@@ -190,6 +190,17 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
+        // SOMETHING WRONG WITH BELOW
+        // SETS OFF A LOT OF ALARMS.
+
+        // impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::ParseChoice<V, #on> for #ident<V> {
+        //     #[inline]
+        //     fn parse_choice(data: V, hint: ::core::option::Option<#on>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
+        //         let ::ingot_types::Success{ val, remainder, hint } = #validated_ident::parse_choice(data, hint)?;
+        //         Ok(::ingot_types::Success{ val: val.into(), remainder, hint })
+        //     }
+        // }
+
         impl<V> ::core::convert::From<#validated_ident<V>> for #ident<V> {
             #[inline]
             fn from(value: #validated_ident<V>) -> Self {

@@ -14,7 +14,8 @@ use std::{
 };
 use syn::{
     parse_quote, spanned::Spanned, visit::Visit, Error, Expr, ExprLit,
-    Generics, Lit, PathArguments, Type, TypeArray, TypeParam,
+    GenericArgument, Generics, Lit, PathArguments, Token, Type, TypeArray,
+    TypeInfer, TypeParam,
 };
 
 mod bitfield;
@@ -710,7 +711,7 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            let hint = ::core::option::Option::Some(#val_ident.#access);
+            hint = ::core::option::Option::Some(::ingot::types::NetworkRepr::from_network(#val_ident.#access));
         }
     }
 
@@ -1294,6 +1295,7 @@ impl StructParseDeriveCtx {
 
         let mut segment_fragments = vec![];
         let mut els = vec![];
+        let mut hint_could_be_altered = false;
         for (i, chunk) in self.chunk_layout.iter().enumerate() {
             let val_ident = Ident::new(&format!("v{i}"), Span::call_site());
             match chunk {
@@ -1330,11 +1332,43 @@ impl StructParseDeriveCtx {
                     let user_ty = &field.user_ty;
                     let mut genless_user_ty = user_ty.clone();
 
+                    let FieldState::Parsable { on_next_layer, .. } =
+                        &field.state
+                    else {
+                        unreachable!()
+                    };
+
                     // Hacky generic handling.
-                    if let Type::Path(ref mut t) = genless_user_ty {
-                        t.qself = None;
-                        if let Some(el) = t.path.segments.last_mut() {
-                            el.arguments = PathArguments::None;
+                    if *on_next_layer {
+                        if let Type::Path(ref mut t) = genless_user_ty {
+                            t.qself = None;
+                            if let Some(el) = t.path.segments.last_mut() {
+                                // replace all generic args with inferred.
+                                match &mut el.arguments {
+                                    PathArguments::AngleBracketed(args) => {
+                                        for arg in args.args.iter_mut() {
+                                            if let GenericArgument::Type(t) =
+                                                arg
+                                            {
+                                                *t = Type::Infer(TypeInfer {
+                                                    underscore_token: Token![_](
+                                                        t.span(),
+                                                    ),
+                                                })
+                                            }
+                                        }
+                                    }
+                                    PathArguments::None => todo!(),
+                                    PathArguments::Parenthesized(_) => todo!(),
+                                }
+                            }
+                        }
+                    } else {
+                        if let Type::Path(ref mut t) = genless_user_ty {
+                            t.qself = None;
+                            if let Some(el) = t.path.segments.last_mut() {
+                                el.arguments = PathArguments::None;
+                            }
                         }
                     }
 
@@ -1344,21 +1378,18 @@ impl StructParseDeriveCtx {
                         .map(|(a, b)| (Some(a), Some(b)))
                         .unwrap_or_default();
 
-                    let FieldState::Parsable { on_next_layer, .. } =
-                        &field.state
-                    else {
-                        unreachable!()
-                    };
-
                     if *on_next_layer {
+                        hint_could_be_altered = true;
                         let hint_lkup = self.gen_private_hint_lookup(i);
                         segment_fragments.push(quote! {
                             #hint_lkup
-                            let ::ingot::types::Success { val: #val_ident, hint, remainder: from } = #genless_user_ty::parse_choice(hint)?;
+                            // Discard hint
+                            let ::ingot::types::Success { val: #val_ident, remainder: from, .. } = <#genless_user_ty as HasView>::ViewType::parse_choice(from, hint)?;
+                            let #val_ident = #val_ident.into();
                         });
                     } else {
                         segment_fragments.push(quote! {
-                            let ::ingot::types::Success { val: #val_ident, hint, remainder: from } = #genless_user_ty::parse()?;
+                            let ::ingot::types::Success { val: #val_ident, hint: h2, remainder: from } = #genless_user_ty::parse(from)?;
                         });
                     }
                 }
@@ -1366,13 +1397,18 @@ impl StructParseDeriveCtx {
             els.push(val_ident);
         }
 
-        let hint_recheck = if self.nominated_next_header.is_some() {
-            Some(quote! {
-                let hint = hint.or_else(|| val.next_layer());
-            })
-        } else {
-            None
-        };
+        let hint_recheck =
+            match (&self.nominated_next_header, hint_could_be_altered) {
+                (Some(_), true) => quote! {
+                    hint = hint.or_else(|| val.next_layer());
+                },
+                (Some(_), false) => quote! {
+                    hint = val.next_layer();
+                },
+                _ => quote! {
+                    hint = None;
+                },
+            };
 
         quote! {
             impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse for #validated_ident<V> {
@@ -1384,7 +1420,7 @@ impl StructParseDeriveCtx {
                     use ::ingot::types::ParseChoice;
                     use ::ingot::types::HeaderParse;
 
-                    let hint = None;
+                    let mut hint = None;
 
                     #( #segment_fragments )*
 

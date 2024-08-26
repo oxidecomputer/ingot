@@ -11,7 +11,7 @@ use crate::{
 };
 use alloc::{collections::LinkedList, vec::Vec};
 use example_chain::{OpteIn, UltimateChain, L3};
-use ingot_types::{primitives::*, Header, HeaderParse};
+use ingot_types::{primitives::*, BufState, Header, HeaderParse};
 use ip::IpProtocol;
 use macaddr::MacAddr6;
 
@@ -52,8 +52,10 @@ fn are_my_fragment_traits_sane() {
     let mut buf2 =
         [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::<&[u8]>::MINIMUM_LENGTH];
     // let mut eth = EthernetView::
-    let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
-    let (_v6, rest) = ValidIpv6::parse(&mut rest[..]).unwrap();
+    let BufState { val: mut eth, remainder: rest, .. } =
+        ValidEthernet::parse(&mut buf2[..]).unwrap();
+    let BufState { val: v6, remainder: rest, .. } =
+        ValidIpv6::parse(&mut rest[..]).unwrap();
     assert_eq!(rest.len(), 0);
     assert_eq!(eth.source(), MacAddr6::nil());
     eth.set_source(MacAddr6::broadcast());
@@ -73,9 +75,11 @@ fn does_this_chain_stuff_compile() {
 
     // set up stack as Ipv4, UDP
     {
-        let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
-        let (mut ipv4, rest) = ValidIpv4::parse(rest).unwrap();
-        let (_udp, _rest) = ValidUdp::parse(rest).unwrap();
+        let BufState { val: mut eth, remainder: rest, .. } =
+            ValidEthernet::parse(&mut buf2[..]).unwrap();
+        let BufState { val: mut ipv4, remainder: rest, .. } =
+            ValidIpv4::parse(rest).unwrap();
+        let BufState { .. } = ValidUdp::parse(rest).unwrap();
 
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
@@ -85,8 +89,9 @@ fn does_this_chain_stuff_compile() {
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
     }
 
-    let (_mystack, _) = UltimateChain::parse(&mut buf2[..]).unwrap();
-    let (mystack, _) = UltimateChain::parse(&buf2[..]).unwrap();
+    let BufState { .. } = UltimateChain::parse(&mut buf2[..]).unwrap();
+    let BufState { val: mystack, .. } =
+        UltimateChain::parse(&buf2[..]).unwrap();
 
     match mystack.l3 {
         L3::Ipv4(v) => v.hop_limit(),
@@ -109,8 +114,10 @@ fn variable_len_fields_in_chain() {
 
     // set up stack as Ipv4, UDP
     {
-        let (mut eth, rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
-        let (mut ipv4, rest) = ValidIpv4::parse(rest).unwrap();
+        let BufState { val: mut eth, remainder: rest, .. } =
+            ValidEthernet::parse(&mut buf2[..]).unwrap();
+        let BufState { val: mut ipv4, remainder: rest, .. } =
+            ValidIpv4::parse(rest).unwrap();
 
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
@@ -127,7 +134,7 @@ fn variable_len_fields_in_chain() {
 
     {
         let l = buf2.len();
-        let (mut udp, rest) =
+        let BufState { val: mut udp, remainder: rest, .. } =
             ValidUdp::parse(&mut buf2[l - Udp::MINIMUM_LENGTH..]).unwrap();
         assert_eq!(rest.len(), 0);
         udp.set_source(6082);
@@ -136,7 +143,8 @@ fn variable_len_fields_in_chain() {
         udp.set_checksum(0xffff);
     }
 
-    let (mystack, _) = UltimateChain::parse(&buf2[..]).unwrap();
+    let BufState { val: mystack, .. } =
+        UltimateChain::parse(&buf2[..]).unwrap();
 
     assert_eq!(
         mystack.eth.source(),
@@ -170,9 +178,12 @@ fn parse_multichunk() {
     let mut udp_bytes = vec![0u8; Udp::MINIMUM_LENGTH];
     let body_bytes = vec![0xaau8; 128];
     {
-        let (mut eth, _) = ValidEthernet::parse(&mut eth_bytes[..]).unwrap();
-        let (mut ipv6, _) = ValidIpv6::parse(&mut v6_bytes[..]).unwrap();
-        let (mut udp, _) = ValidUdp::parse(&mut udp_bytes[..]).unwrap();
+        let BufState { val: mut eth, .. } =
+            ValidEthernet::parse(&mut eth_bytes[..]).unwrap();
+        let BufState { val: mut ipv6, .. } =
+            ValidIpv6::parse(&mut v6_bytes[..]).unwrap();
+        let BufState { val: mut udp, .. } =
+            ValidUdp::parse(&mut udp_bytes[..]).unwrap();
 
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
@@ -255,7 +266,7 @@ fn field_accesses_of_all_kinds() {
         0x01, 0xde, 0x01, 0xde,
     ];
 
-    let (mut a, _rest) =
+    let BufState { val: mut a, .. } =
         ValidTestFunFields::parse(&mut base_bytes[..]).unwrap();
 
     assert_eq!(a.fine(), 1, "fine");
@@ -396,7 +407,8 @@ fn test_opte_unconditionals() {
         0x04, 0x05, 0x06, 0x07,
     ];
 
-    let (mut opte_in, _unparsed) = OpteIn::parse(&mut pkt[..]).unwrap();
+    let BufState { val: mut opte_in, .. } =
+        OpteIn::parse(&mut pkt[..]).unwrap();
 
     assert_eq!(opte_in.outer_encap.options_ref().as_ref().len(), 4);
     assert_eq!(opte_in.inner_eth.ethertype(), 0x0800);
@@ -405,7 +417,7 @@ fn test_opte_unconditionals() {
 
     // Now, try out pretending we're ARP and early exiting.
     opte_in.inner_eth.set_ethertype(0x0806);
-    let (opte_in, _unparsed) = OpteIn::parse(&pkt[..]).unwrap();
+    let BufState { val: opte_in, .. } = OpteIn::parse(&pkt[..]).unwrap();
     assert!(opte_in.inner_l3.is_none());
     assert!(opte_in.inner_ulp.is_none());
 }
@@ -445,10 +457,10 @@ fn varlen_geneve() {
         0x00,
     ];
 
-    let (g, _) = ValidGeneve::parse(&g_no_opt[..]).unwrap();
+    let BufState { val: g, .. } = ValidGeneve::parse(&g_no_opt[..]).unwrap();
     assert_eq!(g.packet_length(), 8);
 
-    let (g, _) = ValidGeneve::parse(&g_opt[..]).unwrap();
+    let BufState { val: g, .. } = ValidGeneve::parse(&g_opt[..]).unwrap();
     assert_eq!(g.packet_length(), 12);
 }
 
@@ -469,7 +481,7 @@ fn ipv6_bitset() {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
     ];
 
-    let (mut v6, _rest) = ValidIpv6::parse(&mut pkt[..]).unwrap();
+    let BufState { val: mut v6, .. } = ValidIpv6::parse(&mut pkt[..]).unwrap();
 
     for i in 0..5 {
         match i {

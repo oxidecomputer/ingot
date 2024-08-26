@@ -2,8 +2,10 @@ use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, NetworkRepr, NextLayer, Packet, ParseError, VarBytes,
+    primitives::*, HeaderParse, NetworkRepr, NextLayer, Packet, ParseError,
+    VarBytes,
 };
+use zerocopy::ByteSlice;
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct IpProtocol(pub u8);
@@ -154,7 +156,6 @@ impl NetworkRepr<u3> for Ipv4Flags {
 #[derive(Ingot)]
 pub struct Ipv6<V> {
     // pub struct Ipv6 {
-    // pub struct Ipv6 {
     // #[ingot(valid = 6)]
     pub version: u4,
     pub dscp: u6,
@@ -165,7 +166,7 @@ pub struct Ipv6<V> {
     // #[ingot(payload_len)]
     pub payload_len: u16be,
     #[ingot(is = "u8", next_layer)]
-    pub next_header: IpProtocol, // should be a type.
+    pub next_header: IpProtocol,
     // #[ingot(default = 128)]
     pub hop_limit: u8,
 
@@ -175,7 +176,6 @@ pub struct Ipv6<V> {
     pub destination: Ipv6Addr,
 
     #[ingot(subparse(on_next_layer))]
-    // // // pub v6ext: V6Ehs<V>,//<V>,
     pub v6ext: LowRentV6Eh<V>,
 }
 
@@ -186,17 +186,28 @@ pub enum LowRentV6Eh {
     IpV6Ext6564 = ExtHdrClass::Rfc6564,
 }
 
-impl<V> NextLayer for LowRentV6Eh<V> {
-    type Denom = IpProtocol;
-    fn next_layer(&self) -> Option<Self::Denom> {
-        None
-    }
-}
+// impl<V> NextLayer for LowRentV6Eh<V> {
+//     type Denom = IpProtocol;
+//     fn next_layer(&self) -> Option<Self::Denom> {
+//         None
+//     }
+// }
+
+// impl<V: ByteSlice> HeaderParse for LowRentV6Eh<V> {
+//     type Target = Self;
+
+//     fn parse(
+//         from: <Self::Target as ingot_types::HasBuf>::BufType,
+//     ) -> ingot_types::ParseResult<ingot_types::Success<Self::Target>> {
+//         todo!()
+//     }
+// }
 
 // 0x2c
 #[derive(Ingot)]
 pub struct IpV6ExtFragment {
-    pub next_header: u8,
+    #[ingot(is = "u8", next_layer)]
+    pub next_header: IpProtocol, // should be a type.
     pub reserved: u8,
     pub fragment_offset: u13be,
     pub res: u2,
@@ -207,7 +218,8 @@ pub struct IpV6ExtFragment {
 // 0x00, 0x2b, 0x3c, custom(0xfe)
 #[derive(Ingot)]
 pub struct IpV6Ext6564<V> {
-    pub next_header: u8,
+    #[ingot(is = "u8", next_layer)]
+    pub next_header: IpProtocol, // should be a type.
     pub ext_len: u8,
 
     #[ingot(var_len = "(ext_len as usize) * 8")]
