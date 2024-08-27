@@ -2,10 +2,12 @@ use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, HeaderParse, NetworkRepr, NextLayer, Packet, ParseError,
-    VarBytes,
+    primitives::*, HasBuf, HasRepr, HasView, Header, HeaderParse, NetworkRepr,
+    NextLayer, Packet, ParseChoice, ParseError, VarBytes,
 };
-use zerocopy::ByteSlice;
+use zerocopy::{ByteSlice, SplitByteSlice};
+
+use crate::util::{Repeated, ValidRepeated};
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct IpProtocol(pub u8);
@@ -176,8 +178,40 @@ pub struct Ipv6<V> {
     pub destination: Ipv6Addr,
 
     #[ingot(subparse(on_next_layer))]
+    // pub v6ext: V6Extensions<V>,
     pub v6ext: LowRentV6Eh<V>,
 }
+
+// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
+// for ValidIpv6<V> {
+//     type Target = Self;
+//     fn parse(
+//         from: V,
+//     ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
+//         use ::ingot::types::Header;
+//         use ::ingot::types::HasView;
+//         use ::ingot::types::NextLayer;
+//         use ::ingot::types::ParseChoice;
+//         use ::ingot::types::HeaderParse;
+//         let mut hint = None;
+//         let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
+//                 from,
+//             )
+//             .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+//         hint = ::core::option::Option::Some(
+//             ::ingot::types::NetworkRepr::from_network(v0.next_header),
+//         );
+//         let ::ingot::types::Success { val: v1, remainder: from, .. } = ValidRepeated::<ValidLowRentV6Eh<_>, _>::parse_choice(from, hint)?;
+//         let v1 = v1.into();
+//         let val = ValidIpv6(v0, v1);
+//         hint = hint.or_else(|| val.next_layer());
+//         ::core::result::Result::Ok(::ingot::types::Success {
+//             val,
+//             hint,
+//             remainder: from,
+//         })
+//     }
+// }
 
 #[choice(on = "IpProtocol", map_on = IpProtocol::class)]
 pub enum LowRentV6Eh {
@@ -185,6 +219,52 @@ pub enum LowRentV6Eh {
     #[ingot(generic)]
     IpV6Ext6564 = ExtHdrClass::Rfc6564,
 }
+
+// TODO: generate
+impl<V> HasRepr for LowRentV6Eh<V> {
+    type ReprType = LowRentV6EhRepr<V>;
+}
+
+impl<V> HasView for LowRentV6EhRepr<V> {
+    type ViewType = ValidLowRentV6Eh<V>;
+}
+
+impl<V> HasRepr for ValidLowRentV6Eh<V> {
+    type ReprType = LowRentV6EhRepr<V>;
+}
+
+impl<V> HasView for ValidLowRentV6Eh<V> {
+    type ViewType = Self;
+}
+
+impl<V: ByteSlice> HasBuf for LowRentV6EhRepr<V> {
+    type BufType = V;
+}
+
+impl<V> Header for LowRentV6EhRepr<V> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    fn packet_length(&self) -> usize {
+        todo!()
+    }
+}
+
+// impl<V> NextLayer for LowRentV6Eh<V> {
+//     type Denom = IpProtocol;
+// }
+
+// impl<V: ByteSlice> HeaderParse for LowRentV6Eh<V> {
+
+//     type Target = Self;
+
+//     fn parse(
+//         from: <Self::Target as ingot_types::HasBuf>::BufType,
+//     ) -> ingot_types::ParseResult<ingot_types::Success<Self::Target>> {
+//         todo!()
+//     }
+// }
+
+pub type V6Extensions<V> = Repeated<ValidLowRentV6Eh<V>, V>;
 
 // impl<V> NextLayer for LowRentV6Eh<V> {
 //     type Denom = IpProtocol;

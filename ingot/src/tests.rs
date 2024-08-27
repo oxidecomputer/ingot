@@ -11,9 +11,11 @@ use crate::{
 };
 use alloc::{collections::LinkedList, vec::Vec};
 use example_chain::{OpteIn, UltimateChain, L3};
-use ingot_types::{primitives::*, BufState, Header, HeaderParse};
+use ingot_types::{primitives::*, BufState, Header, HeaderParse, ParseChoice};
 use ip::IpProtocol;
 use macaddr::MacAddr6;
+use udp::UdpPacket;
+use util::{Repeated, ValidRepeated};
 
 use super::*;
 
@@ -535,4 +537,11 @@ fn ipv6_bitset() {
             &pkt[..4]
         );
     }
+}
+
+#[test]
+fn repeat() {
+    let some_udps = [0u8; 32];
+    todo!()
+    // let a = Repeated::<ValidUdp<_>, &[u8]>::parse_choice(&some_udps, None);
 }

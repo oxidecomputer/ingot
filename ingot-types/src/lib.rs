@@ -85,8 +85,16 @@ impl<O, B> HasView for Packet<O, B> {
     type ViewType = B;
 }
 
+impl<O, B> HasRepr for Packet<O, B> {
+    type ReprType = O;
+}
+
 impl<T: HasView> HasView for Option<T> {
     type ViewType = T;
+}
+
+impl<T: HasRepr> HasRepr for Option<T> {
+    type ReprType = T;
 }
 
 #[cfg(feature = "alloc")]
@@ -129,6 +137,14 @@ where
             Packet::Repr(o) => o.len(),
             Packet::Raw(b) => b.len(),
         }
+    }
+}
+
+impl<T: Header> Header for Vec<T> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    fn packet_length(&self) -> usize {
+        self.iter().map(|v| v.packet_length()).sum()
     }
 }
 
