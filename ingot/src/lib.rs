@@ -22,7 +22,6 @@ pub mod icmp;
 pub mod ip;
 pub mod tcp;
 pub mod udp;
-pub mod util;
 
 pub mod example_chain;
 

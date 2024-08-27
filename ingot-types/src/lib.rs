@@ -112,7 +112,7 @@ impl<O, B> Header for Packet<O, B>
 where
     O: Header,
     B: Header,
-    B: HasRepr<ReprType = O>,
+    // B: HasRepr<ReprType = O>,
 {
     const MINIMUM_LENGTH: usize = O::MINIMUM_LENGTH;
 

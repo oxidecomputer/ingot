@@ -1,13 +1,12 @@
+use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
     primitives::*, HasBuf, HasRepr, HasView, Header, HeaderParse, NetworkRepr,
-    NextLayer, Packet, ParseChoice, ParseError, VarBytes,
+    NextLayer, Packet, ParseChoice, ParseError, Success, VarBytes,
 };
 use zerocopy::{ByteSlice, SplitByteSlice};
-
-use crate::util::{Repeated, ValidRepeated};
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct IpProtocol(pub u8);
@@ -179,7 +178,8 @@ pub struct Ipv6<V> {
 
     #[ingot(subparse(on_next_layer))]
     // pub v6ext: V6Extensions<V>,
-    pub v6ext: LowRentV6Eh<V>,
+    // pub v6ext: LowRentV6Eh<V>,
+    pub v6ext: RepeatedEh<V>,
 }
 
 // impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
@@ -249,40 +249,6 @@ impl<V> Header for LowRentV6EhRepr<V> {
     }
 }
 
-// impl<V> NextLayer for LowRentV6Eh<V> {
-//     type Denom = IpProtocol;
-// }
-
-// impl<V: ByteSlice> HeaderParse for LowRentV6Eh<V> {
-
-//     type Target = Self;
-
-//     fn parse(
-//         from: <Self::Target as ingot_types::HasBuf>::BufType,
-//     ) -> ingot_types::ParseResult<ingot_types::Success<Self::Target>> {
-//         todo!()
-//     }
-// }
-
-pub type V6Extensions<V> = Repeated<ValidLowRentV6Eh<V>, V>;
-
-// impl<V> NextLayer for LowRentV6Eh<V> {
-//     type Denom = IpProtocol;
-//     fn next_layer(&self) -> Option<Self::Denom> {
-//         None
-//     }
-// }
-
-// impl<V: ByteSlice> HeaderParse for LowRentV6Eh<V> {
-//     type Target = Self;
-
-//     fn parse(
-//         from: <Self::Target as ingot_types::HasBuf>::BufType,
-//     ) -> ingot_types::ParseResult<ingot_types::Success<Self::Target>> {
-//         todo!()
-//     }
-// }
-
 // 0x2c
 #[derive(Ingot)]
 pub struct IpV6ExtFragment {
@@ -304,4 +270,76 @@ pub struct IpV6Ext6564<V> {
 
     #[ingot(var_len = "(ext_len as usize) * 8")]
     pub data: VarBytes<V>,
+}
+
+// TODO: Ideally, we want this as a combinator.
+//       I fought with my collection of types and traits for like 4 hours
+//       and was unable to make that happen -- We only *need* it for V6EHs
+//       but it would be real nice to have for, e.g., Q-in-Q.
+
+pub type RepeatedEh<B> = Packet<Vec<LowRentV6Eh<B>>, ValidRepeatedEh<B>>;
+
+pub struct ValidRepeatedEh<B> {
+    inner: B,
+}
+
+impl<B: ByteSlice> HasBuf for ValidRepeatedEh<B> {
+    type BufType = B;
+}
+
+impl<B: ByteSlice> Header for ValidRepeatedEh<B> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    fn packet_length(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<B: ByteSlice> NextLayer for ValidRepeatedEh<B> {
+    type Denom = IpProtocol;
+
+    fn next_layer(&self) -> Option<Self::Denom> {
+        // TODO: scan to last and re-read.
+        None
+    }
+}
+
+impl<B> HasRepr for ValidRepeatedEh<B> {
+    type ReprType = Vec<LowRentV6EhRepr<B>>;
+}
+
+impl<B: SplitByteSlice> ParseChoice<B, IpProtocol> for ValidRepeatedEh<B> {
+    fn parse_choice(
+        data: B,
+        mut hint: Option<IpProtocol>,
+    ) -> ingot_types::ParseResult<ingot_types::Success<Self>> {
+        let original_len = data.len();
+        let mut bytes_read = 0;
+
+        loop {
+            match <ValidLowRentV6Eh<&[u8]> as ParseChoice<&[u8], IpProtocol>>::parse_choice(
+                &data[bytes_read..],
+                hint,
+            ) {
+                Ok(Success { hint: l_hint, remainder, .. }) => {
+                    bytes_read = original_len - remainder.len();
+                    hint = l_hint;
+                }
+                Err(ParseError::Unwanted) => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        let (inner, remainder) = data.split_at(bytes_read);
+
+        let val = Self { inner };
+
+        Ok(Success { val, hint, remainder })
+    }
+}
+
+impl<B> From<ValidRepeatedEh<B>> for RepeatedEh<B> {
+    fn from(value: ValidRepeatedEh<B>) -> Self {
+        Self::Raw(value)
+    }
 }

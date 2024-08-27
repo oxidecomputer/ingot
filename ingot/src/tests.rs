@@ -11,11 +11,9 @@ use crate::{
 };
 use alloc::{collections::LinkedList, vec::Vec};
 use example_chain::{OpteIn, UltimateChain, L3};
-use ingot_types::{primitives::*, BufState, Header, HeaderParse, ParseChoice};
+use ingot_types::{primitives::*, BufState, Header, HeaderParse, NetworkRepr};
 use ip::IpProtocol;
 use macaddr::MacAddr6;
-use udp::UdpPacket;
-use util::{Repeated, ValidRepeated};
 
 use super::*;
 
@@ -53,9 +51,11 @@ pub struct TestFunFields {
 fn are_my_fragment_traits_sane() {
     let mut buf2 =
         [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::<&[u8]>::MINIMUM_LENGTH];
-    // let mut eth = EthernetView::
     let BufState { val: mut eth, remainder: rest, .. } =
         ValidEthernet::parse(&mut buf2[..]).unwrap();
+
+    // 0 is a valid v6 EH -- need to change to e.g. TCP before parse.
+    rest[6] = IpProtocol::TCP.to_network();
     let BufState { val: v6, remainder: rest, .. } =
         ValidIpv6::parse(&mut rest[..]).unwrap();
     assert_eq!(rest.len(), 0);
@@ -177,6 +177,8 @@ fn variable_len_fields_in_chain() {
 fn parse_multichunk() {
     let mut eth_bytes = vec![0u8; Ethernet::MINIMUM_LENGTH];
     let mut v6_bytes = vec![0u8; Ipv6::<&[u8]>::MINIMUM_LENGTH];
+    // 0 is a valid v6 EH -- need to init it before parse.
+    v6_bytes[6] = IpProtocol::UDP.to_network();
     let mut udp_bytes = vec![0u8; Udp::MINIMUM_LENGTH];
     let body_bytes = vec![0xaau8; 128];
     {
@@ -191,7 +193,7 @@ fn parse_multichunk() {
         eth.set_destination(MacAddr6::broadcast());
         eth.set_ethertype(0x86DD);
 
-        ipv6.set_next_header(IpProtocol::UDP);
+        assert_eq!(ipv6.next_header(), IpProtocol::UDP);
         ipv6.set_source(Ipv6Addr::LOCALHOST);
         ipv6.set_destination(Ipv6Addr::UNSPECIFIED);
 
@@ -537,11 +539,4 @@ fn ipv6_bitset() {
             &pkt[..4]
         );
     }
-}
-
-#[test]
-fn repeat() {
-    let some_udps = [0u8; 32];
-    todo!()
-    // let a = Repeated::<ValidUdp<_>, &[u8]>::parse_choice(&some_udps, None);
 }
