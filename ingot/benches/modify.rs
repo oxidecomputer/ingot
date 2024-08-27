@@ -144,7 +144,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
     c.bench_function("parse-and-decr-v4", |b| {
         b.iter(|| {
-            let (mut hdrs, _body) =
+            let (mut hdrs, ..) =
                 UltimateChain::parse(black_box(&mut pkt_body_v4[..])).unwrap();
             black_box(hdrs.l4.set_destination(hdrs.l4.destination() - 1));
         })

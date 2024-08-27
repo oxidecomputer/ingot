@@ -680,7 +680,7 @@ impl StructParseDeriveCtx {
             return quote! {let hint = None;};
         };
 
-        let field_lk = self.validated.get(&field_ident).unwrap();
+        let field_lk = self.validated.get(field_ident).unwrap();
         let field_lk = field_lk.borrow();
 
         if curr_idx <= field_lk.sub_field_idx {
@@ -1363,12 +1363,10 @@ impl StructParseDeriveCtx {
                                 }
                             }
                         }
-                    } else {
-                        if let Type::Path(ref mut t) = genless_user_ty {
-                            t.qself = None;
-                            if let Some(el) = t.path.segments.last_mut() {
-                                el.arguments = PathArguments::None;
-                            }
+                    } else if let Type::Path(ref mut t) = genless_user_ty {
+                        t.qself = None;
+                        if let Some(el) = t.path.segments.last_mut() {
+                            el.arguments = PathArguments::None;
                         }
                     }
 
@@ -1384,12 +1382,12 @@ impl StructParseDeriveCtx {
                         segment_fragments.push(quote! {
                             #hint_lkup
                             // Discard hint
-                            let ::ingot::types::Success { val: #val_ident, remainder: from, .. } = <#genless_user_ty as HasView>::ViewType::parse_choice(from, hint)?;
+                            let (#val_ident, mut hint, from) = <#genless_user_ty as HasView>::ViewType::parse_choice(from, hint)?;
                             let #val_ident = #val_ident.into();
                         });
                     } else {
                         segment_fragments.push(quote! {
-                            let ::ingot::types::Success { val: #val_ident, hint: h2, remainder: from } = #genless_user_ty::parse(from)?;
+                            let (#val_ident, h2, from) = #genless_user_ty::parse(from)?;
                         });
                     }
                 }
@@ -1429,7 +1427,7 @@ impl StructParseDeriveCtx {
                     #hint_recheck
 
                     ::core::result::Result::Ok(
-                        ::ingot::types::Success { val, hint, remainder: from }
+                        (val, hint, from)
                     )
                 }
             }

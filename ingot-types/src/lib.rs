@@ -207,13 +207,8 @@ where
     fn parse(
         from: <Self::Target as HasBuf>::BufType,
     ) -> ParseResult<Success<Self::Target>> {
-        <B as HeaderParse>::parse(from).map(
-            |Success { val, hint, remainder }| Success {
-                val: val.into(),
-                hint,
-                remainder,
-            },
-        )
+        <B as HeaderParse>::parse(from)
+            .map(|(val, hint, remainder)| (val.into(), hint, remainder))
     }
 }
 
@@ -333,7 +328,8 @@ pub struct BufState<T, H, B> {
 }
 
 pub type Success<T> =
-    BufState<T, <T as NextLayer>::Denom, <T as HasBuf>::BufType>;
+    (T, Option<<T as NextLayer>::Denom>, <T as HasBuf>::BufType);
+// BufState<T, <T as NextLayer>::Denom, <T as HasBuf>::BufType>;
 
 pub trait NextLayer {
     type Denom: Copy;

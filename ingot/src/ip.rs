@@ -3,8 +3,8 @@ use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, HasBuf, HasRepr, HasView, Header, HeaderParse, NetworkRepr,
-    NextLayer, Packet, ParseChoice, ParseError, Success, VarBytes,
+    primitives::*, HasBuf, HasRepr, HasView, Header, NetworkRepr,
+    NextLayer, Packet, ParseChoice, ParseError, VarBytes,
 };
 use zerocopy::{ByteSlice, SplitByteSlice};
 
@@ -37,6 +37,7 @@ impl IpProtocol {
     pub const IPV6_EXPERIMENT0: Self = Self(253);
     pub const IPV6_EXPERIMENT1: Self = Self(254);
 
+    #[inline]
     pub fn class(self) -> ExtHdrClass {
         match self {
             Self::IPV6_FRAGMENT => ExtHdrClass::FragmentHeader,
@@ -54,10 +55,12 @@ impl IpProtocol {
 }
 
 impl NetworkRepr<u8> for IpProtocol {
+    #[inline]
     fn to_network(self) -> u8 {
         self.0
     }
 
+    #[inline]
     fn from_network(val: u8) -> Self {
         Self(val)
     }
@@ -110,6 +113,7 @@ impl NetworkRepr<u2> for Ecn {
         self as u8
     }
 
+    #[inline]
     fn from_network(val: u8) -> Self {
         match val {
             0 => Ecn::NotCapable,
@@ -124,6 +128,7 @@ impl NetworkRepr<u2> for Ecn {
 impl TryFrom<u2> for Ecn {
     type Error = ParseError;
 
+    #[inline]
     fn try_from(value: u2) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Ecn::NotCapable),
@@ -145,10 +150,12 @@ pub struct Ipv4Flags: u3 {
 }
 
 impl NetworkRepr<u3> for Ipv4Flags {
+    #[inline]
     fn to_network(self) -> u3 {
         self.bits()
     }
 
+    #[inline]
     fn from_network(val: u3) -> Self {
         Ipv4Flags::from_bits_truncate(val)
     }
@@ -290,6 +297,7 @@ impl<B: ByteSlice> HasBuf for ValidRepeatedEh<B> {
 impl<B: ByteSlice> Header for ValidRepeatedEh<B> {
     const MINIMUM_LENGTH: usize = 0;
 
+    #[inline]
     fn packet_length(&self) -> usize {
         self.inner.len()
     }
@@ -298,6 +306,7 @@ impl<B: ByteSlice> Header for ValidRepeatedEh<B> {
 impl<B: ByteSlice> NextLayer for ValidRepeatedEh<B> {
     type Denom = IpProtocol;
 
+    #[inline]
     fn next_layer(&self) -> Option<Self::Denom> {
         // TODO: scan to last and re-read.
         None
@@ -309,23 +318,27 @@ impl<B> HasRepr for ValidRepeatedEh<B> {
 }
 
 impl<B: SplitByteSlice> ParseChoice<B, IpProtocol> for ValidRepeatedEh<B> {
+    #[inline]
     fn parse_choice(
         data: B,
-        mut hint: Option<IpProtocol>,
+        hint: Option<IpProtocol>,
     ) -> ingot_types::ParseResult<ingot_types::Success<Self>> {
         let original_len = data.len();
         let mut bytes_read = 0;
+        let Some(mut hint) = hint else {
+            return Err(ParseError::NeedsHint);
+        };
 
-        loop {
+        while IpProtocol::class(hint) != ExtHdrClass::NotAnEh {
             match <ValidLowRentV6Eh<&[u8]> as ParseChoice<&[u8], IpProtocol>>::parse_choice(
                 &data[bytes_read..],
-                hint,
+                Some(hint),
             ) {
-                Ok(Success { hint: l_hint, remainder, .. }) => {
+                Ok((.., Some(l_hint), remainder)) => {
                     bytes_read = original_len - remainder.len();
                     hint = l_hint;
                 }
-                Err(ParseError::Unwanted) => break,
+                Ok(_) | Err(ParseError::Unwanted) => unreachable!(),
                 Err(e) => return Err(e),
             }
         }
@@ -334,11 +347,12 @@ impl<B: SplitByteSlice> ParseChoice<B, IpProtocol> for ValidRepeatedEh<B> {
 
         let val = Self { inner };
 
-        Ok(Success { val, hint, remainder })
+        Ok((val, Some(hint), remainder))
     }
 }
 
 impl<B> From<ValidRepeatedEh<B>> for RepeatedEh<B> {
+    #[inline]
     fn from(value: ValidRepeatedEh<B>) -> Self {
         Self::Raw(value)
     }

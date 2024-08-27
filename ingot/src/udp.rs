@@ -1,5 +1,5 @@
 use ingot_macros::Ingot;
-use ingot_types::{primitives::u16be, HasRepr, HasView};
+use ingot_types::{primitives::u16be, HasRepr};
 
 #[derive(Ingot)]
 pub struct Udp {

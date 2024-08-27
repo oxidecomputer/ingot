@@ -224,7 +224,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         }
 
         let destructure = quote! {
-            ::ingot::types::Success{val: #fname, hint, remainder}
+            (#fname, hint, remainder)
         };
 
         // TODO: implement and figure in conditions (when/skip_if)
@@ -365,11 +365,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
                 #( #onechunk_parse_points )*
 
-                let val = #ctor;
-
-                // Ok((#ctor, slice))
-
-                Ok(::ingot::types::Success{val, hint: None, remainder: slice})
+                Ok((#ctor, None, slice))
             }
         }
 
