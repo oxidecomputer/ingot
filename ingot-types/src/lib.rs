@@ -3,13 +3,14 @@
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
-use alloc::vec::Vec;
+pub use alloc::vec::Vec;
 use core::{
     convert::Infallible,
     net::{Ipv4Addr, Ipv6Addr},
+    ops::{Deref, DerefMut},
 };
 #[cfg(not(feature = "alloc"))]
-use heapless::Vec;
+pub use heapless::Vec;
 
 pub use zerocopy::{
     ByteSlice, ByteSliceMut, SplitByteSlice, SplitByteSliceMut,
@@ -18,27 +19,7 @@ pub use zerocopy::{
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
-pub mod primitives {
-    #![allow(non_camel_case_types)]
-
-    pub type u1 = u8;
-    pub type u2 = u8;
-    pub type u3 = u8;
-    pub type u4 = u8;
-    pub type u5 = u8;
-    pub type u6 = u8;
-    pub type u7 = u8;
-
-    pub type i1 = i8;
-    pub type i2 = i8;
-    pub type i3 = i8;
-    pub type i4 = i8;
-    pub type i5 = i8;
-    pub type i6 = i8;
-    pub type i7 = i8;
-
-    ingot_macros::define_primitive_types!();
-}
+pub mod primitives;
 
 pub enum Packet<O, B> {
     #[cfg(feature = "alloc")]
@@ -50,6 +31,56 @@ pub enum Packet<O, B> {
     /// Packed representation of a ...
     Raw(B),
 }
+
+pub enum FieldRef<'a, T: HasView<V>, V> {
+    Repr(&'a T),
+    Raw(&'a PacketOf<T, V>),
+}
+
+impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
+    AsRef<[u8]> for FieldRef<'a, T, V>
+{
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            FieldRef::Repr(t) => t.as_ref(),
+            FieldRef::Raw(Packet::Repr(a)) => a.deref().as_ref(),
+            FieldRef::Raw(Packet::Raw(a)) => a.as_ref(),
+        }
+    }
+}
+
+pub enum FieldMut<'a, T: HasView<V>, V> {
+    Repr(&'a mut T),
+    Raw(&'a mut PacketOf<T, V>),
+}
+
+impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
+    AsRef<[u8]> for FieldMut<'a, T, V>
+{
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            FieldMut::Repr(t) => t.as_ref(),
+            FieldMut::Raw(Packet::Repr(a)) => a.deref().as_ref(),
+            FieldMut::Raw(Packet::Raw(a)) => a.as_ref(),
+        }
+    }
+}
+
+impl<'a, T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>>
+    AsMut<[u8]> for FieldMut<'a, T, V>
+{
+    fn as_mut(&mut self) -> &mut [u8] {
+        match self {
+            FieldMut::Repr(t) => t.as_mut(),
+            FieldMut::Raw(Packet::Repr(a)) => a.deref_mut().as_mut(),
+            FieldMut::Raw(Packet::Raw(a)) => a.as_mut(),
+        }
+    }
+}
+
+/// The `Packet` type corresponding to an owned representation
+/// type `T` on buffer `B`.
+pub type PacketOf<T, B> = Packet<T, <T as HasView<B>>::ViewType>;
 
 impl<O, B> Packet<O, B> {
     pub fn repr(&self) -> Option<&O> {
@@ -79,9 +110,25 @@ impl<O, B> Packet<O, B> {
             _ => None,
         }
     }
+
+    pub fn to_owned(&self) -> Self
+    where
+        for<'a> &'a B: Into<O>,
+    {
+        match self {
+            Packet::Repr(_) => todo!(),
+            Packet::Raw(v) => Packet::Repr(Box::new(v.into())),
+        }
+    }
 }
 
-impl<O, B> HasView for Packet<O, B> {
+impl<O, B: HasBuf> HasBuf for Packet<O, B> {
+    type BufType = B::BufType;
+}
+
+impl<O: HasView<V, ViewType = B>, B: HasBuf<BufType = V>, V> HasView<V>
+    for Packet<O, B>
+{
     type ViewType = B;
 }
 
@@ -89,7 +136,7 @@ impl<O, B> HasRepr for Packet<O, B> {
     type ReprType = O;
 }
 
-impl<T: HasView> HasView for Option<T> {
+impl<T: HasView<B> + HasBuf<BufType = B>, B> HasView<B> for Option<T> {
     type ViewType = T;
 }
 
@@ -101,6 +148,18 @@ impl<T: HasRepr> HasRepr for Option<T> {
 pub type VarBytes<V> = Packet<Vec<u8>, V>;
 #[cfg(not(feature = "alloc"))]
 pub type VarBytes<V> = Packet<Vec<u8, 256>, V>;
+
+impl<B: ByteSlice> HasView<B> for Vec<u8> {
+    type ViewType = RawBytes<B>;
+}
+
+impl<B: ByteSlice, const N: usize> HasView<B> for heapless::Vec<u8, N> {
+    type ViewType = RawBytes<B>;
+}
+
+impl<B: ByteSlice> HasBuf for B {
+    type BufType = Self;
+}
 
 pub trait Header {
     const MINIMUM_LENGTH: usize;
@@ -125,27 +184,66 @@ where
     }
 }
 
-impl<V> Header for VarBytes<V>
-where
-    V: ByteSlice,
-{
-    const MINIMUM_LENGTH: usize = 0;
-
-    #[inline]
-    fn packet_length(&self) -> usize {
-        match self {
-            Packet::Repr(o) => o.len(),
-            Packet::Raw(b) => b.len(),
-        }
-    }
-}
-
 impl<T: Header> Header for Vec<T> {
     const MINIMUM_LENGTH: usize = 0;
 
     fn packet_length(&self) -> usize {
         self.iter().map(|v| v.packet_length()).sum()
     }
+}
+
+impl Header for Vec<u8> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    fn packet_length(&self) -> usize {
+        self.len()
+    }
+}
+
+pub struct RawBytes<B: ByteSlice>(B);
+
+impl<B: ByteSlice> From<B> for RawBytes<B> {
+    fn from(value: B) -> Self {
+        Self(value)
+    }
+}
+
+impl<B: ByteSlice> Deref for RawBytes<B> {
+    type Target = B;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<B: ByteSlice> DerefMut for RawBytes<B> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<B: ByteSlice> AsRef<[u8]> for RawBytes<B> {
+    fn as_ref(&self) -> &[u8] {
+        &self[..]
+    }
+}
+
+impl<B: ByteSliceMut> AsMut<[u8]> for RawBytes<B> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self[..]
+    }
+}
+
+impl<B: ByteSlice> Header for RawBytes<B> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    fn packet_length(&self) -> usize {
+        self.len()
+    }
+}
+
+impl<B: zerocopy::ByteSlice> HasBuf for RawBytes<B> {
+    type BufType = B;
 }
 
 impl<V: ByteSlice> AsRef<[u8]> for VarBytes<V> {
@@ -168,8 +266,8 @@ impl<V: ByteSliceMut> AsMut<[u8]> for VarBytes<V> {
     }
 }
 
-pub trait HasView {
-    type ViewType;
+pub trait HasView<B> {
+    type ViewType: HasBuf<BufType = B>;
 }
 
 pub trait HasRepr {
@@ -180,9 +278,9 @@ pub trait HasBuf: Sized {
     type BufType: ByteSlice;
 }
 
-impl<O, B: HeaderParse> HasBuf for Packet<O, B> {
-    type BufType = <<B as HeaderParse>::Target as HasBuf>::BufType;
-}
+// impl<O, B: HeaderParse> HasBuf for Packet<O, B> {
+//     type BufType = <<B as HeaderParse>::Target as HasBuf>::BufType;
+// }
 
 pub trait HeaderParse {
     type Target: HasBuf + NextLayer;
@@ -428,6 +526,8 @@ impl NetworkRepr<[u8; 6]> for macaddr::MacAddr6 {
         macaddr::MacAddr6::from(val)
     }
 }
+
+pub trait Emit {}
 
 pub struct Parsed<Stack, RawPkt: Read> {
     // this needs to be a struct with all the right names.

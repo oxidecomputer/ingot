@@ -1,9 +1,9 @@
 use bitflags::bitflags;
 use ingot_macros::Ingot;
-use ingot_types::{primitives::*, NetworkRepr, VarBytes};
+use ingot_types::{primitives::*, NetworkRepr, VarBytes, Vec};
 
-#[derive(Ingot)]
-pub struct Tcp<V> {
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+pub struct Tcp {
     pub source: u16be,
     pub destination: u16be,
 
@@ -23,11 +23,11 @@ pub struct Tcp<V> {
     // #[ingot(extension)]
     // pub tcp_opts: ???
     #[ingot(var_len = "(data_offset * 4).saturating_sub(20)")]
-    pub options: VarBytes<V>,
+    pub options: Vec<u8>,
 }
 
 bitflags! {
-#[derive(Clone, Copy, Default)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct TcpFlags: u8 {
     const FIN = 0b0000_0001;
     const SYN = 0b0000_0010;

@@ -1,10 +1,9 @@
-use alloc::vec::Vec;
 use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, HasBuf, HasRepr, HasView, Header, NetworkRepr,
-    NextLayer, Packet, ParseChoice, ParseError, VarBytes,
+    primitives::*, HasBuf, HasRepr, HasView, Header, NetworkRepr, NextLayer,
+    Packet, ParseChoice, ParseError, VarBytes, Vec,
 };
 use zerocopy::{ByteSlice, SplitByteSlice};
 
@@ -66,8 +65,8 @@ impl NetworkRepr<u8> for IpProtocol {
     }
 }
 
-#[derive(Ingot)]
-pub struct Ipv4<V> {
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+pub struct Ipv4 {
     // #[ingot(valid = "version = 4")]
     pub version: u4,
     // #[ingot(valid = "ihl >= 5")]
@@ -95,7 +94,7 @@ pub struct Ipv4<V> {
     pub destination: Ipv4Addr,
 
     #[ingot(var_len = "(ihl * 4).saturating_sub(20)")]
-    pub options: VarBytes<V>,
+    pub options: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
@@ -141,7 +140,7 @@ impl TryFrom<u2> for Ecn {
 }
 
 bitflags! {
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub struct Ipv4Flags: u3 {
     const RESERVED       = 0b100;
     const DONT_FRAGMENT  = 0b010;
@@ -161,9 +160,8 @@ impl NetworkRepr<u3> for Ipv4Flags {
     }
 }
 
-#[derive(Ingot)]
-pub struct Ipv6<V> {
-    // pub struct Ipv6 {
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+pub struct Ipv6 {
     // #[ingot(valid = 6)]
     pub version: u4,
     pub dscp: u6,
@@ -182,11 +180,10 @@ pub struct Ipv6<V> {
     pub source: Ipv6Addr,
     #[ingot(is = "[u8; 16]")]
     pub destination: Ipv6Addr,
-
-    #[ingot(subparse(on_next_layer))]
-    // pub v6ext: V6Extensions<V>,
-    // pub v6ext: LowRentV6Eh<V>,
-    pub v6ext: RepeatedEh<V>,
+    // #[ingot(subparse(on_next_layer))]
+    // // pub v6ext: V6Extensions<V>,
+    // // pub v6ext: LowRentV6Eh<V>,
+    // pub v6ext: RepeatedEh<V>,
 }
 
 // impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
@@ -223,38 +220,44 @@ pub struct Ipv6<V> {
 #[choice(on = "IpProtocol", map_on = IpProtocol::class)]
 pub enum LowRentV6Eh {
     IpV6ExtFragment = ExtHdrClass::FragmentHeader,
-    #[ingot(generic)]
     IpV6Ext6564 = ExtHdrClass::Rfc6564,
 }
 
 // TODO: generate
-impl<V> HasRepr for LowRentV6Eh<V> {
-    type ReprType = LowRentV6EhRepr<V>;
-}
+// impl<V> HasRepr for LowRentV6Eh<V> {
+//     type ReprType = LowRentV6EhRepr;
+// }
 
-impl<V> HasView for LowRentV6EhRepr<V> {
-    type ViewType = ValidLowRentV6Eh<V>;
-}
+// impl<V> HasView<V> for LowRentV6EhRepr
+// where
+//     ValidLowRentV6Eh<V>: HasBuf<BufType = V>,
+// {
+//     type ViewType = ValidLowRentV6Eh<V>;
+// }
 
-impl<V> HasRepr for ValidLowRentV6Eh<V> {
-    type ReprType = LowRentV6EhRepr<V>;
-}
+// impl<V> HasRepr for ValidLowRentV6Eh<V> {
+//     type ReprType = LowRentV6EhRepr;
+// }
 
-impl<V> HasView for ValidLowRentV6Eh<V> {
-    type ViewType = Self;
-}
+// impl<V> HasView<V> for ValidLowRentV6Eh<V>
+// where
+//     Self: HasBuf<BufType = V>,
+// {
+//     type ViewType = Self;
+// }
 
-impl<V: ByteSlice> HasBuf for LowRentV6EhRepr<V> {
-    type BufType = V;
-}
+// impl Header for LowRentV6EhRepr {
+//     const MINIMUM_LENGTH: usize = 0;
 
-impl<V> Header for LowRentV6EhRepr<V> {
-    const MINIMUM_LENGTH: usize = 0;
+//     fn packet_length(&self) -> usize {
+//         todo!()
+//     }
+// }
 
-    fn packet_length(&self) -> usize {
-        todo!()
-    }
-}
+// impl<'a> HasView<&'a [u8]> for Vec<LowRentV6Eh<LowRentV6EhRepr<&'a [u8]>>>
+// {
+//     type ViewType = ValidRepeatedEh<&'a [u8]>;
+// }
 
 // 0x2c
 #[derive(Ingot)]
@@ -270,24 +273,64 @@ pub struct IpV6ExtFragment {
 
 // 0x00, 0x2b, 0x3c, custom(0xfe)
 #[derive(Ingot)]
-pub struct IpV6Ext6564<V> {
+pub struct IpV6Ext6564 {
     #[ingot(is = "u8", next_layer)]
     pub next_header: IpProtocol, // should be a type.
     pub ext_len: u8,
 
     #[ingot(var_len = "(ext_len as usize) * 8")]
-    pub data: VarBytes<V>,
+    pub data: Vec<u8>,
 }
 
 // TODO: Ideally, we want this as a combinator.
 //       I fought with my collection of types and traits for like 4 hours
 //       and was unable to make that happen -- We only *need* it for V6EHs
 //       but it would be real nice to have for, e.g., Q-in-Q.
+/*
+pub type RepeatedEh<B> = Packet<Vec<LowRentV6EhRepr>, ValidRepeatedEh<B>>;
 
-pub type RepeatedEh<B> = Packet<Vec<LowRentV6Eh<B>>, ValidRepeatedEh<B>>;
+// impl<B: SplitByteSlice> From<&ValidRepeatedEh<B>> for Vec<LowRentV6EhRepr> {
+//     fn from(value: &ValidRepeatedEh<B>) -> Self {
+//         let mut out = alloc::vec![];
+//         let mut hint = value.first_hint;
+//         let mut to_read = value.inner;
+
+//         while IpProtocol::class(hint) != ExtHdrClass::NotAnEh {
+//             match <ValidLowRentV6Eh<B> as ParseChoice<B, IpProtocol>>::parse_choice(
+//                 to_read,
+//                 Some(hint),
+//             ) {
+//                 Ok((val, Some(l_hint), remainder)) => {
+//                     to_read = remainder;
+//                     // bytes_read = original_len - remainder.len();
+//                     hint = l_hint;
+//                     // TODO: derive froms on choices.
+//                     let owned = match val {
+//                         ValidLowRentV6Eh::IpV6ExtFragment(v) => LowRentV6EhRepr::IpV6ExtFragment((&v).into()),
+//                         ValidLowRentV6Eh::IpV6Ext6564(v) => LowRentV6EhRepr::IpV6Ext6564((&v).into()),
+//                     };
+//                     out.push(owned);
+//                 }
+//                 Ok(_) | Err(ParseError::Unwanted) => unreachable!(),
+//                 Err(_) => unreachable!()
+//             }
+//         }
+
+//         out
+//     }
+// }
 
 pub struct ValidRepeatedEh<B> {
     inner: B,
+    first_hint: IpProtocol,
+}
+
+impl<B: SplitByteSlice> Iterator for &ValidRepeatedEh<B> {
+    type Item = ValidLowRentV6Eh<B>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
 }
 
 impl<B: ByteSlice> HasBuf for ValidRepeatedEh<B> {
@@ -314,7 +357,7 @@ impl<B: ByteSlice> NextLayer for ValidRepeatedEh<B> {
 }
 
 impl<B> HasRepr for ValidRepeatedEh<B> {
-    type ReprType = Vec<LowRentV6EhRepr<B>>;
+    type ReprType = Vec<LowRentV6EhRepr>;
 }
 
 impl<B: SplitByteSlice> ParseChoice<B, IpProtocol> for ValidRepeatedEh<B> {
@@ -328,6 +371,7 @@ impl<B: SplitByteSlice> ParseChoice<B, IpProtocol> for ValidRepeatedEh<B> {
         let Some(mut hint) = hint else {
             return Err(ParseError::NeedsHint);
         };
+        let first_hint = hint;
 
         while IpProtocol::class(hint) != ExtHdrClass::NotAnEh {
             match <ValidLowRentV6Eh<&[u8]> as ParseChoice<&[u8], IpProtocol>>::parse_choice(
@@ -345,7 +389,7 @@ impl<B: SplitByteSlice> ParseChoice<B, IpProtocol> for ValidRepeatedEh<B> {
 
         let (inner, remainder) = data.split_at(bytes_read);
 
-        let val = Self { inner };
+        let val = Self { inner, first_hint };
 
         Ok((val, Some(hint), remainder))
     }
@@ -357,3 +401,4 @@ impl<B> From<ValidRepeatedEh<B>> for RepeatedEh<B> {
         Self::Raw(value)
     }
 }
+*/

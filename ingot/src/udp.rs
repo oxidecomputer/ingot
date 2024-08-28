@@ -1,7 +1,7 @@
 use ingot_macros::Ingot;
 use ingot_types::{primitives::u16be, HasRepr};
 
-#[derive(Ingot)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 pub struct Udp {
     pub source: u16be,
     pub destination: u16be,

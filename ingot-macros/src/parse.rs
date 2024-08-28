@@ -244,7 +244,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                         // should this be last??
                         (::core::option::Option::None, slice, None)
                     } else {
-                        let #destructure = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)?;
                         // #hint_frag
                         (::core::option::Option::Some(#fname), remainder, hint)
                     };
@@ -257,7 +257,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     // #hint_frag
                 },
                 quote! {
-                    let #destructure = <#local_ty as HasView>::ViewType::parse_choice(slice, hint)?;
+                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)?;
                     // #hint_frag
                 },
             )
@@ -350,7 +350,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             type BufType = V;
         }
 
-        impl<V> ::ingot::types::NextLayer for #ident<V> {
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #ident<V> {
             type Denom = ();
         }
 

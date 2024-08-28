@@ -118,7 +118,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         });
 
         unpacks.push(quote! {
-            impl<V> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
 
                 fn try_from(value: #ident<V>) -> ::core::result::Result<Self, Self::Error> {
@@ -129,7 +129,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
                 }
             }
 
-            impl<V> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
 
                 fn try_from(value: #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
@@ -161,11 +161,11 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     };
 
     quote! {
-        pub enum #ident<V> {
+        pub enum #ident<V: ::ingot::types::ByteSlice> {
             #( #top_vars ),*
         }
 
-        pub enum #validated_ident<V> {
+        pub enum #validated_ident<V: ::ingot::types::ByteSlice> {
             #( #validated_vars ),*
         }
 
@@ -190,7 +190,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V> ::core::convert::From<#validated_ident<V>> for #ident<V> {
+        impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for #ident<V> {
             #[inline]
             fn from(value: #validated_ident<V>) -> Self {
                 match value {
@@ -199,7 +199,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V> ::core::convert::From<#repr_head> for #ident<V> {
+        impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#repr_head> for #ident<V> {
             #[inline]
             fn from(value: #repr_head) -> Self {
                 match value {
@@ -231,7 +231,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V> ::ingot::types::HasView for #ident<V> {
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasView<V> for #ident<V> {
             type ViewType = #validated_ident<V>;
         }
 

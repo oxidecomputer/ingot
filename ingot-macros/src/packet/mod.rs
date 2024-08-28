@@ -744,12 +744,12 @@ impl StructParseDeriveCtx {
                 let ref_field = self.validated.get(i).expect("reference to a non-existent field").borrow();
                 let ty = &ref_field.user_ty;
 
-                quote! {pub #ty}
+                quote! {pub ::ingot::types::PacketOf<#ty, #type_param>}
             },
         });
 
         quote! {
-            pub struct #validated_ident<#type_param>(
+            pub struct #validated_ident<#type_param: ::ingot::types::ByteSlice>(
                 #( #entries ),*
             );
         }
@@ -859,17 +859,12 @@ impl StructParseDeriveCtx {
         let substruct_methods = self.gen_zerocopy_methods();
         let parse_impl = self.gen_parse_impl();
 
-        let (ref_def, mut_def) = if let Some(g) = self.my_explicit_generic() {
-            (quote! {#ref_ident<#g>}, quote! {#mut_ident<#g>})
-        } else {
-            (quote! {#ref_ident}, quote! {#mut_ident})
-        };
-
         let mut trait_impls = vec![];
         let mut direct_trait_impls = vec![];
         let mut trait_mut_impls = vec![];
         let mut direct_trait_mut_impls = vec![];
 
+        let mut trait_needs_generic = false;
         for field in &self.validated_order {
             let field = field.borrow();
             let get_name = field.getter_name();
@@ -991,46 +986,52 @@ impl StructParseDeriveCtx {
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                    trait_needs_generic = true;
                     direct_trait_impls.push(quote! {
                         #[inline]
-                        fn #field_ref(&self) -> &#user_ty {
-                            &self.#ident
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, V> {
+                            ::ingot::types::FieldRef::Repr(&self.#ident)
                         }
                     });
                     trait_impls.push(quote! {
                         #[inline]
-                        fn #field_ref(&self) -> &#user_ty {
-                            &self.#sub_field_idx
-                        }
-                    });
-                    trait_mut_impls.push(quote! {
-                        #[inline]
-                        fn #field_mut(&mut self) -> &mut #user_ty {
-                            &mut self.#sub_field_idx
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, V> {
+                            ::ingot::types::FieldRef::Raw(&self.#sub_field_idx)
                         }
                     });
                     direct_trait_mut_impls.push(quote! {
                         #[inline]
-                        fn #field_mut(&mut self) -> &mut #user_ty {
-                            &mut self.#ident
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, V> {
+                            ::ingot::types::FieldMut::Repr(&mut self.#ident)
+                        }
+                    });
+                    trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, V> {
+                            ::ingot::types::FieldMut::Raw(&mut self.#sub_field_idx)
                         }
                     });
                 }
             }
         }
 
-        let (direct_ref_head, direct_mut_head) =
-            if let Some(a) = self.my_explicit_generic() {
-                (
-                    quote! {impl<#a> #ref_def for #ident<#a>},
-                    quote! {impl<#a> #mut_def for #ident<#a>},
-                )
-            } else {
-                (
-                    quote! {impl #ref_def for #ident},
-                    quote! {impl #mut_def for #ident},
-                )
-            };
+        let (ref_def, mut_def) = if trait_needs_generic {
+            (quote! {#ref_ident<V>}, quote! {#mut_ident<V>})
+        } else {
+            (quote! {#ref_ident}, quote! {#mut_ident})
+        };
+
+        let (direct_ref_head, direct_mut_head) = if trait_needs_generic {
+            (
+                quote! {impl<V: ::ingot::types::ByteSlice> #ref_def for #ident},
+                quote! {impl<V: ::ingot::types::ByteSlice> #mut_def for #ident},
+            )
+        } else {
+            (
+                quote! {impl #ref_def for #ident},
+                quote! {impl #mut_def for #ident},
+            )
+        };
 
         quote! {
             #[allow(non_snake_case)]
@@ -1077,6 +1078,7 @@ impl StructParseDeriveCtx {
             (quote! {#ref_ident}, quote! {#mut_ident})
         };
 
+        let mut trait_needs_generic = false;
         for field in &self.validated_order {
             let field = field.borrow();
             let get_name = field.getter_name();
@@ -1119,22 +1121,32 @@ impl StructParseDeriveCtx {
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                    trait_needs_generic = true;
                     trait_defs.push(quote! {
-                        fn #field_ref(&self) -> &#user_ty;
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, V>;
                     });
                     mut_trait_defs.push(quote! {
-                        fn #field_mut(&mut self) -> &mut #user_ty;
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, V>;
                     });
                 }
             }
         }
 
+        let (ref_head, mut_head) = if trait_needs_generic {
+            (
+                quote! {#ref_def<V: ::ingot::types::ByteSlice>},
+                quote! {#mut_def<V: ::ingot::types::ByteSlice>},
+            )
+        } else {
+            (quote! {#ref_def}, quote! {#mut_def})
+        };
+
         quote! {
-            pub trait #ref_def {
+            pub trait #ref_head {
                 #( #trait_defs )*
             }
 
-            pub trait #mut_def {
+            pub trait #mut_head {
                 #( #mut_trait_defs )*
             }
         }
@@ -1153,6 +1165,7 @@ impl StructParseDeriveCtx {
             (quote! {#ref_ident}, quote! {#mut_ident})
         };
 
+        let mut trait_needs_generic = false;
         for field in &self.validated_order {
             let field = field.borrow();
             let get_name = field.getter_name();
@@ -1233,10 +1246,11 @@ impl StructParseDeriveCtx {
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                     // We need to translate the `V` (or whatever) in these types
                     // into the buffer type of the current packet.
+                    trait_needs_generic = true;
 
                     packet_impls.push(quote! {
                         #[inline]
-                        fn #field_ref(&self) -> &#user_ty {
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, V> {
                             match self {
                                 ::ingot::types::Packet::Repr(o) => o.#field_ref(),
                                 ::ingot::types::Packet::Raw(b) => b.#field_ref(),
@@ -1245,7 +1259,7 @@ impl StructParseDeriveCtx {
                     });
                     packet_mut_impls.push(quote! {
                         #[inline]
-                        fn #field_mut(&mut self) -> &mut #user_ty {
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, V> {
                             match self {
                                 ::ingot::types::Packet::Repr(o) => o.#field_mut(),
                                 ::ingot::types::Packet::Raw(b) => b.#field_mut(),
@@ -1256,34 +1270,37 @@ impl StructParseDeriveCtx {
             }
         }
 
-        let (direct_ref_head, direct_mut_head) = if let Some(a) =
-            self.my_explicit_generic()
-        {
-            // (quote!{impl<#a> #ref_def for #ident<#a>}, quote!{impl<#a> #mut_def for #ident<#a>})
-            (
-                quote! {impl<O, B, #a> #ref_def for ::ingot::types::Packet<O, B>},
-                quote! {impl<O, B, #a> #mut_def for ::ingot::types::Packet<O, B>},
-            )
-        } else {
-            (
-                quote! {impl<O, B> #ref_def for ::ingot::types::Packet<O, B>},
-                quote! {impl<O, B> #mut_def for ::ingot::types::Packet<O, B>},
-            )
-        };
+        let (direct_ref_head, direct_mut_head, ref_part, mut_part) =
+            if trait_needs_generic {
+                // (quote!{impl<#a> #ref_def for #ident<#a>}, quote!{impl<#a> #mut_def for #ident<#a>})
+                (
+                    quote! {impl<O, B, V: ::ingot::types::ByteSlice> #ref_def<V> for ::ingot::types::Packet<O, B>},
+                    quote! {impl<O, B, V: ::ingot::types::ByteSlice> #mut_def<V> for ::ingot::types::Packet<O, B>},
+                    quote! {#ref_def<V>},
+                    quote! {#mut_def<V>},
+                )
+            } else {
+                (
+                    quote! {impl<O, B> #ref_def for ::ingot::types::Packet<O, B>},
+                    quote! {impl<O, B> #mut_def for ::ingot::types::Packet<O, B>},
+                    quote! {#ref_def},
+                    quote! {#mut_def},
+                )
+            };
 
         quote! {
             #direct_ref_head
             where
-                O: #ref_def,
-                B: #ref_def,
+                O: #ref_part,
+                B: #ref_part,
             {
                 #( #packet_impls )*
             }
 
             #direct_mut_head
             where
-                O: #mut_def,
-                B: #mut_def,
+                O: #mut_part,
+                B: #mut_part,
             {
                 #( #packet_mut_impls )*
             }
@@ -1324,7 +1341,7 @@ impl StructParseDeriveCtx {
                         }
 
                         let (varlen, from) = from.split_at(chunk_len);
-                        let #val_ident = ::ingot::types::Packet::Raw(varlen);
+                        let #val_ident = ::ingot::types::Packet::Raw(varlen.into());
                     });
                 }
                 ChunkState::Parsable(id) => {
@@ -1382,7 +1399,7 @@ impl StructParseDeriveCtx {
                         segment_fragments.push(quote! {
                             #hint_lkup
                             // Discard hint
-                            let (#val_ident, mut hint, from) = <#genless_user_ty as HasView>::ViewType::parse_choice(from, hint)?;
+                            let (#val_ident, mut hint, from) = <#genless_user_ty as HasView<_>>::ViewType::parse_choice(from, hint)?;
                             let #val_ident = #val_ident.into();
                         });
                     } else {
@@ -1433,6 +1450,52 @@ impl StructParseDeriveCtx {
             }
         }
     }
+
+    fn gen_owned_from(&self) -> TokenStream {
+        let ident = &self.ident;
+        let validated_ident = self.validated_ident();
+        let self_ty = if self.my_explicit_generic().is_some() {
+            quote! {#ident<V>}
+        } else {
+            quote! {#ident}
+        };
+
+        let mut field_create = vec![];
+        let mut field_names = vec![];
+
+        for field in &self.validated_order {
+            let field = field.borrow();
+            let f_ident = field.ident.clone();
+            match &field.state {
+                FieldState::FixedWidth { .. } => {
+                    field_create.push(quote! {
+                        let #f_ident = val.#f_ident();
+                    });
+                }
+                FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                    let ref_method = Ident::new(
+                        &format!("{f_ident}_ref"),
+                        field.ident.span(),
+                    );
+                    field_create.push(quote! {
+                        let #f_ident = val.#ref_method().to_owned();
+                    });
+                }
+            }
+            field_names.push(f_ident);
+        }
+
+        quote! {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<&#validated_ident<V>> for #self_ty {
+                fn from(val: &#validated_ident<V>) -> Self {
+                    #( #field_create )*
+                    Self {
+                        #( #field_names ),*,
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl ToTokens for StructParseDeriveCtx {
@@ -1449,6 +1512,7 @@ impl ToTokens for StructParseDeriveCtx {
 
         let zc_mod = self.gen_zc_module();
         let next_layer = self.gen_next_header_lookup();
+        let owned_from = self.gen_owned_from();
 
         let self_ty = if self.my_explicit_generic().is_some() {
             quote! {#ident<V>}
@@ -1469,26 +1533,33 @@ impl ToTokens for StructParseDeriveCtx {
 
             pub type #pkt_ident<V> = ::ingot::types::Packet<#self_ty, #validated_ident<V>>;
 
+            impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasView<V> for #self_ty
+            {
+                type ViewType = #validated_ident<V>;
+            }
+
             impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasBuf for #validated_ident<V> {
                 type BufType = V;
             }
 
-            impl<V> ::ingot::types::HasRepr for #validated_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasRepr for #validated_ident<V> {
                 type ReprType = #self_ty;
             }
 
-            impl<V> ::core::convert::From<#validated_ident<V>> for #pkt_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for #pkt_ident<V> {
                 fn from(value: #validated_ident<V>) -> Self {
                     ::ingot::types::Packet::Raw(value)
                 }
             }
 
-            impl<V> ::core::convert::From<#self_ty> for #pkt_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for #pkt_ident<V> {
                 fn from(value: #self_ty) -> Self {
                     // into used to paper over boxing / in-place.
                     ::ingot::types::Packet::Repr(value.into())
                 }
             }
+
+            // #owned_from
 
             #next_layer
         });

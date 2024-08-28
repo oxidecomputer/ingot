@@ -10,6 +10,7 @@ use crate::{
     udp::{Udp, UdpMut, UdpRef, ValidUdp},
 };
 use alloc::{collections::LinkedList, vec::Vec};
+use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
 use ingot_types::{primitives::*, BufState, Header, HeaderParse, NetworkRepr};
 use ip::IpProtocol;
@@ -49,8 +50,7 @@ pub struct TestFunFields {
 
 #[test]
 fn are_my_fragment_traits_sane() {
-    let mut buf2 =
-        [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::<&[u8]>::MINIMUM_LENGTH];
+    let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
     let (mut eth, .., rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
 
     // 0 is a valid v6 EH -- need to change to e.g. TCP before parse.
@@ -70,7 +70,7 @@ fn are_my_fragment_traits_sane() {
 #[test]
 fn does_this_chain_stuff_compile() {
     let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
-        + Ipv4::<&[u8]>::MINIMUM_LENGTH
+        + Ipv4::MINIMUM_LENGTH
         + Udp::MINIMUM_LENGTH];
 
     // set up stack as Ipv4, UDP
@@ -81,7 +81,7 @@ fn does_this_chain_stuff_compile() {
 
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
-        eth.set_ethertype(0x0800);
+        eth.set_ethertype(Ethertype::IPV4);
         ipv4.set_protocol(IpProtocol::UDP);
         ipv4.set_source(Ipv4Addr::from([192, 168, 0, 1]));
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
@@ -105,7 +105,7 @@ fn does_this_chain_stuff_compile() {
 fn variable_len_fields_in_chain() {
     const V4_EXTRA: usize = 12;
     let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
-        + Ipv4::<&[u8]>::MINIMUM_LENGTH
+        + Ipv4::MINIMUM_LENGTH
         + V4_EXTRA
         + Udp::MINIMUM_LENGTH];
 
@@ -116,7 +116,7 @@ fn variable_len_fields_in_chain() {
 
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
-        eth.set_ethertype(0x0800);
+        eth.set_ethertype(Ethertype::IPV4);
         ipv4.set_protocol(IpProtocol::UDP);
         ipv4.set_source(Ipv4Addr::from([192, 168, 0, 1]));
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
@@ -145,7 +145,7 @@ fn variable_len_fields_in_chain() {
         MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf)
     );
     assert_eq!(mystack.eth.destination(), MacAddr6::broadcast());
-    assert_eq!(mystack.eth.ethertype(), 0x0800);
+    assert_eq!(mystack.eth.ethertype(), Ethertype::IPV4);
 
     let L3::Ipv4(v4) = mystack.l3 else {
         panic!("did not parse IPv4...");
@@ -168,7 +168,7 @@ fn variable_len_fields_in_chain() {
 #[test]
 fn parse_multichunk() {
     let mut eth_bytes = vec![0u8; Ethernet::MINIMUM_LENGTH];
-    let mut v6_bytes = vec![0u8; Ipv6::<&[u8]>::MINIMUM_LENGTH];
+    let mut v6_bytes = vec![0u8; Ipv6::MINIMUM_LENGTH];
     // 0 is a valid v6 EH -- need to init it before parse.
     v6_bytes[6] = IpProtocol::UDP.to_network();
     let mut udp_bytes = vec![0u8; Udp::MINIMUM_LENGTH];
@@ -180,7 +180,7 @@ fn parse_multichunk() {
 
         eth.set_source(MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
         eth.set_destination(MacAddr6::broadcast());
-        eth.set_ethertype(0x86DD);
+        eth.set_ethertype(Ethertype::IPV6);
 
         assert_eq!(ipv6.next_header(), IpProtocol::UDP);
         ipv6.set_source(Ipv6Addr::LOCALHOST);
@@ -205,7 +205,7 @@ fn parse_multichunk() {
 
     assert_eq!(hdr.eth.source(), MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
     assert_eq!(hdr.eth.destination(), MacAddr6::broadcast());
-    assert_eq!(hdr.eth.ethertype(), 0x86DD);
+    assert_eq!(hdr.eth.ethertype(), Ethertype::IPV6);
 
     let L3::Ipv6(ref mut v6) = hdr.l3 else {
         panic!("did not parse IPv4...");
@@ -402,12 +402,12 @@ fn test_opte_unconditionals() {
     let (mut opte_in, ..) = OpteIn::parse(&mut pkt[..]).unwrap();
 
     assert_eq!(opte_in.outer_encap.options_ref().as_ref().len(), 4);
-    assert_eq!(opte_in.inner_eth.ethertype(), 0x0800);
+    assert_eq!(opte_in.inner_eth.ethertype(), Ethertype::IPV4);
     assert!(opte_in.inner_l3.is_some());
     assert!(opte_in.inner_ulp.is_some());
 
     // Now, try out pretending we're ARP and early exiting.
-    opte_in.inner_eth.set_ethertype(0x0806);
+    opte_in.inner_eth.set_ethertype(Ethertype::ARP);
     let (opte_in, ..) = OpteIn::parse(&pkt[..]).unwrap();
     assert!(opte_in.inner_l3.is_none());
     assert!(opte_in.inner_ulp.is_none());
