@@ -346,17 +346,12 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     quote! {
-        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasBuf for #ident<V> {
-            type BufType = V;
-        }
-
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #ident<V> {
             type Denom = ();
         }
 
-        impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse for #ident<V> {
-            type Target = Self;
-            fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
+        impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V> for #ident<V> {
+            fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                 #imports
                 // #( #define_all_optionals )*
 

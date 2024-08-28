@@ -123,13 +123,7 @@ impl<O, B> Packet<O, B> {
     }
 }
 
-impl<O, B: HasBuf> HasBuf for Packet<O, B> {
-    type BufType = B::BufType;
-}
-
-impl<O: HasView<V, ViewType = B>, B: HasBuf<BufType = V>, V> HasView<V>
-    for Packet<O, B>
-{
+impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for Packet<O, B> {
     type ViewType = B;
 }
 
@@ -137,7 +131,7 @@ impl<O, B> HasRepr for Packet<O, B> {
     type ReprType = O;
 }
 
-impl<T: HasView<B> + HasBuf<BufType = B>, B> HasView<B> for Option<T> {
+impl<T: HasView<B>, B> HasView<B> for Option<T> {
     type ViewType = T;
 }
 
@@ -156,10 +150,6 @@ impl<B: ByteSlice> HasView<B> for Vec<u8> {
 
 impl<B: ByteSlice, const N: usize> HasView<B> for heapless::Vec<u8, N> {
     type ViewType = RawBytes<B>;
-}
-
-impl<B: ByteSlice> HasBuf for B {
-    type BufType = Self;
 }
 
 pub trait Header {
@@ -243,10 +233,6 @@ impl<B: ByteSlice> Header for RawBytes<B> {
     }
 }
 
-impl<B: zerocopy::ByteSlice> HasBuf for RawBytes<B> {
-    type BufType = B;
-}
-
 impl<V: ByteSlice> AsRef<[u8]> for VarBytes<V> {
     #[inline]
     fn as_ref(&self) -> &[u8] {
@@ -268,45 +254,34 @@ impl<V: ByteSliceMut> AsMut<[u8]> for VarBytes<V> {
 }
 
 pub trait HasView<B> {
-    type ViewType: HasBuf<BufType = B>;
+    type ViewType;
 }
 
 pub trait HasRepr {
     type ReprType;
 }
 
-pub trait HasBuf: Sized {
-    type BufType: ByteSlice;
-}
-
 // impl<O, B: HeaderParse> HasBuf for Packet<O, B> {
 //     type BufType = <<B as HeaderParse>::Target as HasBuf>::BufType;
 // }
 
-pub trait HeaderParse {
-    type Target: HasBuf + NextLayer;
-
-    fn parse(
-        from: <Self::Target as HasBuf>::BufType,
-    ) -> ParseResult<Success<Self::Target>>;
+pub trait HeaderParse<B: SplitByteSlice>: NextLayer + Sized {
+    fn parse(from: B) -> ParseResult<Success<Self, B>>;
 }
 
 // allows us to call e.g. Packet<A,ValidA>::parse if ValidA is also Parse
 // and its owned type has a matching next layer Denom.
 impl<
-        B: HeaderParse<Target = B> + HasBuf + HasRepr + NextLayer + Into<Self>,
-    > HeaderParse for Packet<B::ReprType, B>
+        V: SplitByteSlice,
+        B: HeaderParse<V> + HasRepr + NextLayer + Into<Self>,
+    > HeaderParse<V> for Packet<B::ReprType, B>
 where
     B: NextLayer,
     B::ReprType: NextLayer<Denom = B::Denom>,
 {
-    type Target = Self;
-
     #[inline]
-    fn parse(
-        from: <Self::Target as HasBuf>::BufType,
-    ) -> ParseResult<Success<Self::Target>> {
-        <B as HeaderParse>::parse(from)
+    fn parse(from: V) -> ParseResult<Success<Self, V>> {
+        <B as HeaderParse<V>>::parse(from)
             .map(|(val, hint, remainder)| (val.into(), hint, remainder))
     }
 }
@@ -426,8 +401,7 @@ pub struct BufState<T, H, B> {
     pub remainder: B,
 }
 
-pub type Success<T> =
-    (T, Option<<T as NextLayer>::Denom>, <T as HasBuf>::BufType);
+pub type Success<T, B> = (T, Option<<T as NextLayer>::Denom>, B);
 // BufState<T, <T as NextLayer>::Denom, <T as HasBuf>::BufType>;
 
 pub trait NextLayer {
@@ -460,26 +434,26 @@ impl From<Infallible> for ParseError {
 }
 
 pub trait ParseChoice<V: SplitByteSlice, Denom: Copy + Eq>:
-    Sized + HasBuf + NextLayer
+    Sized + NextLayer
 {
-    fn parse_choice(data: V, hint: Option<Denom>)
-        -> ParseResult<Success<Self>>;
+    fn parse_choice(
+        data: V,
+        hint: Option<Denom>,
+    ) -> ParseResult<Success<Self, V>>;
 }
 
 // Allow unconditional parsing of any valid standalone header in a #choice.
-impl<T: HeaderParse<Target = T> + HasBuf + NextLayer, AnyDenom: Copy + Eq>
-    ParseChoice<T::BufType, AnyDenom> for T
-where
-    <T as HasBuf>::BufType: SplitByteSlice,
-{
-    #[inline]
-    fn parse_choice(
-        data: T::BufType,
-        _hint: Option<AnyDenom>,
-    ) -> ParseResult<Success<Self>> {
-        T::parse(data)
-    }
-}
+// impl<B: SplitByteSlice, T: HeaderParse<B> + NextLayer, AnyDenom: Copy + Eq>
+//     ParseChoice<B, AnyDenom> for T
+// {
+//     #[inline]
+//     fn parse_choice(
+//         data: B,
+//         _hint: Option<AnyDenom>,
+//     ) -> ParseResult<Success<Self, B>> {
+//         T::parse(data)
+//     }
+// }
 
 pub enum ParseControl {
     Accept,
@@ -625,10 +599,6 @@ impl<B, T: Header + NextLayer> Header for RepeatedView<B, T> {
     }
 }
 
-impl<B: ByteSlice, T: NextLayer> HasBuf for RepeatedView<B, T> {
-    type BufType = B;
-}
-
 impl<T: NextLayer> NextLayer for Repeated<T> {
     type Denom = T::Denom;
 }
@@ -648,10 +618,11 @@ where
     type ViewType = RepeatedView<B, T::ViewType>;
 }
 
+// impl<B: SplitByteSlice, T: ParseChoice<B, D> + for<'a> ParseChoice<&'a [u8], D> + NextLayer<Denom = D>, D: Copy + Eq> ParseChoice<B, D>
 impl<
-        D: Copy + Eq,
         B: SplitByteSlice,
         T: ParseChoice<B, D> + NextLayer<Denom = D>,
+        D: Copy + Eq,
     > ParseChoice<B, D> for RepeatedView<B, T>
 where
     T: for<'a> ParseChoice<&'a [u8], D>, // T: ParseChoice<&'static [u8], D>
@@ -660,10 +631,10 @@ where
     fn parse_choice(
         data: B,
         mut hint: Option<D>,
-    ) -> ParseResult<Success<Self>> {
+    ) -> ParseResult<Success<Self, B>> {
         let original_len = data.len();
         let mut bytes_read = 0;
-        let first_hint = hint;
+        // let first_hint = hint;
 
         loop {
             let slice = &data[bytes_read..];
@@ -677,10 +648,40 @@ where
             }
         }
 
+        // let (bytes_read, first_hint) = repeat_parse::<T, D>(&data[..], hint)?;
+
         let (inner, remainder) = data.split_at(bytes_read);
 
-        let val = Self { inner, first_hint };
+        // let val = Self { inner, first_hint };
+        let val = Self { inner, first_hint: hint };
 
         Ok((val, hint, remainder))
     }
+}
+
+fn repeat_parse<
+    'a,
+    T: ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
+    D: Copy + Eq,
+>(
+    inp: &'a [u8],
+    mut hint: Option<D>,
+) -> ParseResult<(usize, Option<D>)> {
+    let original_len = inp.len();
+    let mut bytes_read = 0;
+    let first_hint = hint;
+
+    loop {
+        let slice = &inp[bytes_read..];
+        match <T as ParseChoice<&[u8], D>>::parse_choice(slice, hint) {
+            Ok((.., l_hint, remainder)) => {
+                bytes_read = original_len - remainder.len();
+                hint = l_hint;
+            }
+            Err(ParseError::Unwanted) => break,
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok((bytes_read, first_hint))
 }

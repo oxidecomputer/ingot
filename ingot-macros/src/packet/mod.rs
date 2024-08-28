@@ -1426,9 +1426,8 @@ impl StructParseDeriveCtx {
             };
 
         quote! {
-            impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse for #validated_ident<V> {
-                type Target = Self;
-                fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
+            impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
+                fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                     use ::ingot::types::Header;
                     use ::ingot::types::HasView;
                     use ::ingot::types::NextLayer;
@@ -1446,6 +1445,13 @@ impl StructParseDeriveCtx {
                     ::core::result::Result::Ok(
                         (val, hint, from)
                     )
+                }
+            }
+
+            impl<V: ::ingot::types::SplitByteSlice, AnyDenom: Copy + Eq> ::ingot::types::ParseChoice<V, AnyDenom> for #validated_ident<V> {
+                fn parse_choice(from: V, hint: Option<AnyDenom>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+                    use ::ingot::types::HeaderParse;
+                    Self::parse(from)
                 }
             }
         }
@@ -1536,10 +1542,6 @@ impl ToTokens for StructParseDeriveCtx {
             impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasView<V> for #self_ty
             {
                 type ViewType = #validated_ident<V>;
-            }
-
-            impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasBuf for #validated_ident<V> {
-                type BufType = V;
             }
 
             impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasRepr for #validated_ident<V> {

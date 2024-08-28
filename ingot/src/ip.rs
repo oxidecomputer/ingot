@@ -2,8 +2,8 @@ use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, HasBuf, HasRepr, HasView, Header, NetworkRepr, NextLayer,
-    Packet, ParseChoice, ParseError, Repeated, RepeatedView, VarBytes, Vec,
+    primitives::*, HasRepr, HasView, Header, NetworkRepr, NextLayer, Packet,
+    ParseChoice, ParseError, Repeated, RepeatedView, Success, VarBytes, Vec,
 };
 use zerocopy::{ByteSlice, SplitByteSlice};
 
@@ -184,62 +184,42 @@ pub struct Ipv6 {
     // // pub v6ext: V6Extensions<V>,
     // // pub v6ext: LowRentV6Eh<V>,
     // pub v6ext: RepeatedEh<V>,
-    #[ingot(subparse(on_next_layer))]
-    pub v6ext: Quack,
+    // #[ingot(subparse(on_next_layer))]
+    // pub v6ext: Quack,
 }
 
-impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
-    for ValidIpv6<V>
-{
-    type Target = Self;
-    fn parse(
-        from: V,
-    ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
-        use ::ingot::types::{
-            HasView, Header, HeaderParse, NextLayer, ParseChoice,
-        };
-        let mut hint = None;
-        let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) =
-            ::zerocopy::Ref::from_prefix(from)
-                .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
-        hint = ::core::option::Option::Some(
-            ::ingot::types::NetworkRepr::from_network(v0.next_header),
-        );
-        let (v1, mut hint, from): (_, _, V) =
-            <Quack as HasView<_>>::ViewType::parse_choice(from, hint)?;
-        let v1 = v1.into();
-        let val = ValidIpv6(v0, v1);
-        hint = hint.or_else(|| val.next_layer());
-        ::core::result::Result::Ok((val, hint, from))
-    }
-}
-
-// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
+// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V>
 // for ValidIpv6<V> {
-//     type Target = Self;
 //     fn parse(
 //         from: V,
-//     ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>>
-//     where
-//     {
+//     ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
 //         use ::ingot::types::Header;
 //         use ::ingot::types::HasView;
 //         use ::ingot::types::NextLayer;
 //         use ::ingot::types::ParseChoice;
 //         use ::ingot::types::HeaderParse;
 //         let mut hint = None;
-//         let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
-//                 from,
-//             )
-//             .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
-//         hint = ::core::option::Option::Some(
-//             ::ingot::types::NetworkRepr::from_network(v0.next_header),
-//         );
-//         // let (v1, mut hint, from): (<Quack as HasView<V>>::ViewType, Option<IpProtocol>, V) = <Quack as HasView<
-//         let (v1, mut hint, from) = <Quack as HasView<
-//             V,
-//         >>::ViewType::parse_choice(from, hint)?;
-//         let v1 = v1.into();
+//         // let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
+//         //         from,
+//         //     )
+//         //     .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+//         // hint = ::core::option::Option::Some(
+//         //     ::ingot::types::NetworkRepr::from_network(v0.next_header),
+//         // );
+//         // let (v1, mut hint, from) = <Quack as HasView<
+//         //     _,
+//         // >>::ViewType::parse_choice(from, hint)?;
+//         let (v1, mut hint, from) = RepeatedView::<V, ValidLowRentV6Eh<V>>::parse_choice(from, hint)?;
+//         let v1 = ::ingot::types::Packet::Raw(v1.into());
+
+//         fn a<V: ::ingot::types::SplitByteSlice>(b: impl ParseChoice<V, IpProtocol> + NextLayer<Denom=IpProtocol> + for<'a> ParseChoice<&'a [u8], IpProtocol>) {
+
+//         }
+
+//         let q: ValidLowRentV6Eh<&[u8]> = todo!();
+//         a(q);
+
+//         let v0 = todo!();
 //         let val = ValidIpv6(v0, v1);
 //         hint = hint.or_else(|| val.next_layer());
 //         ::core::result::Result::Ok((val, hint, from))
@@ -273,6 +253,41 @@ impl<B: ByteSlice> Header for ValidLowRentV6Eh<B> {
         todo!()
     }
 }
+
+// impl<'a> ParseChoice<&'a [u8], IpProtocol> for ValidLowRentV6Eh<&'a [u8]> {
+//     fn parse_choice(data: &'a [u8], hint: Option<IpProtocol>)
+//         -> ingot_types::ParseResult<ingot_types::Success<Self, &'a [u8]>> {
+//         todo!()
+//     }
+// }
+
+// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V>
+//         for ValidIpv6<V> {
+//             fn parse(
+//                 from: V,
+//             ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+//                 use ::ingot::types::Header;
+//                 use ::ingot::types::HasView;
+//                 use ::ingot::types::NextLayer;
+//                 use ::ingot::types::ParseChoice;
+//                 use ::ingot::types::HeaderParse;
+//                 let mut hint = None;
+//                 let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
+//                         from,
+//                     )
+//                     .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+//                 hint = ::core::option::Option::Some(
+//                     ::ingot::types::NetworkRepr::from_network(v0.next_header),
+//                 );
+//                 let (v1, mut hint, from): Success<RepeatedView<V, _>, V> = <Quack as HasView<
+//                     _,
+//                 >>::ViewType::parse_choice(from, hint)?;
+//                 let v1 = ::ingot::types::Packet::Raw(v1.into());
+//                 let val = ValidIpv6(v0, v1);
+//                 hint = hint.or_else(|| val.next_layer());
+//                 ::core::result::Result::Ok((val, hint, from))
+//             }
+//         }
 
 // impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
 // for ValidIpv6<V> {

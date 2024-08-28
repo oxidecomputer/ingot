@@ -14,7 +14,7 @@ use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
 use ingot_types::{
     primitives::*, BufState, HasView, Header, HeaderParse, NetworkRepr, Packet,
-    Repeated, RepeatedView,
+    ParseChoice, Repeated, RepeatedView,
 };
 use ip::{IpProtocol, LowRentV6EhRepr, Quack, ValidLowRentV6Eh};
 use macaddr::MacAddr6;
@@ -551,4 +551,10 @@ fn oh_god_help() {
         >(),
         // core::any::type_name::<RepeatedView<&[u8], ValidLowRentV6Eh<&[u8]>>>()
     );
+}
+
+#[test]
+fn loopy() {
+    let bytes = [0u8; 24];
+    let a = RepeatedView::<_, ValidUdp<_>>::parse_choice(&bytes[..], None);
 }
