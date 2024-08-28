@@ -21,12 +21,13 @@ extern crate alloc;
 
 pub mod primitives;
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Packet<O, B> {
+    /// Owned, in-memory representation of a ...
     #[cfg(feature = "alloc")]
-    /// Owned, in-memory representation of a ...
     Repr(Box<O>),
-    #[cfg(not(feature = "alloc"))]
     /// Owned, in-memory representation of a ...
+    #[cfg(not(feature = "alloc"))]
     Repr(O),
     /// Packed representation of a ...
     Raw(B),
@@ -595,5 +596,91 @@ impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
         _value: HeaderStack<(Option<T>, U)>,
     ) -> Result<Self, Self::Error> {
         todo!()
+    }
+}
+
+#[derive(Clone)]
+pub struct Repeated<T> {
+    inner: Vec<T>,
+}
+
+impl<T: Header> Header for Repeated<T> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    fn packet_length(&self) -> usize {
+        todo!()
+    }
+}
+
+pub struct RepeatedView<B, T: NextLayer> {
+    inner: B,
+    first_hint: Option<T::Denom>,
+}
+
+impl<B, T: Header + NextLayer> Header for RepeatedView<B, T> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    fn packet_length(&self) -> usize {
+        todo!()
+    }
+}
+
+impl<B: ByteSlice, T: NextLayer> HasBuf for RepeatedView<B, T> {
+    type BufType = B;
+}
+
+impl<T: NextLayer> NextLayer for Repeated<T> {
+    type Denom = T::Denom;
+}
+
+impl<B: ByteSlice, T: NextLayer> NextLayer for RepeatedView<B, T> {
+    type Denom = T::Denom;
+
+    fn next_layer(&self) -> Option<Self::Denom> {
+        self.first_hint
+    }
+}
+
+impl<B: ByteSlice, T: HasView<B> + NextLayer> HasView<B> for Repeated<T>
+where
+    T::ViewType: NextLayer,
+{
+    type ViewType = RepeatedView<B, T::ViewType>;
+}
+
+impl<
+        D: Copy + Eq,
+        B: SplitByteSlice,
+        T: ParseChoice<B, D> + NextLayer<Denom = D>,
+    > ParseChoice<B, D> for RepeatedView<B, T>
+where
+    T: for<'a> ParseChoice<&'a [u8], D>, // T: ParseChoice<&'static [u8], D>
+                                         // <T as HasBuf>::BufType: SplitByteSlice
+{
+    fn parse_choice(
+        data: B,
+        mut hint: Option<D>,
+    ) -> ParseResult<Success<Self>> {
+        let original_len = data.len();
+        let mut bytes_read = 0;
+        let first_hint = hint;
+
+        loop {
+            let slice = &data[bytes_read..];
+            match <T as ParseChoice<&[u8], D>>::parse_choice(slice, hint) {
+                Ok((.., l_hint, remainder)) => {
+                    bytes_read = original_len - remainder.len();
+                    hint = l_hint;
+                }
+                Err(ParseError::Unwanted) => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        let (inner, remainder) = data.split_at(bytes_read);
+
+        let val = Self { inner, first_hint };
+
+        Ok((val, hint, remainder))
     }
 }

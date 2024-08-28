@@ -12,8 +12,11 @@ use crate::{
 use alloc::{collections::LinkedList, vec::Vec};
 use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
-use ingot_types::{primitives::*, BufState, Header, HeaderParse, NetworkRepr};
-use ip::IpProtocol;
+use ingot_types::{
+    primitives::*, BufState, HasView, Header, HeaderParse, NetworkRepr, Packet,
+    Repeated, RepeatedView,
+};
+use ip::{IpProtocol, LowRentV6EhRepr, Quack, ValidLowRentV6Eh};
 use macaddr::MacAddr6;
 
 use super::*;
@@ -526,4 +529,26 @@ fn ipv6_bitset() {
             &pkt[..4]
         );
     }
+}
+
+#[test]
+fn oh_god_help() {
+    panic!(
+        "{}\n{}\n{}\n{}",
+        core::any::type_name::<<Quack as HasView<&[u8]>>::ViewType>(),
+        core::any::type_name::<RepeatedView<&[u8], ValidLowRentV6Eh<&[u8]>>>(),
+        core::any::type_name::<
+            Packet<
+                Repeated<LowRentV6EhRepr>,
+                RepeatedView<&[u8], ValidLowRentV6Eh<&[u8]>>,
+            >,
+        >(),
+        core::any::type_name::<
+            Packet<
+                Repeated<LowRentV6EhRepr>,
+                <Repeated<LowRentV6EhRepr> as HasView<&[u8]>>::ViewType,
+            >,
+        >(),
+        // core::any::type_name::<RepeatedView<&[u8], ValidLowRentV6Eh<&[u8]>>>()
+    );
 }

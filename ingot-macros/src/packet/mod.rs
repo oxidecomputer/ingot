@@ -1375,7 +1375,7 @@ impl StructParseDeriveCtx {
                                             }
                                         }
                                     }
-                                    PathArguments::None => todo!(),
+                                    PathArguments::None => {}
                                     PathArguments::Parenthesized(_) => todo!(),
                                 }
                             }
@@ -1400,7 +1400,7 @@ impl StructParseDeriveCtx {
                             #hint_lkup
                             // Discard hint
                             let (#val_ident, mut hint, from) = <#genless_user_ty as HasView<_>>::ViewType::parse_choice(from, hint)?;
-                            let #val_ident = #val_ident.into();
+                            let #val_ident = ::ingot::types::Packet::Raw(#val_ident.into());
                         });
                     } else {
                         segment_fragments.push(quote! {
