@@ -1,3 +1,4 @@
+use crate::ethernet::Ethertype;
 use bitflags::bitflags;
 use ingot::types::Vec;
 use ingot_macros::Ingot;
@@ -10,7 +11,8 @@ pub struct Geneve {
     pub opt_len: u6,
     #[ingot(is = "u8")]
     pub flags: GeneveFlags,
-    pub protocol_type: u16be,
+    #[ingot(is = "u16be")]
+    pub protocol_type: Ethertype,
 
     pub vni: u24be,
     // #[ingot(valid = 0)]

@@ -12,11 +12,12 @@ use crate::{
 use alloc::{collections::LinkedList, vec::Vec};
 use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
+use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
     primitives::*, Header, HeaderParse, NetworkRepr, ParseChoice, ParseError,
     RepeatedView,
 };
-use ip::IpProtocol;
+use ip::{IpProtocol, IpV6Ext6564Ref, IpV6ExtFragmentRef, ValidLowRentV6Eh};
 use macaddr::MacAddr6;
 
 use super::*;
@@ -567,12 +568,37 @@ fn v6_extension_headers() {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ];
 
-    let (v6, hint, next) = ValidIpv6::parse(&bytes[..]).unwrap();
+    let (v6, hint, _) = ValidIpv6::parse(&bytes[..]).unwrap();
     // v6.
 
     // assert_eq!(v6.().len(), 56);
 
     assert_eq!(hint, Some(IpProtocol::UDP));
+
+    // TODO: ergonomics
+    match v6.1 {
+        ingot_types::Packet::Repr(_) => panic!(),
+        ingot_types::Packet::Raw(v) => {
+            let mut t = v.iter(Some(IpProtocol::IPV6_HOP_BY_HOP));
+            let hbh = t.next().unwrap().unwrap();
+            let ValidLowRentV6Eh::IpV6Ext6564(hbh) = hbh else { panic!() };
+            assert_eq!(hbh.next_header(), IpProtocol::IPV6_FRAGMENT);
+            assert_eq!(hbh.ext_len(), 0);
+
+            let frag = t.next().unwrap().unwrap();
+            let ValidLowRentV6Eh::IpV6ExtFragment(frag) = frag else {
+                panic!()
+            };
+            assert_eq!(frag.next_header(), IpProtocol::IPV6_EXPERIMENT0);
+
+            let experiment = t.next().unwrap().unwrap();
+            let ValidLowRentV6Eh::IpV6Ext6564(experiment) = experiment else {
+                panic!()
+            };
+            assert_eq!(experiment.next_header(), IpProtocol::UDP);
+            assert_eq!(experiment.ext_len(), 4);
+        }
+    }
 }
 
 #[test]
@@ -588,4 +614,73 @@ fn loopy() {
 }
 
 #[test]
-fn to_owned() {}
+fn to_owned() {
+    #[rustfmt::skip]
+    let g_opt = [
+        // ---GENEVE WITH OPT---
+        // ver + opt len
+        0x01,
+        // flags
+        0x00,
+        // proto
+        0x65, 0x58,
+        // vni + reserved
+        0x00, 0x04, 0xD2, 0x00,
+
+        // option class
+        0x01, 0x29,
+        // crt + type
+        0x00,
+        // rsvd + len
+        0x00,
+    ];
+
+    let (g, ..) = ValidGeneve::parse(&g_opt[..]).unwrap();
+
+    let owned_g = Geneve::from(&g);
+    assert_eq!(owned_g.version, 0);
+    assert_eq!(owned_g.opt_len, 1);
+    assert_eq!(owned_g.flags, GeneveFlags::empty());
+    assert_eq!(owned_g.protocol_type, Ethertype::ETHERNET);
+    assert_eq!(owned_g.vni, 0x0004d2);
+    assert_eq!(owned_g.reserved, 0);
+
+    assert_eq!(owned_g.options, &[0x01, 0x29, 0x00, 0x00]);
+
+    #[rustfmt::skip]
+    let bytes = [
+        // ---OUTER v6---
+        // v6 -> HBH
+        0x6A, 0x61, 0xe2, 0x40,
+        0x00, 0x10, 0x00, 0xf0,
+        // v6src
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+        // v6dst
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+
+        // IPv6 Hop-by-hop -> Fragment
+        // 6564 Header...
+        44, 0x00,
+        // body bytes.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+        // IPv6 Fragment -> Experiment(253)
+        253, 0, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+
+        // IPv6 Experiment -> UDP
+        // 6564 Header...
+        0x11, 0x04,
+        // body bytes.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let (v6, hint, _) = ValidIpv6::parse(&bytes[..]).unwrap();
+    let owned_v6 = Ipv6::try_from(&v6).unwrap();
+}

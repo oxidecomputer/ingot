@@ -1474,6 +1474,7 @@ impl StructParseDeriveCtx {
         let mut field_create = vec![];
         let mut field_names = vec![];
 
+        let mut fallible = false;
         for field in &self.validated_order {
             let field = field.borrow();
             let f_ident = field.ident.clone();
@@ -1484,34 +1485,60 @@ impl StructParseDeriveCtx {
                     });
                 }
                 FieldState::VarWidth { .. } => {
+                    let idx = syn::Index::from(field.sub_field_idx);
                     let ref_method = Ident::new(
                         &format!("{f_ident}_ref"),
                         field.ident.span(),
                     );
                     field_create.push(quote! {
-                        let #f_ident = val.#ref_method().to_owned();
+                        let #f_ident = (&val.#idx).into();
                     });
                 }
                 FieldState::Parsable { .. } => {
+                    fallible = true;
+                    let idx = syn::Index::from(field.sub_field_idx);
                     let ref_method = Ident::new(
                         &format!("{f_ident}_ref"),
                         field.ident.span(),
                     );
+                    let hint_spec =
+                        if let Some(id) = &self.nominated_next_header {
+                            quote! {Some(#id)}
+                        } else {
+                            quote! {None}
+                        };
                     field_create.push(quote! {
-                        let #f_ident = todo!();//val.#ref_method().to_owned();
+                        // let #f_ident = (&val.#idx).to_owned(#hint_spec)?;
+                        let #f_ident = todo!();
                     });
                 }
             }
             field_names.push(f_ident);
         }
 
-        quote! {
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<&#validated_ident<V>> for #self_ty {
-                #[inline]
-                fn from(val: &#validated_ident<V>) -> Self {
-                    #( #field_create )*
-                    Self {
-                        #( #field_names ),*,
+        if !fallible {
+            quote! {
+                impl<V: ::ingot::types::ByteSlice> ::core::convert::From<&#validated_ident<V>> for #self_ty {
+                    #[inline]
+                    fn from(val: &#validated_ident<V>) -> Self {
+                        #( #field_create )*
+                        Self {
+                            #( #field_names ),*,
+                        }
+                    }
+                }
+            }
+        } else {
+            quote! {
+                impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<&#validated_ident<V>> for #self_ty {
+                    type Error = ::ingot::types::ParseError;
+
+                    #[inline]
+                    fn try_from(val: &#validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
+                        #( #field_create )*
+                        ::core::result::Result::Ok(Self {
+                            #( #field_names ),*,
+                        })
                     }
                 }
             }

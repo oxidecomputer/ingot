@@ -160,6 +160,7 @@ impl NetworkRepr<u3> for Ipv4Flags {
     }
 }
 
+// #[derive(Clone, Debug, Eq, PartialEq, Hash, Ingot)]
 #[derive(Ingot)]
 pub struct Ipv6 {
     // #[ingot(valid = 6)]
