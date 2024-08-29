@@ -1508,8 +1508,8 @@ impl StructParseDeriveCtx {
                             quote! {None}
                         };
                     field_create.push(quote! {
-                        // let #f_ident = (&val.#idx).to_owned(#hint_spec)?;
-                        let #f_ident = todo!();
+                        let #f_ident = (val.#idx).to_owned(#hint_spec)?;
+                        // let #f_ident = todo!();
                     });
                 }
             }
@@ -1530,11 +1530,12 @@ impl StructParseDeriveCtx {
             }
         } else {
             quote! {
-                impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<&#validated_ident<V>> for #self_ty {
+                impl<V: ::ingot::types::SplitByteSlice> ::core::convert::TryFrom<&#validated_ident<V>> for #self_ty {
                     type Error = ::ingot::types::ParseError;
 
                     #[inline]
                     fn try_from(val: &#validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
+                        use ::ingot::types::ToOwnedPacket;
                         #( #field_create )*
                         ::core::result::Result::Ok(Self {
                             #( #field_names ),*,

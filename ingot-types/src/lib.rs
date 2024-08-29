@@ -2,6 +2,7 @@
 
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+use alloc::vec;
 #[cfg(feature = "alloc")]
 pub use alloc::vec::Vec;
 use core::{
@@ -25,7 +26,7 @@ pub mod primitives;
 pub trait ToOwnedPacket: NextLayer {
     type Target;
 
-    fn to_owned(&self, hint: Option<Self::Denom>) -> Self::Target;
+    fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target>;
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -40,6 +41,22 @@ pub enum Packet<O, B> {
     Raw(B),
 }
 
+// impl<
+//         D: Copy + Eq,
+//         O: NextLayer<Denom = D> + Clone,
+//         B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
+//     > ToOwnedPacket for Packet<O, B>
+// {
+//     type Target = O;
+
+//     fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target> {
+//         match self {
+//             Packet::Repr(o) => Ok(*o.clone()),
+//             Packet::Raw(v) => v.to_owned(hint),
+//         }
+//     }
+// }
+
 // TODO: genericise
 impl<'a, B: ByteSlice> From<&'a Packet<Vec<u8>, RawBytes<B>>> for Vec<u8> {
     fn from(value: &Packet<Vec<u8>, RawBytes<B>>) -> Self {
@@ -47,6 +64,40 @@ impl<'a, B: ByteSlice> From<&'a Packet<Vec<u8>, RawBytes<B>>> for Vec<u8> {
             Packet::Repr(v) => v.to_vec(),
             Packet::Raw(v) => v.to_vec(),
         }
+    }
+}
+
+impl<D, B: SplitByteSlice, T: NextLayer<Denom = D> + HasView<B> + Clone>
+    ToOwnedPacket for Packet<Repeated<T>, RepeatedView<B, T>>
+where
+    D: Copy + Eq,
+    T: for<'a> HasView<&'a [u8]>,
+    for<'b> <T as HasView<&'b [u8]>>::ViewType: NextLayer<Denom = D>,
+    for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType: Into<T>,
+    for<'a> <T as HasView<&'a [u8]>>::ViewType: ParseChoice<&'a [u8], D>,
+{
+    type Target = Repeated<T>;
+
+    fn to_owned(&self, mut hint: Option<D>) -> ParseResult<Self::Target> {
+        let raw = match self {
+            Packet::Repr(o) => return Ok(*o.clone()),
+            Packet::Raw(raw) => raw,
+        };
+
+        let mut inner: Vec<T> = vec![];
+        let mut slice = &raw.inner[..];
+
+        // let
+        while !slice.is_empty() {
+            let (pkt, h2, rest) =
+                <T as HasView<&[u8]>>::ViewType::parse_choice(slice, hint)?;
+            slice = rest;
+            hint = h2;
+
+            inner.push((&pkt).into());
+        }
+
+        Ok(Repeated { inner })
     }
 }
 
@@ -162,16 +213,6 @@ impl<O, B> Packet<O, B> {
         match self {
             Packet::Raw(b) => Some(b),
             _ => None,
-        }
-    }
-
-    pub fn to_owned(&self) -> Self
-    where
-        for<'a> &'a B: Into<O>,
-    {
-        match self {
-            Packet::Repr(_) => todo!(),
-            Packet::Raw(v) => Packet::Repr(Box::new(v.into())),
         }
     }
 }
@@ -758,6 +799,40 @@ where
 }
 
 impl<
+        'c,
+        D: Copy + Eq,
+        B: SplitByteSlice,
+        T: NextLayer<Denom = D> + HasView<B>,
+    > ToOwnedPacket for RepeatedView<B, T>
+where
+    T: for<'a> HasView<&'a [u8]>,
+    for<'a> <T as HasView<&'a [u8]>>::ViewType:
+        ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
+    for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType: Into<T>,
+{
+    type Target = Repeated<T>;
+
+    fn to_owned(
+        &self,
+        mut hint: Option<Self::Denom>,
+    ) -> ParseResult<Self::Target> {
+        let mut inner = vec![];
+        let mut slice = &self.inner[..];
+
+        while !slice.is_empty() {
+            let (pkt, h2, rest) =
+                <T as HasView<&[u8]>>::ViewType::parse_choice(slice, hint)?;
+            slice = rest;
+            hint = h2;
+
+            inner.push((&pkt).into());
+        }
+
+        Ok(Repeated { inner })
+    }
+}
+
+impl<
         B: ByteSlice,
         T: for<'a> HasView<&'a [u8]> + HasView<B> + NextLayer<Denom = D>,
         D: Copy + Eq,
@@ -800,7 +875,3 @@ where
         }
     }
 }
-
-// pub trait ToOwnedPacket {
-//     pub fn to_owned(&self) ->
-// }

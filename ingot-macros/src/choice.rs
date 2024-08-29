@@ -163,14 +163,17 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     };
 
     quote! {
+        // #[derive(Clone)]
         pub enum #ident<V: ::ingot::types::ByteSlice> {
             #( #top_vars ),*
         }
 
+        // #[derive(Clone)]
         pub enum #validated_ident<V: ::ingot::types::ByteSlice> {
             #( #validated_vars ),*
         }
 
+        #[derive(Clone)]
         pub enum #repr_head {
             #( #repr_vars ),*
         }
