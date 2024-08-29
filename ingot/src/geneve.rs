@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use ingot::types::Vec;
 use ingot_macros::Ingot;
-use ingot_types::{primitives::*, NetworkRepr, VarBytes};
+use ingot_types::{primitives::*, NetworkRepr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 pub struct Geneve {

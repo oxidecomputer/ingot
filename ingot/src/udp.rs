@@ -1,6 +1,5 @@
 use ingot_macros::Ingot;
-use ingot_types::{primitives::u16be, HasRepr, HeaderParse, ParseChoice};
-use zerocopy::{ByteSlice, SplitByteSlice};
+use ingot_types::{primitives::u16be, HasRepr};
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 pub struct Udp {
@@ -14,10 +13,3 @@ pub struct Udp {
 impl HasRepr for Udp {
     type ReprType = Self;
 }
-
-// impl<V: SplitByteSlice> ParseChoice<V, ()> for ValidUdp<V> {
-//     fn parse_choice(data: V, _hint: Option<()>)
-//         -> ingot_types::ParseResult<ingot_types::Success<Self, V>> {
-//         ValidUdp::parse(data)
-//     }
-// }

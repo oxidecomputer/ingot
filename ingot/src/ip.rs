@@ -237,6 +237,6 @@ pub struct IpV6Ext6564 {
     pub next_header: IpProtocol, // should be a type.
     pub ext_len: u8,
 
-    #[ingot(var_len = "(ext_len as usize) * 8")]
+    #[ingot(var_len = "6 + (ext_len as usize) * 8")]
     pub data: Vec<u8>,
 }

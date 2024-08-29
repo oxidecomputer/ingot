@@ -13,10 +13,9 @@ use alloc::{collections::LinkedList, vec::Vec};
 use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
 use ingot_types::{
-    primitives::*, BufState, HasView, Header, HeaderParse, NetworkRepr, Packet,
-    ParseChoice, Repeated, RepeatedView,
+    primitives::*, Header, HeaderParse, NetworkRepr, ParseChoice, RepeatedView,
 };
-use ip::{IpProtocol, LowRentV6EhRepr, Quack, ValidLowRentV6Eh};
+use ip::IpProtocol;
 use macaddr::MacAddr6;
 
 use super::*;
@@ -532,8 +531,55 @@ fn ipv6_bitset() {
 }
 
 #[test]
+fn v6_extension_headers() {
+    #[rustfmt::skip]
+    let bytes = [
+        // ---OUTER v6---
+        // v6 -> HBH
+        0x6A, 0x61, 0xe2, 0x40,
+        0x00, 0x10, 0x00, 0xf0,
+        // v6src
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+        // v6dst
+        0xFD, 0x00, 0x00, 0x00, 0x00, 0xF7, 0x01, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+
+        // IPv6 Hop-by-hop -> Fragment
+        // 6564 Header...
+        44, 0x00,
+        // body bytes.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+        // IPv6 Fragment -> Experiment(253)
+        253, 0, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+
+        // IPv6 Experiment -> UDP
+        // 6564 Header...
+        0x11, 0x04,
+        // body bytes.
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let (v6, hint, next) = ValidIpv6::parse(&bytes[..]).unwrap();
+    // v6.
+
+    // assert_eq!(v6.().len(), 56);
+
+    assert_eq!(hint, Some(IpProtocol::UDP));
+}
+
+#[test]
 fn loopy() {
     let bytes = [0u8; 24];
-    let b = ValidUdp::<&[u8]>::parse_choice(&bytes[..], Some(()));
-    let a = RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..], Some(()));
+    let b = ValidUdp::<&[u8]>::parse_choice(&bytes[..], Some(())).unwrap();
+    let a =
+        RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..], Some(())).unwrap();
+    assert!(RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..20], Some(()))
+        .is_err());
 }

@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use ingot_macros::Ingot;
-use ingot_types::{primitives::*, NetworkRepr, VarBytes, Vec};
+use ingot_types::{primitives::*, NetworkRepr, Vec};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 pub struct Tcp {

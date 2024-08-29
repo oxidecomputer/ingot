@@ -6,6 +6,7 @@ use alloc::boxed::Box;
 pub use alloc::vec::Vec;
 use core::{
     convert::Infallible,
+    marker::PhantomData,
     net::{Ipv4Addr, Ipv6Addr},
     ops::{Deref, DerefMut},
 };
@@ -604,7 +605,8 @@ impl<T: Header> Header for Repeated<T> {
 
 pub struct RepeatedView<B, T: HasView<B> + NextLayer> {
     inner: B,
-    first_hint: Option<T::Denom>,
+    // first_hint: Option<T::Denom>,
+    marker: PhantomData<T>,
 }
 
 impl<B, T: Header + NextLayer + HasView<B>> Header for RepeatedView<B, T> {
@@ -623,10 +625,10 @@ impl<T: NextLayer> NextLayer for Repeated<T> {
 impl<B: ByteSlice, T: NextLayer + HasView<B>> NextLayer for RepeatedView<B, T> {
     type Denom = T::Denom;
 
-    #[inline]
-    fn next_layer(&self) -> Option<Self::Denom> {
-        self.first_hint
-    }
+    // #[inline]
+    // fn next_layer(&self) -> Option<Self::Denom> {
+    //     self.first_hint
+    // }
 }
 
 impl<B: ByteSlice, T: HasView<B> + NextLayer> HasView<B> for Repeated<T>
@@ -651,9 +653,9 @@ where
     ) -> ParseResult<Success<Self, B>> {
         let original_len = data.deref().len();
         let mut bytes_read = 0;
-        let first_hint = hint;
+        // let first_hint = hint;
 
-        loop {
+        while bytes_read < original_len {
             let slice = &data[bytes_read..];
             match <T as HasView<&[u8]>>::ViewType::parse_choice(slice, hint) {
                 Ok((.., l_hint, remainder)) => {
@@ -667,7 +669,8 @@ where
 
         let (inner, remainder) = data.split_at(bytes_read);
 
-        let val = Self { inner, first_hint };
+        // let val = Self { inner, first_hint };
+        let val = Self { inner, marker: PhantomData };
 
         Ok((val, hint, remainder))
     }
