@@ -17,7 +17,10 @@ use ingot_types::{
     primitives::*, Header, HeaderParse, NetworkRepr, ParseChoice, ParseError,
     RepeatedView,
 };
-use ip::{IpProtocol, IpV6Ext6564Ref, IpV6ExtFragmentRef, ValidLowRentV6Eh};
+use ip::{
+    IpProtocol, IpV6Ext6564Ref, IpV6ExtFragmentRef, LowRentV6EhRepr,
+    ValidLowRentV6Eh,
+};
 use macaddr::MacAddr6;
 
 use super::*;
@@ -683,4 +686,9 @@ fn to_owned() {
 
     let (v6, hint, _) = ValidIpv6::parse(&bytes[..]).unwrap();
     let owned_v6 = Ipv6::try_from(&v6).unwrap();
+
+    // let a = &owned_v6.v6ext[0];
+    assert!(matches!(&owned_v6.v6ext[0], LowRentV6EhRepr::IpV6Ext6564(_)));
+    assert!(matches!(&owned_v6.v6ext[1], LowRentV6EhRepr::IpV6ExtFragment(_)));
+    assert!(matches!(&owned_v6.v6ext[2], LowRentV6EhRepr::IpV6Ext6564(_)));
 }

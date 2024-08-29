@@ -761,7 +761,8 @@ where
     T: for<'a> HasView<&'a [u8]>,
     for<'a> <T as HasView<&'a [u8]>>::ViewType:
         ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
-    for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType: Into<T>,
+    for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType:
+        TryInto<T, Error = ParseError>,
 {
     type Target = Repeated<T>;
 
@@ -778,7 +779,7 @@ where
             slice = rest;
             hint = h2;
 
-            inner.push((&pkt).into());
+            inner.push((&pkt).try_into()?);
         }
 
         Ok(Repeated { inner })

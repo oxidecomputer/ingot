@@ -1,11 +1,7 @@
 use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
-use ingot_types::{
-    primitives::*, HasRepr, HasView, Header, NetworkRepr, NextLayer,
-    ParseError, Repeated, Vec,
-};
-use zerocopy::ByteSlice;
+use ingot_types::{primitives::*, NetworkRepr, ParseError, Repeated, Vec};
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct IpProtocol(pub u8);
@@ -186,88 +182,11 @@ pub struct Ipv6 {
     pub v6ext: Repeated<LowRentV6EhRepr>,
 }
 
-// TODO: emit + fixup
-
-impl<B: ByteSlice> HasView<B> for LowRentV6EhRepr {
-    type ViewType = ValidLowRentV6Eh<B>;
-}
-
-impl<B: ByteSlice> HasRepr for ValidLowRentV6Eh<B> {
-    type ReprType = LowRentV6EhRepr;
-}
-
-impl NextLayer for LowRentV6EhRepr {
-    type Denom = IpProtocol;
-}
-
-impl Header for LowRentV6EhRepr {
-    const MINIMUM_LENGTH: usize = IpV6Ext6564::MINIMUM_LENGTH;
-
-    fn packet_length(&self) -> usize {
-        todo!()
-    }
-}
-
-impl<B: ByteSlice> Header for ValidLowRentV6Eh<B> {
-    const MINIMUM_LENGTH: usize = IpV6Ext6564::MINIMUM_LENGTH;
-
-    fn packet_length(&self) -> usize {
-        todo!()
-    }
-}
-
-impl<B: ByteSlice> From<&ValidLowRentV6Eh<B>> for LowRentV6EhRepr {
-    fn from(value: &ValidLowRentV6Eh<B>) -> Self {
-        match value {
-            ValidLowRentV6Eh::IpV6ExtFragment(v) => {
-                LowRentV6EhRepr::IpV6ExtFragment(v.into())
-            }
-            ValidLowRentV6Eh::IpV6Ext6564(v) => {
-                LowRentV6EhRepr::IpV6Ext6564(v.into())
-            }
-        }
-    }
-}
-
 #[choice(on = "IpProtocol", map_on = IpProtocol::class)]
 pub enum LowRentV6Eh {
     IpV6ExtFragment = ExtHdrClass::FragmentHeader,
     IpV6Ext6564 = ExtHdrClass::Rfc6564,
 }
-
-// impl<V: ::ingot::types::SplitByteSlice> ::core::convert::TryFrom<&ValidIpv6<V>>
-//     for Ipv6
-// {
-//     type Error = ::ingot::types::ParseError;
-//     #[inline]
-//     fn try_from(
-//         val: &ValidIpv6<V>,
-//     ) -> ::core::result::Result<Self, Self::Error> {
-//         use ::ingot::types::ToOwnedPacket;
-//         let version = val.version();
-//         let dscp = val.dscp();
-//         let ecn = val.ecn();
-//         let flow_label = val.flow_label();
-//         let payload_len = val.payload_len();
-//         let next_header = val.next_header();
-//         let hop_limit = val.hop_limit();
-//         let source = val.source();
-//         let destination = val.destination();
-//         let v6ext = (val.1).to_owned(Some(next_header))?;
-//         ::core::result::Result::Ok::<Self, ParseError>(Self {
-//             version,
-//             dscp,
-//             ecn,
-//             flow_label,
-//             payload_len,
-//             next_header,
-//             hop_limit,
-//             source,
-//             destination,
-//             v6ext,
-//         })
-//     }
-// }
 
 // 0x2c
 // #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]

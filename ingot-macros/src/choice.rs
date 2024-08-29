@@ -45,9 +45,12 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     let mut repr_match_arms: Vec<TokenStream> = vec![];
 
     let mut next_layer_wheres: Vec<TokenStream> = vec![];
+    let mut next_layer_wheres_repr: Vec<TokenStream> = vec![];
     let mut next_layer_match_arms: Vec<TokenStream> = vec![];
 
     let mut packet_len_arms: Vec<TokenStream> = vec![];
+
+    let mut from_ref_arms: Vec<TokenStream> = vec![];
 
     let mut unpacks: Vec<TokenStream> = vec![];
 
@@ -109,12 +112,20 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #valid_field_ident<V>: ::ingot::types::NextLayer<Denom=T>
         });
 
+        next_layer_wheres_repr.push(quote! {
+            #id: ::ingot::types::NextLayer<Denom=T>
+        });
+
         next_layer_match_arms.push(quote! {
-            #validated_ident::#id(v) => v.next_layer()
+            Self::#id(v) => v.next_layer()
         });
 
         packet_len_arms.push(quote! {
             Self::#id(v) => v.packet_length(),
+        });
+
+        from_ref_arms.push(quote! {
+            #validated_ident::#id(v) => ::core::result::Result::Ok(#repr_ident::#id(v.try_into()?))
         });
 
         unpacks.push(quote! {
@@ -226,7 +237,42 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
+        impl<T: Copy + Eq> ::ingot::types::NextLayer for #repr_head
+        where #( #next_layer_wheres_repr ),*
+        {
+            type Denom = T;
+
+            #[inline]
+            fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
+                match self {
+                    #( #next_layer_match_arms ),*
+                }
+            }
+        }
+
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #ident<V> {
+            const MINIMUM_LENGTH: usize = 0; // TODO
+
+            #[inline]
+            fn packet_length(&self) -> usize {
+                match self {
+                    #( #packet_len_arms )*
+                }
+            }
+        }
+
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #validated_ident<V> {
+            const MINIMUM_LENGTH: usize = 0; // TODO
+
+            #[inline]
+            fn packet_length(&self) -> usize {
+                match self {
+                    #( #packet_len_arms )*
+                }
+            }
+        }
+
+        impl ::ingot::types::Header for #repr_head {
             const MINIMUM_LENGTH: usize = 0; // TODO
 
             #[inline]
@@ -239,6 +285,25 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasView<V> for #ident<V> {
             type ViewType = #validated_ident<V>;
+        }
+
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasView<V> for #repr_head {
+            type ViewType = #validated_ident<V>;
+        }
+
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasRepr for #validated_ident<V> {
+            type ReprType = #repr_head;
+        }
+
+        // from Valid -> Repr
+        impl<V: ::ingot::types::SplitByteSlice> ::core::convert::TryFrom<&#validated_ident<V>> for #repr_head {
+            type Error = ::ingot::types::ParseError;
+
+            fn try_from(value: & #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
+                match value {
+                    #( #from_ref_arms ),*
+                }
+            }
         }
 
         #( #unpacks )*
