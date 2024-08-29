@@ -41,21 +41,21 @@ pub enum Packet<O, B> {
     Raw(B),
 }
 
-// impl<
-//         D: Copy + Eq,
-//         O: NextLayer<Denom = D> + Clone,
-//         B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
-//     > ToOwnedPacket for Packet<O, B>
-// {
-//     type Target = O;
+impl<
+        D: Copy + Eq,
+        O: NextLayer<Denom = D> + Clone,
+        B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
+    > ToOwnedPacket for Packet<O, B>
+{
+    type Target = O;
 
-//     fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target> {
-//         match self {
-//             Packet::Repr(o) => Ok(*o.clone()),
-//             Packet::Raw(v) => v.to_owned(hint),
-//         }
-//     }
-// }
+    fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target> {
+        match self {
+            Packet::Repr(o) => Ok(*o.clone()),
+            Packet::Raw(v) => v.to_owned(hint),
+        }
+    }
+}
 
 // TODO: genericise
 impl<'a, B: ByteSlice> From<&'a Packet<Vec<u8>, RawBytes<B>>> for Vec<u8> {
@@ -64,40 +64,6 @@ impl<'a, B: ByteSlice> From<&'a Packet<Vec<u8>, RawBytes<B>>> for Vec<u8> {
             Packet::Repr(v) => v.to_vec(),
             Packet::Raw(v) => v.to_vec(),
         }
-    }
-}
-
-impl<D, B: SplitByteSlice, T: NextLayer<Denom = D> + HasView<B> + Clone>
-    ToOwnedPacket for Packet<Repeated<T>, RepeatedView<B, T>>
-where
-    D: Copy + Eq,
-    T: for<'a> HasView<&'a [u8]>,
-    for<'b> <T as HasView<&'b [u8]>>::ViewType: NextLayer<Denom = D>,
-    for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType: Into<T>,
-    for<'a> <T as HasView<&'a [u8]>>::ViewType: ParseChoice<&'a [u8], D>,
-{
-    type Target = Repeated<T>;
-
-    fn to_owned(&self, mut hint: Option<D>) -> ParseResult<Self::Target> {
-        let raw = match self {
-            Packet::Repr(o) => return Ok(*o.clone()),
-            Packet::Raw(raw) => raw,
-        };
-
-        let mut inner: Vec<T> = vec![];
-        let mut slice = &raw.inner[..];
-
-        // let
-        while !slice.is_empty() {
-            let (pkt, h2, rest) =
-                <T as HasView<&[u8]>>::ViewType::parse_choice(slice, hint)?;
-            slice = rest;
-            hint = h2;
-
-            inner.push((&pkt).into());
-        }
-
-        Ok(Repeated { inner })
     }
 }
 
@@ -561,19 +527,6 @@ pub trait ParseChoice<V: SplitByteSlice, Denom: Copy + Eq>:
         hint: Option<Denom>,
     ) -> ParseResult<Success<Self, V>>;
 }
-
-// Allow unconditional parsing of any valid standalone header in a #choice.
-// impl<B: SplitByteSlice, T: HeaderParse<B> + NextLayer, AnyDenom: Copy + Eq>
-//     ParseChoice<B, AnyDenom> for T
-// {
-//     #[inline]
-//     fn parse_choice(
-//         data: B,
-//         _hint: Option<AnyDenom>,
-//     ) -> ParseResult<Success<Self, B>> {
-//         T::parse(data)
-//     }
-// }
 
 pub enum ParseControl {
     Accept,

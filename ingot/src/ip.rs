@@ -216,18 +216,6 @@ impl<B: ByteSlice> Header for ValidLowRentV6Eh<B> {
     }
 }
 
-// impl<B: ByteSlice> From<LowRentV6Eh<B>> for LowRentV6EhRepr {
-//     fn from(value: LowRentV6Eh<B>) -> Self {
-//         todo!()
-//     }
-// }
-
-// impl<B: ByteSlice> From<&LowRentV6Eh<B>> for LowRentV6EhRepr {
-//     fn from(value: &LowRentV6Eh<B>) -> Self {
-//         todo!()
-//     }
-// }
-
 impl<B: ByteSlice> From<&ValidLowRentV6Eh<B>> for LowRentV6EhRepr {
     fn from(value: &ValidLowRentV6Eh<B>) -> Self {
         match value {
