@@ -5,10 +5,7 @@ use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 pub use alloc::vec::Vec;
 use core::{
-    convert::Infallible,
-    marker::PhantomData,
-    net::{Ipv4Addr, Ipv6Addr},
-    ops::{Deref, DerefMut},
+    convert::Infallible, marker::PhantomData, net::{Ipv4Addr, Ipv6Addr}, ops::{Deref, DerefMut}
 };
 #[cfg(not(feature = "alloc"))]
 pub use heapless::Vec;
@@ -21,6 +18,12 @@ pub use zerocopy::{
 extern crate alloc;
 
 pub mod primitives;
+
+pub trait ToOwnedPacket: NextLayer {
+    type Target;
+
+    fn to_owned(&self, hint: Option<Self::Denom>) -> Self::Target;
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum Packet<O, B> {
@@ -52,6 +55,26 @@ impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
     }
 }
 
+impl<'a, B: ByteSlice, T: HasView<B> + Clone> FieldRef<'a, T, B> {
+    pub fn to_owned(&self) -> T {
+        match self {
+            FieldRef::Repr(a) => (*a).clone(),
+            FieldRef::Raw(a) => todo!(),
+        }
+    }
+}
+
+// impl<'a, D, B: ByteSlice, T: HasView<B> + NextLayer<Denom=D> + Clone> ToOwnedPacket for FieldRef<'a, T, B> {
+//     type Target = T;
+
+//     fn to_owned(&self, hint: Option<D>) -> T {
+//         match self {
+//             FieldRef::Repr(a) => (*a).clone(),
+//             FieldRef::Raw(a) => todo!(),
+//         }
+//     }
+// }
+
 pub enum FieldMut<'a, T: HasView<V>, V> {
     Repr(&'a mut T),
     Raw(&'a mut PacketOf<T, V>),
@@ -82,6 +105,18 @@ impl<'a, T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>>
         }
     }
 }
+
+// impl<'a, B: ByteSlice, T: HasView<B>> Into<T> for FieldRef<'a, B, T> {
+//     fn into(self) -> T {
+//         todo!()
+//     }
+// }
+
+// impl<'a, T: HasView<B>, B: ByteSlice> From<FieldRef<'a, T, B>> for T {
+//     fn from(value: FieldRef<'a, T, B>) -> Self {
+//         todo!()
+//     }
+// }
 
 /// The `Packet` type corresponding to an owned representation
 /// type `T` on buffer `B`.
@@ -127,7 +162,9 @@ impl<O, B> Packet<O, B> {
     }
 }
 
-impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for Packet<O, B> {
+impl<O: HasView<V, ViewType = B>, B, V> HasView<V>
+    for Packet<O, B>
+{
     type ViewType = B;
 }
 
@@ -154,6 +191,17 @@ impl<B: ByteSlice> HasView<B> for Vec<u8> {
 
 impl<B: ByteSlice, const N: usize> HasView<B> for heapless::Vec<u8, N> {
     type ViewType = RawBytes<B>;
+}
+
+impl<V: ByteSlice> From<&VarBytes<V>> for Vec<u8> {
+    fn from(value: &VarBytes<V>) -> Self {
+        match value {
+            Packet::Repr(v) => *v.clone(),
+            Packet::Raw(v) => {
+                v.to_vec()
+            },
+        }
+    }
 }
 
 pub trait Header {
@@ -278,13 +326,15 @@ pub trait HasRepr {
 // }
 
 pub trait HeaderParse<B: SplitByteSlice>: NextLayer + Sized {
-    fn parse(from: B) -> ParseResult<Success<Self, B>>;
+    fn parse(
+        from: B,
+    ) -> ParseResult<Success<Self, B>>;
 }
 
 // allows us to call e.g. Packet<A,ValidA>::parse if ValidA is also Parse
 // and its owned type has a matching next layer Denom.
 impl<
-        V: SplitByteSlice,
+    V: SplitByteSlice,
         B: HeaderParse<V> + HasRepr + NextLayer + Into<Self>,
     > HeaderParse<V> for Packet<B::ReprType, B>
 where
@@ -292,7 +342,9 @@ where
     B::ReprType: NextLayer<Denom = B::Denom>,
 {
     #[inline]
-    fn parse(from: V) -> ParseResult<Success<Self, V>> {
+    fn parse(
+        from: V,
+    ) -> ParseResult<Success<Self, V>> {
         <B as HeaderParse<V>>::parse(from)
             .map(|(val, hint, remainder)| (val.into(), hint, remainder))
     }
@@ -415,7 +467,8 @@ pub struct BufState<T, H, B> {
     pub remainder: B,
 }
 
-pub type Success<T, B> = (T, Option<<T as NextLayer>::Denom>, B);
+pub type Success<T, B> =
+    (T, Option<<T as NextLayer>::Denom>, B);
 // BufState<T, <T as NextLayer>::Denom, <T as HasBuf>::BufType>;
 
 pub trait NextLayer {
@@ -451,10 +504,8 @@ impl From<Infallible> for ParseError {
 pub trait ParseChoice<V: SplitByteSlice, Denom: Copy + Eq>:
     Sized + NextLayer
 {
-    fn parse_choice(
-        data: V,
-        hint: Option<Denom>,
-    ) -> ParseResult<Success<Self, V>>;
+    fn parse_choice(data: V, hint: Option<Denom>)
+        -> ParseResult<Success<Self, V>>;
 }
 
 // Allow unconditional parsing of any valid standalone header in a #choice.
@@ -594,12 +645,26 @@ pub struct Repeated<T> {
     inner: Vec<T>,
 }
 
+impl<T> Deref for Repeated<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for Repeated<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
 impl<T: Header> Header for Repeated<T> {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
     fn packet_length(&self) -> usize {
-        todo!()
+        self.iter().map(|v| v.packet_length()).sum()
     }
 }
 
@@ -609,12 +674,12 @@ pub struct RepeatedView<B, T: HasView<B> + NextLayer> {
     marker: PhantomData<T>,
 }
 
-impl<B, T: Header + NextLayer + HasView<B>> Header for RepeatedView<B, T> {
+impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Header for RepeatedView<B, T> {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
     fn packet_length(&self) -> usize {
-        todo!()
+        self.inner.len()
     }
 }
 
@@ -622,6 +687,7 @@ impl<T: NextLayer> NextLayer for Repeated<T> {
     type Denom = T::Denom;
 }
 
+// Rethink: this is next layer but requires a hint to extract...
 impl<B: ByteSlice, T: NextLayer + HasView<B>> NextLayer for RepeatedView<B, T> {
     type Denom = T::Denom;
 
@@ -632,32 +698,30 @@ impl<B: ByteSlice, T: NextLayer + HasView<B>> NextLayer for RepeatedView<B, T> {
 }
 
 impl<B: ByteSlice, T: HasView<B> + NextLayer> HasView<B> for Repeated<T>
-where
-    T::ViewType: NextLayer,
+    where T::ViewType: NextLayer
 {
     type ViewType = RepeatedView<B, T>;
 }
 
-impl<B: SplitByteSlice, T: HasView<B> + NextLayer<Denom = D>, D: Copy + Eq>
-    ParseChoice<B, D> for RepeatedView<B, T>
+impl<B: SplitByteSlice, T: HasView<B> + NextLayer<Denom = D>, D: Copy + Eq> ParseChoice<B, D>
+    for RepeatedView<B, T>
 where
-    T: for<'a> HasView<&'a [u8]>,
+    T: for<'a> HasView<&'a[u8]>,
     <T as HasView<B>>::ViewType: ParseChoice<B, D> + NextLayer<Denom = D>,
-    for<'a> <T as HasView<&'a [u8]>>::ViewType:
-        ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
+    for<'a> <T as HasView<&'a [u8]>>::ViewType: ParseChoice<&'a[u8], D> + NextLayer<Denom = D>,
 {
     #[inline]
-    fn parse_choice(
-        data: B,
-        mut hint: Option<D>,
-    ) -> ParseResult<Success<Self, B>> {
+    fn parse_choice(data: B, mut hint: Option<D>) -> ParseResult<Success<Self, B>> {
         let original_len = data.deref().len();
         let mut bytes_read = 0;
         // let first_hint = hint;
 
         while bytes_read < original_len {
             let slice = &data[bytes_read..];
-            match <T as HasView<&[u8]>>::ViewType::parse_choice(slice, hint) {
+            match <T as HasView<&[u8]>>::ViewType::parse_choice(
+                slice,
+                hint,
+            ) {
                 Ok((.., l_hint, remainder)) => {
                     bytes_read = original_len - remainder.len();
                     hint = l_hint;
@@ -675,3 +739,19 @@ where
         Ok((val, hint, remainder))
     }
 }
+
+impl<B: ByteSlice, T: HasView<B> + NextLayer> RepeatedView<B, T> {
+
+}
+
+// pub struct RepeatedViewIter<'a, B, T: HasView<B> + NextLayer> {
+//     inner: &'a RepeatedView<B, T>,
+//     hint: T::Denom
+// }
+
+// impl<B: ByteSlice, T: HasView<B> + NextLayer> Iterator for RepeatedViewIter<>
+
+
+// pub trait ToOwnedPacket {
+//     pub fn to_owned(&self) ->
+// }

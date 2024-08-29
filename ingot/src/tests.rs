@@ -13,7 +13,8 @@ use alloc::{collections::LinkedList, vec::Vec};
 use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
 use ingot_types::{
-    primitives::*, Header, HeaderParse, NetworkRepr, ParseChoice, RepeatedView,
+    primitives::*, Header, HeaderParse, NetworkRepr, ParseChoice, ParseError,
+    RepeatedView,
 };
 use ip::IpProtocol;
 use macaddr::MacAddr6;
@@ -580,6 +581,11 @@ fn loopy() {
     let b = ValidUdp::<&[u8]>::parse_choice(&bytes[..], Some(())).unwrap();
     let a =
         RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..], Some(())).unwrap();
-    assert!(RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..20], Some(()))
-        .is_err());
+    assert!(matches!(
+        RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..20], Some(())),
+        Err(ParseError::TooSmall)
+    ));
 }
+
+#[test]
+fn to_owned() {}

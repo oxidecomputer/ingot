@@ -1483,13 +1483,22 @@ impl StructParseDeriveCtx {
                         let #f_ident = val.#f_ident();
                     });
                 }
-                FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
+                FieldState::VarWidth { .. } => {
                     let ref_method = Ident::new(
                         &format!("{f_ident}_ref"),
                         field.ident.span(),
                     );
                     field_create.push(quote! {
                         let #f_ident = val.#ref_method().to_owned();
+                    });
+                }
+                FieldState::Parsable { .. } => {
+                    let ref_method = Ident::new(
+                        &format!("{f_ident}_ref"),
+                        field.ident.span(),
+                    );
+                    field_create.push(quote! {
+                        let #f_ident = todo!();//val.#ref_method().to_owned();
                     });
                 }
             }
@@ -1569,7 +1578,7 @@ impl ToTokens for StructParseDeriveCtx {
                 }
             }
 
-            // #owned_from
+            #owned_from
 
             #next_layer
         });
