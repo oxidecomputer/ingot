@@ -41,6 +41,7 @@ pub enum FieldRef<'a, T: HasView<V>, V> {
 impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
     AsRef<[u8]> for FieldRef<'a, T, V>
 {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         match self {
             FieldRef::Repr(t) => t.as_ref(),
@@ -58,6 +59,7 @@ pub enum FieldMut<'a, T: HasView<V>, V> {
 impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
     AsRef<[u8]> for FieldMut<'a, T, V>
 {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         match self {
             FieldMut::Repr(t) => t.as_ref(),
@@ -70,6 +72,7 @@ impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
 impl<'a, T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>>
     AsMut<[u8]> for FieldMut<'a, T, V>
 {
+    #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
         match self {
             FieldMut::Repr(t) => t.as_mut(),
@@ -178,6 +181,7 @@ where
 impl<T: Header> Header for Vec<T> {
     const MINIMUM_LENGTH: usize = 0;
 
+    #[inline]
     fn packet_length(&self) -> usize {
         self.iter().map(|v| v.packet_length()).sum()
     }
@@ -186,6 +190,7 @@ impl<T: Header> Header for Vec<T> {
 impl Header for Vec<u8> {
     const MINIMUM_LENGTH: usize = 0;
 
+    #[inline]
     fn packet_length(&self) -> usize {
         self.len()
     }
@@ -194,6 +199,7 @@ impl Header for Vec<u8> {
 pub struct RawBytes<B: ByteSlice>(B);
 
 impl<B: ByteSlice> From<B> for RawBytes<B> {
+    #[inline]
     fn from(value: B) -> Self {
         Self(value)
     }
@@ -202,24 +208,28 @@ impl<B: ByteSlice> From<B> for RawBytes<B> {
 impl<B: ByteSlice> Deref for RawBytes<B> {
     type Target = B;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl<B: ByteSlice> DerefMut for RawBytes<B> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
 impl<B: ByteSlice> AsRef<[u8]> for RawBytes<B> {
+    #[inline]
     fn as_ref(&self) -> &[u8] {
         &self[..]
     }
 }
 
 impl<B: ByteSliceMut> AsMut<[u8]> for RawBytes<B> {
+    #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
         &mut self[..]
     }
@@ -228,6 +238,7 @@ impl<B: ByteSliceMut> AsMut<[u8]> for RawBytes<B> {
 impl<B: ByteSlice> Header for RawBytes<B> {
     const MINIMUM_LENGTH: usize = 0;
 
+    #[inline]
     fn packet_length(&self) -> usize {
         self.len()
     }
@@ -311,6 +322,7 @@ pub trait Read {
 impl<'a> Read for alloc::collections::linked_list::Iter<'a, Vec<u8>> {
     type Chunk = &'a [u8];
 
+    #[inline]
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
         self.next().ok_or(ParseError::TooSmall).map(|v| v.as_ref())
     }
@@ -320,6 +332,7 @@ impl<'a> Read for alloc::collections::linked_list::Iter<'a, Vec<u8>> {
 impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
     type Chunk = &'a mut [u8];
 
+    #[inline]
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
         self.next().ok_or(ParseError::TooSmall).map(|v| v.as_mut())
     }
@@ -407,6 +420,7 @@ pub type Success<T, B> = (T, Option<<T as NextLayer>::Denom>, B);
 pub trait NextLayer {
     type Denom: Copy;
 
+    #[inline]
     fn next_layer(&self) -> Option<Self::Denom> {
         None
     }
@@ -566,6 +580,7 @@ pub struct HeaderStack<T>(pub T);
 impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
     type Error = ();
 
+    #[inline]
     fn try_from(
         _value: HeaderStack<(Option<T>, U)>,
     ) -> Result<Self, Self::Error> {
@@ -581,19 +596,21 @@ pub struct Repeated<T> {
 impl<T: Header> Header for Repeated<T> {
     const MINIMUM_LENGTH: usize = 0;
 
+    #[inline]
     fn packet_length(&self) -> usize {
         todo!()
     }
 }
 
-pub struct RepeatedView<B, T: NextLayer> {
+pub struct RepeatedView<B, T: HasView<B> + NextLayer> {
     inner: B,
     first_hint: Option<T::Denom>,
 }
 
-impl<B, T: Header + NextLayer> Header for RepeatedView<B, T> {
+impl<B, T: Header + NextLayer + HasView<B>> Header for RepeatedView<B, T> {
     const MINIMUM_LENGTH: usize = 0;
 
+    #[inline]
     fn packet_length(&self) -> usize {
         todo!()
     }
@@ -603,9 +620,10 @@ impl<T: NextLayer> NextLayer for Repeated<T> {
     type Denom = T::Denom;
 }
 
-impl<B: ByteSlice, T: NextLayer> NextLayer for RepeatedView<B, T> {
+impl<B: ByteSlice, T: NextLayer + HasView<B>> NextLayer for RepeatedView<B, T> {
     type Denom = T::Denom;
 
+    #[inline]
     fn next_layer(&self) -> Option<Self::Denom> {
         self.first_hint
     }
@@ -615,30 +633,29 @@ impl<B: ByteSlice, T: HasView<B> + NextLayer> HasView<B> for Repeated<T>
 where
     T::ViewType: NextLayer,
 {
-    type ViewType = RepeatedView<B, T::ViewType>;
+    type ViewType = RepeatedView<B, T>;
 }
 
-// impl<B: SplitByteSlice, T: ParseChoice<B, D> + for<'a> ParseChoice<&'a [u8], D> + NextLayer<Denom = D>, D: Copy + Eq> ParseChoice<B, D>
-impl<
-        B: SplitByteSlice,
-        T: ParseChoice<B, D> + NextLayer<Denom = D>,
-        D: Copy + Eq,
-    > ParseChoice<B, D> for RepeatedView<B, T>
+impl<B: SplitByteSlice, T: HasView<B> + NextLayer<Denom = D>, D: Copy + Eq>
+    ParseChoice<B, D> for RepeatedView<B, T>
 where
-    T: for<'a> ParseChoice<&'a [u8], D>, // T: ParseChoice<&'static [u8], D>
-                                         // <T as HasBuf>::BufType: SplitByteSlice
+    T: for<'a> HasView<&'a [u8]>,
+    <T as HasView<B>>::ViewType: ParseChoice<B, D> + NextLayer<Denom = D>,
+    for<'a> <T as HasView<&'a [u8]>>::ViewType:
+        ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
 {
+    #[inline]
     fn parse_choice(
         data: B,
         mut hint: Option<D>,
     ) -> ParseResult<Success<Self, B>> {
-        let original_len = data.len();
+        let original_len = data.deref().len();
         let mut bytes_read = 0;
-        // let first_hint = hint;
+        let first_hint = hint;
 
         loop {
             let slice = &data[bytes_read..];
-            match <T as ParseChoice<&[u8], D>>::parse_choice(slice, hint) {
+            match <T as HasView<&[u8]>>::ViewType::parse_choice(slice, hint) {
                 Ok((.., l_hint, remainder)) => {
                     bytes_read = original_len - remainder.len();
                     hint = l_hint;
@@ -648,40 +665,10 @@ where
             }
         }
 
-        // let (bytes_read, first_hint) = repeat_parse::<T, D>(&data[..], hint)?;
-
         let (inner, remainder) = data.split_at(bytes_read);
 
-        // let val = Self { inner, first_hint };
-        let val = Self { inner, first_hint: hint };
+        let val = Self { inner, first_hint };
 
         Ok((val, hint, remainder))
     }
-}
-
-fn repeat_parse<
-    'a,
-    T: ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
-    D: Copy + Eq,
->(
-    inp: &'a [u8],
-    mut hint: Option<D>,
-) -> ParseResult<(usize, Option<D>)> {
-    let original_len = inp.len();
-    let mut bytes_read = 0;
-    let first_hint = hint;
-
-    loop {
-        let slice = &inp[bytes_read..];
-        match <T as ParseChoice<&[u8], D>>::parse_choice(slice, hint) {
-            Ok((.., l_hint, remainder)) => {
-                bytes_read = original_len - remainder.len();
-                hint = l_hint;
-            }
-            Err(ParseError::Unwanted) => break,
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok((bytes_read, first_hint))
 }

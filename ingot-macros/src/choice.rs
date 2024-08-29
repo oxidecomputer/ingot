@@ -121,6 +121,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
 
+                #[inline]
                 fn try_from(value: #ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
                         #ident::#id(v) => Ok(v),
@@ -132,6 +133,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
 
+                #[inline]
                 fn try_from(value: #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
                         #validated_ident::#id(v) => Ok(v.into()),
@@ -224,6 +226,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #ident<V> {
             const MINIMUM_LENGTH: usize = 0; // TODO
 
+            #[inline]
             fn packet_length(&self) -> usize {
                 match self {
                     #( #packet_len_arms )*

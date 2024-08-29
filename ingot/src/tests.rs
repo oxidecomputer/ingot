@@ -532,29 +532,8 @@ fn ipv6_bitset() {
 }
 
 #[test]
-fn oh_god_help() {
-    panic!(
-        "{}\n{}\n{}\n{}",
-        core::any::type_name::<<Quack as HasView<&[u8]>>::ViewType>(),
-        core::any::type_name::<RepeatedView<&[u8], ValidLowRentV6Eh<&[u8]>>>(),
-        core::any::type_name::<
-            Packet<
-                Repeated<LowRentV6EhRepr>,
-                RepeatedView<&[u8], ValidLowRentV6Eh<&[u8]>>,
-            >,
-        >(),
-        core::any::type_name::<
-            Packet<
-                Repeated<LowRentV6EhRepr>,
-                <Repeated<LowRentV6EhRepr> as HasView<&[u8]>>::ViewType,
-            >,
-        >(),
-        // core::any::type_name::<RepeatedView<&[u8], ValidLowRentV6Eh<&[u8]>>>()
-    );
-}
-
-#[test]
 fn loopy() {
     let bytes = [0u8; 24];
-    let a = RepeatedView::<_, ValidUdp<_>>::parse_choice(&bytes[..], None);
+    let b = ValidUdp::<&[u8]>::parse_choice(&bytes[..], Some(()));
+    let a = RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..], Some(()));
 }

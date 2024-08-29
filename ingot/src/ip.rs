@@ -2,10 +2,10 @@ use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, HasRepr, HasView, Header, NetworkRepr, NextLayer, Packet,
-    ParseChoice, ParseError, Repeated, RepeatedView, Success, VarBytes, Vec,
+    primitives::*, HasView, Header, NetworkRepr, NextLayer, ParseError,
+    Repeated, Vec,
 };
-use zerocopy::{ByteSlice, SplitByteSlice};
+use zerocopy::ByteSlice;
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct IpProtocol(pub u8);
@@ -180,53 +180,10 @@ pub struct Ipv6 {
     pub source: Ipv6Addr,
     #[ingot(is = "[u8; 16]")]
     pub destination: Ipv6Addr,
-    // #[ingot(subparse(on_next_layer))]
-    // // pub v6ext: V6Extensions<V>,
-    // // pub v6ext: LowRentV6Eh<V>,
-    // pub v6ext: RepeatedEh<V>,
-    // #[ingot(subparse(on_next_layer))]
-    // pub v6ext: Quack,
+
+    #[ingot(subparse(on_next_layer))]
+    pub v6ext: Repeated<LowRentV6EhRepr>,
 }
-
-// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V>
-// for ValidIpv6<V> {
-//     fn parse(
-//         from: V,
-//     ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
-//         use ::ingot::types::Header;
-//         use ::ingot::types::HasView;
-//         use ::ingot::types::NextLayer;
-//         use ::ingot::types::ParseChoice;
-//         use ::ingot::types::HeaderParse;
-//         let mut hint = None;
-//         // let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
-//         //         from,
-//         //     )
-//         //     .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
-//         // hint = ::core::option::Option::Some(
-//         //     ::ingot::types::NetworkRepr::from_network(v0.next_header),
-//         // );
-//         // let (v1, mut hint, from) = <Quack as HasView<
-//         //     _,
-//         // >>::ViewType::parse_choice(from, hint)?;
-//         let (v1, mut hint, from) = RepeatedView::<V, ValidLowRentV6Eh<V>>::parse_choice(from, hint)?;
-//         let v1 = ::ingot::types::Packet::Raw(v1.into());
-
-//         fn a<V: ::ingot::types::SplitByteSlice>(b: impl ParseChoice<V, IpProtocol> + NextLayer<Denom=IpProtocol> + for<'a> ParseChoice<&'a [u8], IpProtocol>) {
-
-//         }
-
-//         let q: ValidLowRentV6Eh<&[u8]> = todo!();
-//         a(q);
-
-//         let v0 = todo!();
-//         let val = ValidIpv6(v0, v1);
-//         hint = hint.or_else(|| val.next_layer());
-//         ::core::result::Result::Ok((val, hint, from))
-//     }
-// }
-
-pub type Quack = Repeated<LowRentV6EhRepr>;
 
 // TODO: emit + fixup
 
@@ -254,144 +211,11 @@ impl<B: ByteSlice> Header for ValidLowRentV6Eh<B> {
     }
 }
 
-// impl<'a> ParseChoice<&'a [u8], IpProtocol> for ValidLowRentV6Eh<&'a [u8]> {
-//     fn parse_choice(data: &'a [u8], hint: Option<IpProtocol>)
-//         -> ingot_types::ParseResult<ingot_types::Success<Self, &'a [u8]>> {
-//         todo!()
-//     }
-// }
-
-// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V>
-//         for ValidIpv6<V> {
-//             fn parse(
-//                 from: V,
-//             ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
-//                 use ::ingot::types::Header;
-//                 use ::ingot::types::HasView;
-//                 use ::ingot::types::NextLayer;
-//                 use ::ingot::types::ParseChoice;
-//                 use ::ingot::types::HeaderParse;
-//                 let mut hint = None;
-//                 let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
-//                         from,
-//                     )
-//                     .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
-//                 hint = ::core::option::Option::Some(
-//                     ::ingot::types::NetworkRepr::from_network(v0.next_header),
-//                 );
-//                 let (v1, mut hint, from): Success<RepeatedView<V, _>, V> = <Quack as HasView<
-//                     _,
-//                 >>::ViewType::parse_choice(from, hint)?;
-//                 let v1 = ::ingot::types::Packet::Raw(v1.into());
-//                 let val = ValidIpv6(v0, v1);
-//                 hint = hint.or_else(|| val.next_layer());
-//                 ::core::result::Result::Ok((val, hint, from))
-//             }
-//         }
-
-// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
-// for ValidIpv6<V> {
-//     type Target = Self;
-//     fn parse(
-//         from: V,
-//     ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
-//         use ::ingot::types::Header;
-//         use ::ingot::types::HasView;
-//         use ::ingot::types::NextLayer;
-//         use ::ingot::types::ParseChoice;
-//         use ::ingot::types::HeaderParse;
-//         let mut hint = None;
-//         let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
-//                 from,
-//             )
-//             .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
-//         hint = ::core::option::Option::Some(
-//             ::ingot::types::NetworkRepr::from_network(v0.next_header),
-//         );
-//         // let (v1, mut hint, from) = <Quack as HasView<
-//         //     _,
-//         // >>::ViewType::parse_choice(from, hint)?;
-//         let (v1, mut hint, from) = RepeatedView::<V, ValidLowRentV6Eh<V>>::parse_choice(from, hint)?;
-//         // let v1 = v1.into();
-//         let v1 = Packet::Raw(v1.into());
-//         let val = ValidIpv6(v0, v1);
-//         hint = hint.or_else(|| val.next_layer());
-//         ::core::result::Result::Ok((val, hint, from))
-//     }
-// }
-
-// impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse
-// for ValidIpv6<V> {
-//     type Target = Self;
-//     fn parse(
-//         from: V,
-//     ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self>> {
-//         use ::ingot::types::Header;
-//         use ::ingot::types::HasView;
-//         use ::ingot::types::NextLayer;
-//         use ::ingot::types::ParseChoice;
-//         use ::ingot::types::HeaderParse;
-//         let mut hint = None;
-//         let (v0, from): (::zerocopy::Ref<_, _Ipv6_ingot_impl::Ipv6Part0>, _) = ::zerocopy::Ref::from_prefix(
-//                 from,
-//             )
-//             .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
-//         hint = ::core::option::Option::Some(
-//             ::ingot::types::NetworkRepr::from_network(v0.next_header),
-//         );
-//         let ::ingot::types::Success { val: v1, remainder: from, .. } = ValidRepeated::<ValidLowRentV6Eh<_>, _>::parse_choice(from, hint)?;
-//         let v1 = v1.into();
-//         let val = ValidIpv6(v0, v1);
-//         hint = hint.or_else(|| val.next_layer());
-//         ::core::result::Result::Ok(::ingot::types::Success {
-//             val,
-//             hint,
-//             remainder: from,
-//         })
-//     }
-// }
-
 #[choice(on = "IpProtocol", map_on = IpProtocol::class)]
 pub enum LowRentV6Eh {
     IpV6ExtFragment = ExtHdrClass::FragmentHeader,
     IpV6Ext6564 = ExtHdrClass::Rfc6564,
 }
-
-// TODO: generate
-// impl<V> HasRepr for LowRentV6Eh<V> {
-//     type ReprType = LowRentV6EhRepr;
-// }
-
-// impl<V> HasView<V> for LowRentV6EhRepr
-// where
-//     ValidLowRentV6Eh<V>: HasBuf<BufType = V>,
-// {
-//     type ViewType = ValidLowRentV6Eh<V>;
-// }
-
-// impl<V> HasRepr for ValidLowRentV6Eh<V> {
-//     type ReprType = LowRentV6EhRepr;
-// }
-
-// impl<V> HasView<V> for ValidLowRentV6Eh<V>
-// where
-//     Self: HasBuf<BufType = V>,
-// {
-//     type ViewType = Self;
-// }
-
-// impl Header for LowRentV6EhRepr {
-//     const MINIMUM_LENGTH: usize = 0;
-
-//     fn packet_length(&self) -> usize {
-//         todo!()
-//     }
-// }
-
-// impl<'a> HasView<&'a [u8]> for Vec<LowRentV6Eh<LowRentV6EhRepr<&'a [u8]>>>
-// {
-//     type ViewType = ValidRepeatedEh<&'a [u8]>;
-// }
 
 // 0x2c
 // #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
@@ -416,124 +240,3 @@ pub struct IpV6Ext6564 {
     #[ingot(var_len = "(ext_len as usize) * 8")]
     pub data: Vec<u8>,
 }
-
-// TODO: Ideally, we want this as a combinator.
-//       I fought with my collection of types and traits for like 4 hours
-//       and was unable to make that happen -- We only *need* it for V6EHs
-//       but it would be real nice to have for, e.g., Q-in-Q.
-/*
-pub type RepeatedEh<B> = Packet<Vec<LowRentV6EhRepr>, ValidRepeatedEh<B>>;
-
-// impl<B: SplitByteSlice> From<&ValidRepeatedEh<B>> for Vec<LowRentV6EhRepr> {
-//     fn from(value: &ValidRepeatedEh<B>) -> Self {
-//         let mut out = alloc::vec![];
-//         let mut hint = value.first_hint;
-//         let mut to_read = value.inner;
-
-//         while IpProtocol::class(hint) != ExtHdrClass::NotAnEh {
-//             match <ValidLowRentV6Eh<B> as ParseChoice<B, IpProtocol>>::parse_choice(
-//                 to_read,
-//                 Some(hint),
-//             ) {
-//                 Ok((val, Some(l_hint), remainder)) => {
-//                     to_read = remainder;
-//                     // bytes_read = original_len - remainder.len();
-//                     hint = l_hint;
-//                     // TODO: derive froms on choices.
-//                     let owned = match val {
-//                         ValidLowRentV6Eh::IpV6ExtFragment(v) => LowRentV6EhRepr::IpV6ExtFragment((&v).into()),
-//                         ValidLowRentV6Eh::IpV6Ext6564(v) => LowRentV6EhRepr::IpV6Ext6564((&v).into()),
-//                     };
-//                     out.push(owned);
-//                 }
-//                 Ok(_) | Err(ParseError::Unwanted) => unreachable!(),
-//                 Err(_) => unreachable!()
-//             }
-//         }
-
-//         out
-//     }
-// }
-
-pub struct ValidRepeatedEh<B> {
-    inner: B,
-    first_hint: IpProtocol,
-}
-
-impl<B: SplitByteSlice> Iterator for &ValidRepeatedEh<B> {
-    type Item = ValidLowRentV6Eh<B>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        todo!()
-    }
-}
-
-impl<B: ByteSlice> HasBuf for ValidRepeatedEh<B> {
-    type BufType = B;
-}
-
-impl<B: ByteSlice> Header for ValidRepeatedEh<B> {
-    const MINIMUM_LENGTH: usize = 0;
-
-    #[inline]
-    fn packet_length(&self) -> usize {
-        self.inner.len()
-    }
-}
-
-impl<B: ByteSlice> NextLayer for ValidRepeatedEh<B> {
-    type Denom = IpProtocol;
-
-    #[inline]
-    fn next_layer(&self) -> Option<Self::Denom> {
-        // TODO: scan to last and re-read.
-        None
-    }
-}
-
-impl<B> HasRepr for ValidRepeatedEh<B> {
-    type ReprType = Vec<LowRentV6EhRepr>;
-}
-
-impl<B: SplitByteSlice> ParseChoice<B, IpProtocol> for ValidRepeatedEh<B> {
-    #[inline]
-    fn parse_choice(
-        data: B,
-        hint: Option<IpProtocol>,
-    ) -> ingot_types::ParseResult<ingot_types::Success<Self>> {
-        let original_len = data.len();
-        let mut bytes_read = 0;
-        let Some(mut hint) = hint else {
-            return Err(ParseError::NeedsHint);
-        };
-        let first_hint = hint;
-
-        while IpProtocol::class(hint) != ExtHdrClass::NotAnEh {
-            match <ValidLowRentV6Eh<&[u8]> as ParseChoice<&[u8], IpProtocol>>::parse_choice(
-                &data[bytes_read..],
-                Some(hint),
-            ) {
-                Ok((.., Some(l_hint), remainder)) => {
-                    bytes_read = original_len - remainder.len();
-                    hint = l_hint;
-                }
-                Ok(_) | Err(ParseError::Unwanted) => unreachable!(),
-                Err(e) => return Err(e),
-            }
-        }
-
-        let (inner, remainder) = data.split_at(bytes_read);
-
-        let val = Self { inner, first_hint };
-
-        Ok((val, Some(hint), remainder))
-    }
-}
-
-impl<B> From<ValidRepeatedEh<B>> for RepeatedEh<B> {
-    #[inline]
-    fn from(value: ValidRepeatedEh<B>) -> Self {
-        Self::Raw(value)
-    }
-}
-*/

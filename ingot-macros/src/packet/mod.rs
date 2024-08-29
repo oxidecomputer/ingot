@@ -806,6 +806,7 @@ impl StructParseDeriveCtx {
                 impl<#g: ::ingot::types::ByteSlice> ::ingot::types::Header for #ident<#g> {
                     const MINIMUM_LENGTH: usize = #base_bytes;
 
+                    #[inline]
                     fn packet_length(&self) -> usize {
                         #( #owned_len_checks )+*
                     }
@@ -816,6 +817,7 @@ impl StructParseDeriveCtx {
                 impl ::ingot::types::Header for #ident {
                     const MINIMUM_LENGTH: usize = #base_bytes;
 
+                    #[inline]
                     fn packet_length(&self) -> usize {
                         #( #owned_len_checks )+*
                     }
@@ -827,6 +829,7 @@ impl StructParseDeriveCtx {
             impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #validated_ident<V> {
                 const MINIMUM_LENGTH: usize = #base_bytes;
 
+                #[inline]
                 fn packet_length(&self) -> usize {
                     #( #zc_len_checks )+*
                 }
@@ -1427,6 +1430,7 @@ impl StructParseDeriveCtx {
 
         quote! {
             impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
+                #[inline]
                 fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                     use ::ingot::types::Header;
                     use ::ingot::types::HasView;
@@ -1449,6 +1453,7 @@ impl StructParseDeriveCtx {
             }
 
             impl<V: ::ingot::types::SplitByteSlice, AnyDenom: Copy + Eq> ::ingot::types::ParseChoice<V, AnyDenom> for #validated_ident<V> {
+                #[inline]
                 fn parse_choice(from: V, hint: Option<AnyDenom>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                     use ::ingot::types::HeaderParse;
                     Self::parse(from)
@@ -1493,6 +1498,7 @@ impl StructParseDeriveCtx {
 
         quote! {
             impl<V: ::ingot::types::ByteSlice> ::core::convert::From<&#validated_ident<V>> for #self_ty {
+                #[inline]
                 fn from(val: &#validated_ident<V>) -> Self {
                     #( #field_create )*
                     Self {
@@ -1549,12 +1555,14 @@ impl ToTokens for StructParseDeriveCtx {
             }
 
             impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for #pkt_ident<V> {
+                #[inline]
                 fn from(value: #validated_ident<V>) -> Self {
                     ::ingot::types::Packet::Raw(value)
                 }
             }
 
             impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for #pkt_ident<V> {
+                #[inline]
                 fn from(value: #self_ty) -> Self {
                     // into used to paper over boxing / in-place.
                     ::ingot::types::Packet::Repr(value.into())
