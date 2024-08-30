@@ -8,6 +8,7 @@ pub use alloc::vec::Vec;
 use core::{
     convert::Infallible,
     marker::PhantomData,
+    mem::MaybeUninit,
     net::{Ipv4Addr, Ipv6Addr},
     ops::{Deref, DerefMut},
 };
@@ -410,9 +411,144 @@ impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
     }
 }
 
-// pub trait Emit {
-//     fn emit()
-// }
+pub trait Emit: Header {
+    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize>;
+
+    #[inline]
+    fn emit_prefix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
+        if buf.len() < self.packet_length() {
+            return Err(ParseError::TooSmall);
+        }
+
+        let (into, out) = buf.split_at(self.packet_length());
+        self.emit(into)?;
+
+        Ok(out)
+    }
+
+    #[inline]
+    fn emit_suffix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
+        let l = buf.len();
+
+        if l < self.packet_length() {
+            return Err(ParseError::TooSmall);
+        }
+
+        let (out, into) = buf.split_at(l - self.packet_length());
+        self.emit(into)?;
+
+        Ok(out)
+    }
+
+    #[inline]
+    fn emit_vec(&self) -> Vec<u8> {
+        let len = self.packet_length();
+
+        let mut out = vec![0u8; len];
+
+        let o_len = self.emit(&mut out[..]).expect(
+            "mismatch between packet requested length and required length",
+        );
+
+        assert_eq!(o_len, len);
+
+        out
+    }
+}
+
+impl<O: Emit, B: Emit> Emit for Packet<O, B> {
+    #[inline]
+    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize> {
+        match self {
+            Packet::Repr(o) => o.emit(buf),
+            Packet::Raw(b) => b.emit(buf),
+        }
+    }
+}
+
+impl<T: Emit> Emit for Vec<T> {
+    #[inline]
+    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
+        let mut emitted = 0;
+
+        for el in self {
+            emitted += el.emit(&mut buf[emitted..])?;
+        }
+
+        Ok(emitted)
+    }
+}
+
+impl Emit for Vec<u8> {
+    #[inline]
+    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
+        if buf.len() < self.len() {
+            return Err(ParseError::TooSmall);
+        }
+
+        buf.copy_from_slice(self);
+
+        Ok(self.len())
+    }
+}
+
+impl<B: ByteSlice> Emit for RawBytes<B> {
+    #[inline]
+    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
+        if buf.len() < self.len() {
+            return Err(ParseError::TooSmall);
+        }
+
+        buf.copy_from_slice(self);
+
+        Ok(self.len())
+    }
+}
+
+/// TODO: explain this one.
+///
+/// # Safety
+/// Implementors will be given an uninitialised slice of bytes, and must
+/// not meaningfully read from its contents.
+pub unsafe trait EmitDoesNotRelyOnBufContents {}
+
+pub trait EmitUninit: Emit + EmitDoesNotRelyOnBufContents {
+    #[inline]
+    fn emit_uninit(&self, buf: &mut [MaybeUninit<u8>]) -> ParseResult<usize> {
+        // SAFETY: `u8` does not have any validity constraints or Drop.
+        // Accordingly, assuming their initialisation will not trigger
+        // any adverse dropck behaviour, and any value is trivially a valid u8.
+        // We are here if the implementor *promises* not to rely on
+        // buf's contents.
+        // We do not return a reference to the initialised region,
+        // it is up to the caller to inform their datastructre that
+        // bytes are initialised.
+
+        // NOTE: reimpl'ing `slice_assume_init_mut` (unstable).
+        let buf = unsafe { &mut *(buf as *mut [_] as *mut [u8]) };
+
+        self.emit(buf)
+    }
+
+    // TODO: prefix and suffix?
+
+    #[inline]
+    fn emit_vec(&self) -> Vec<u8> {
+        let len = self.packet_length();
+
+        let mut out = Vec::with_capacity(len);
+
+        let o_len = self.emit_uninit(out.spare_capacity_mut()).expect(
+            "mismatch between packet requested length and required length",
+        );
+        assert_eq!(o_len, len);
+        unsafe {
+            out.set_len(o_len);
+        }
+
+        out
+    }
+}
 
 /// Thinking about what we'll need for more generic emit tracking.
 ///
@@ -574,8 +710,6 @@ impl NetworkRepr<[u8; 6]> for macaddr::MacAddr6 {
         macaddr::MacAddr6::from(val)
     }
 }
-
-pub trait Emit {}
 
 pub struct Parsed<Stack, RawPkt: Read> {
     // this needs to be a struct with all the right names.
@@ -751,12 +885,8 @@ where
     }
 }
 
-impl<
-        'c,
-        D: Copy + Eq,
-        B: SplitByteSlice,
-        T: NextLayer<Denom = D> + HasView<B>,
-    > ToOwnedPacket for RepeatedView<B, T>
+impl<D: Copy + Eq, B: SplitByteSlice, T: NextLayer<Denom = D> + HasView<B>>
+    ToOwnedPacket for RepeatedView<B, T>
 where
     T: for<'a> HasView<&'a [u8]>,
     for<'a> <T as HasView<&'a [u8]>>::ViewType:
