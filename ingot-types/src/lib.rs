@@ -413,6 +413,7 @@ impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
 
 pub trait Emit: Header {
     fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize>;
+    fn needs_emit(&self) -> bool;
 
     #[inline]
     fn emit_prefix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
@@ -464,6 +465,14 @@ impl<O: Emit, B: Emit> Emit for Packet<O, B> {
             Packet::Raw(b) => b.emit(buf),
         }
     }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        match self {
+            Packet::Repr(o) => true,
+            Packet::Raw(b) => b.needs_emit(),
+        }
+    }
 }
 
 impl<T: Emit> Emit for Vec<T> {
@@ -476,6 +485,11 @@ impl<T: Emit> Emit for Vec<T> {
         }
 
         Ok(emitted)
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        true
     }
 }
 
@@ -490,6 +504,11 @@ impl Emit for Vec<u8> {
 
         Ok(self.len())
     }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        true
+    }
 }
 
 impl<B: ByteSlice> Emit for RawBytes<B> {
@@ -502,6 +521,11 @@ impl<B: ByteSlice> Emit for RawBytes<B> {
         buf.copy_from_slice(self);
 
         Ok(self.len())
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        false
     }
 }
 

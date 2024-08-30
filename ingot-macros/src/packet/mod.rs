@@ -14,8 +14,8 @@ use std::{
 };
 use syn::{
     parse_quote, spanned::Spanned, visit::Visit, Error, Expr, ExprLit,
-    GenericArgument, Generics, Lit, PathArguments, Token, Type, TypeArray,
-    TypeInfer, TypeParam,
+    GenericArgument, Generics, Index, Lit, PathArguments, Token, Type,
+    TypeArray, TypeInfer, TypeParam,
 };
 
 mod bitfield;
@@ -861,6 +861,7 @@ impl StructParseDeriveCtx {
         let inner_structs = self.gen_zerocopy_substructs();
         let substruct_methods = self.gen_zerocopy_methods();
         let parse_impl = self.gen_parse_impl();
+        let emit_impl = self.gen_emit_impls();
 
         let mut trait_impls = vec![];
         let mut direct_trait_impls = vec![];
@@ -1064,6 +1065,8 @@ impl StructParseDeriveCtx {
                 }
 
                 #parse_impl
+
+                #emit_impl
             }
         }
     }
@@ -1486,10 +1489,6 @@ impl StructParseDeriveCtx {
                 }
                 FieldState::VarWidth { .. } => {
                     let idx = syn::Index::from(field.sub_field_idx);
-                    let ref_method = Ident::new(
-                        &format!("{f_ident}_ref"),
-                        field.ident.span(),
-                    );
                     field_create.push(quote! {
                         let #f_ident = (&val.#idx).into();
                     });
@@ -1497,10 +1496,6 @@ impl StructParseDeriveCtx {
                 FieldState::Parsable { .. } => {
                     fallible = true;
                     let idx = syn::Index::from(field.sub_field_idx);
-                    let ref_method = Ident::new(
-                        &format!("{f_ident}_ref"),
-                        field.ident.span(),
-                    );
                     let hint_spec =
                         if let Some(id) = &self.nominated_next_header {
                             quote! {Some(#id)}
@@ -1509,7 +1504,6 @@ impl StructParseDeriveCtx {
                         };
                     field_create.push(quote! {
                         let #f_ident = (val.#idx).to_owned(#hint_spec)?;
-                        // let #f_ident = todo!();
                     });
                 }
             }
@@ -1543,6 +1537,144 @@ impl StructParseDeriveCtx {
                     }
                 }
             }
+        }
+    }
+
+    fn gen_emit_impls(&self) -> TokenStream {
+        let ident = &self.ident;
+        let validated_ident = self.validated_ident();
+        let self_ty = if self.my_explicit_generic().is_some() {
+            quote! {#ident<V>}
+        } else {
+            quote! {#ident}
+        };
+
+        let mut owned_emit_blocks: Vec<TokenStream> = vec![];
+        let mut valid_emit_blocks: Vec<TokenStream> = vec![];
+        let mut emit_check_clauses: Vec<TokenStream> = vec![];
+
+        for (i, region) in self.chunk_layout.iter().enumerate() {
+            let zc_ty_name = region.chunk_ty_name(&self.ident);
+            let idx = Index::from(i);
+            match region {
+                ChunkState::FixedWidth { fields, .. } => {
+                    let per_field_sets = fields.iter().map(|id| self.validated.get_key_value(id).unwrap())
+                        .map(|(id, field)| {
+                            let field = field.borrow();
+
+                            match &field.state {
+                                FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
+                                    let setter = field.setter_name();
+                                    quote! {g.#setter(self.#id);}
+                                },
+                                FieldState::FixedWidth { underlying_ty, .. } => {
+                                    let do_into = &field.user_ty == underlying_ty;
+                                    if do_into {
+                                        quote! {
+                                            g.#id = self.#id.into();
+                                        }
+                                    } else {
+                                        quote! {
+                                            g.#id = ::ingot::types::NetworkRepr::to_network(self.#id);
+                                        }
+                                    }
+                                },
+                                _ => unreachable!(),
+                            }
+                        });
+
+                    owned_emit_blocks.push(quote! {
+                        let (g, rest) = #zc_ty_name::mut_from_prefix(rest)
+                            .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+                        #( #per_field_sets )*
+                    });
+
+                    // In borrowed variant, this resolves to a memcpy.
+                    valid_emit_blocks.push(quote! {
+                        let s = self.#idx.bytes();
+                        let (fill, rest) = rest.split_at_mut(s.len());
+                        fill.copy_from_slice(s);
+                    });
+                }
+                ChunkState::VarWidth(id) => {
+                    // delegate to emit.
+                    owned_emit_blocks.push(quote! {
+                        let (fill, rest) = rest.split_at_mut(self.#id.packet_length());
+                        self.#id.emit(fill)?;
+                    });
+                    valid_emit_blocks.push(quote! {
+                        let (fill, rest) = rest.split_at_mut(self.#idx.packet_length());
+                        self.#idx.emit(fill)?;
+                    });
+                    emit_check_clauses.push(quote! {
+                        self.#idx.needs_emit()
+                    });
+                }
+                ChunkState::Parsable(id) => {
+                    // delegate to emit.
+                    owned_emit_blocks.push(quote! {
+                        let (fill, rest) = rest.split_at_mut(self.#id.packet_length());
+                        self.#id.emit(fill)?;
+                    });
+                    valid_emit_blocks.push(quote! {
+                        let (fill, rest) = rest.split_at_mut(self.#idx.packet_length());
+                        self.#idx.emit(fill)?;
+                    });
+                    emit_check_clauses.push(quote! {
+                        self.#idx.needs_emit()
+                    });
+                }
+            }
+        }
+
+        quote! {
+            impl ::ingot::types::Emit for #self_ty {
+                fn emit<V: ::ingot::types::ByteSliceMut>(&self, mut buf: V) -> ::ingot::types::ParseResult<usize> {
+                    use ::ingot::types::Header;
+                    use ::zerocopy::FromBytes;
+
+                    let written = self.packet_length();
+                    let rest = &mut buf[..];
+
+                    if rest.len() < written {
+                        return Err(ingot_types::ParseError::TooSmall);
+                    }
+
+                    #( #owned_emit_blocks )*
+
+                    Ok(written)
+                }
+
+                #[inline]
+                fn needs_emit(&self) -> bool {
+                    true
+                }
+            }
+
+            impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #validated_ident<V> {
+                fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+                    use ::ingot::types::Header;
+
+                    let written = self.packet_length();
+                    let rest = &mut buf[..];
+
+                    if rest.len() < written {
+                        return Err(ingot_types::ParseError::TooSmall);
+                    }
+
+                    #( #valid_emit_blocks )*
+
+                    Ok(written)
+                }
+
+                #[inline]
+                fn needs_emit(&self) -> bool {
+                    #( #emit_check_clauses ||)* false
+                }
+            }
+
+            unsafe impl ::ingot::types::EmitDoesNotRelyOnBufContents for #self_ty {}
+            unsafe impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::EmitDoesNotRelyOnBufContents for #validated_ident<V> {}
         }
     }
 }
