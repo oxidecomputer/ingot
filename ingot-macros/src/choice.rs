@@ -48,20 +48,18 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     let mut next_layer_wheres_repr: Vec<TokenStream> = vec![];
     let mut next_layer_match_arms: Vec<TokenStream> = vec![];
 
-    let mut packet_len_arms: Vec<TokenStream> = vec![];
-
     let mut from_ref_arms: Vec<TokenStream> = vec![];
 
     let mut unpacks: Vec<TokenStream> = vec![];
 
     let mut needs_generic = false;
 
-    for var in item.variants {
-        let state = VariantArgs::from_variant(&var).unwrap();
+    for var in &item.variants {
+        let state = VariantArgs::from_variant(var).unwrap();
 
         needs_generic |= state.generic;
 
-        let Some((_, disc)) = var.discriminant else {
+        let Some((_, disc)) = &var.discriminant else {
             return Error::new(
                 var.span(),
                 "variant must have a valid discriminant",
@@ -69,7 +67,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             .into_compile_error();
         };
 
-        let id = var.ident;
+        let id = &var.ident;
         let field_ident = if state.generic {
             quote! {#id<V>}
         } else {
@@ -120,15 +118,25 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             Self::#id(v) => v.next_layer()
         });
 
-        packet_len_arms.push(quote! {
-            Self::#id(v) => v.packet_length(),
-        });
-
         from_ref_arms.push(quote! {
             #validated_ident::#id(v) => ::core::result::Result::Ok(#repr_ident::#id(v.try_into()?))
         });
 
         unpacks.push(quote! {
+            impl ::core::convert::From<#id> for #repr_ident {
+                #[inline]
+                fn from(value: #id) -> Self {
+                    Self::#id(value)
+                }
+            }
+
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#id> for #ident<V> {
+                #[inline]
+                fn from(value: #id) -> Self {
+                    Self::#id(::ingot::types::Packet::Repr(value.into()))
+                }
+            }
+
             impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
 
@@ -173,6 +181,8 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         quote! {hint2}
     };
 
+    let idents: Vec<_> = item.variants.iter().map(|item| &item.ident).collect();
+
     quote! {
         // #[derive(Clone)]
         pub enum #ident<V: ::ingot::types::ByteSlice> {
@@ -184,7 +194,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #( #validated_vars ),*
         }
 
-        #[derive(Clone)]
+        #[derive(Debug, Clone, Eq, PartialEq)]
         pub enum #repr_head {
             #( #repr_vars ),*
         }
@@ -256,7 +266,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #[inline]
             fn packet_length(&self) -> usize {
                 match self {
-                    #( #packet_len_arms )*
+                    #( Self::#idents(v) => v.packet_length(), )*
                 }
             }
         }
@@ -267,7 +277,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #[inline]
             fn packet_length(&self) -> usize {
                 match self {
-                    #( #packet_len_arms )*
+                    #( Self::#idents(v) => v.packet_length(), )*
                 }
             }
         }
@@ -278,10 +288,57 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #[inline]
             fn packet_length(&self) -> usize {
                 match self {
-                    #( #packet_len_arms )*
+                    #( Self::#idents(v) => v.packet_length(), )*
                 }
             }
         }
+
+        impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #ident<V> {
+            fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+                match self {
+                    #( Self::#idents(v) => v.emit(buf) ),*
+                }
+            }
+
+            fn needs_emit(&self) -> bool {
+                match self {
+                    #( Self::#idents(v) => v.needs_emit() ),*
+                }
+            }
+        }
+
+        impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #validated_ident<V> {
+            fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+                match self {
+                    #( Self::#idents(v) => v.emit(buf) ),*
+                }
+            }
+
+            fn needs_emit(&self) -> bool {
+                match self {
+                    #( Self::#idents(v) => v.needs_emit() ),*
+                }
+            }
+        }
+
+        impl ::ingot::types::Emit for #repr_head {
+            fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+                match self {
+                    #( Self::#idents(v) => v.emit(buf) ),*
+                }
+            }
+
+            fn needs_emit(&self) -> bool {
+                match self {
+                    #( Self::#idents(v) => v.needs_emit() ),*
+                }
+            }
+        }
+
+        // TODO: where-clause like all hell.
+        unsafe impl ::ingot::types::EmitDoesNotRelyOnBufContents for #repr_head {}
+        unsafe impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::EmitDoesNotRelyOnBufContents for #validated_ident<V> {}
+        unsafe impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::EmitDoesNotRelyOnBufContents for #ident<V> {}
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasView<V> for #ident<V> {
             type ViewType = #validated_ident<V>;

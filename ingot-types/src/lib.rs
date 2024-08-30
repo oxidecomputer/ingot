@@ -469,7 +469,7 @@ impl<O: Emit, B: Emit> Emit for Packet<O, B> {
     #[inline]
     fn needs_emit(&self) -> bool {
         match self {
-            Packet::Repr(o) => true,
+            Packet::Repr(_) => true,
             Packet::Raw(b) => b.needs_emit(),
         }
     }
@@ -572,6 +572,19 @@ pub trait EmitUninit: Emit + EmitDoesNotRelyOnBufContents {
 
         out
     }
+}
+
+impl<V: Emit + EmitDoesNotRelyOnBufContents> EmitUninit for V {}
+
+unsafe impl<O: EmitDoesNotRelyOnBufContents, B: EmitDoesNotRelyOnBufContents>
+    EmitDoesNotRelyOnBufContents for Packet<O, B>
+{
+}
+unsafe impl EmitDoesNotRelyOnBufContents for Vec<u8> {}
+unsafe impl<B: ByteSlice> EmitDoesNotRelyOnBufContents for RawBytes<B> {}
+unsafe impl<T: EmitDoesNotRelyOnBufContents> EmitDoesNotRelyOnBufContents
+    for Vec<T>
+{
 }
 
 /// Thinking about what we'll need for more generic emit tracking.
@@ -805,9 +818,21 @@ impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub struct Repeated<T> {
     inner: Vec<T>,
+}
+
+impl<T> Repeated<T> {
+    pub fn new(data: Vec<T>) -> Self {
+        Self { inner: data }
+    }
+}
+
+impl<T> From<Vec<T>> for Repeated<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self::new(value)
+    }
 }
 
 impl<T> Deref for Repeated<T> {
@@ -833,6 +858,23 @@ impl<T: Header> Header for Repeated<T> {
     }
 }
 
+impl<T: Emit> Emit for Repeated<T> {
+    #[inline]
+    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize> {
+        self.inner.emit(buf)
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        true
+    }
+}
+
+unsafe impl<T: Emit> EmitDoesNotRelyOnBufContents for Repeated<T> where
+    Vec<T>: EmitDoesNotRelyOnBufContents
+{
+}
+
 pub struct RepeatedView<B, T: HasView<B> + NextLayer> {
     inner: B,
     // first_hint: Option<T::Denom>,
@@ -852,6 +894,26 @@ impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Header
 
 impl<T: NextLayer> NextLayer for Repeated<T> {
     type Denom = T::Denom;
+}
+
+impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Emit
+    for RepeatedView<B, T>
+{
+    #[inline]
+    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
+        if buf.len() < self.inner.len() {
+            return Err(ParseError::TooSmall);
+        }
+
+        buf.copy_from_slice(&self.inner);
+
+        Ok(self.inner.len())
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        false
+    }
 }
 
 // Rethink: this is next layer but requires a hint to extract...

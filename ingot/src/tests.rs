@@ -14,12 +14,12 @@ use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
 use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
-    primitives::*, Header, HeaderParse, NetworkRepr, ParseChoice, ParseError,
-    RepeatedView,
+    primitives::*, Emit, EmitUninit, Header, HeaderParse, NetworkRepr,
+    ParseChoice, ParseError, RepeatedView,
 };
 use ip::{
-    IpProtocol, IpV6Ext6564Ref, IpV6ExtFragmentRef, LowRentV6EhRepr,
-    ValidLowRentV6Eh,
+    IpProtocol, IpV6Ext6564, IpV6Ext6564Ref, IpV6ExtFragmentRef,
+    LowRentV6EhRepr, ValidLowRentV6Eh,
 };
 use macaddr::MacAddr6;
 
@@ -607,8 +607,8 @@ fn v6_extension_headers() {
 #[test]
 fn loopy() {
     let bytes = [0u8; 24];
-    let b = ValidUdp::<&[u8]>::parse_choice(&bytes[..], Some(())).unwrap();
-    let a =
+    let _ = ValidUdp::<&[u8]>::parse_choice(&bytes[..], Some(())).unwrap();
+    let _ =
         RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..], Some(())).unwrap();
     assert!(matches!(
         RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..20], Some(())),
@@ -684,11 +684,52 @@ fn to_owned() {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ];
 
-    let (v6, hint, _) = ValidIpv6::parse(&bytes[..]).unwrap();
+    let (v6, ..) = ValidIpv6::parse(&bytes[..]).unwrap();
     let owned_v6 = Ipv6::try_from(&v6).unwrap();
 
     // let a = &owned_v6.v6ext[0];
     assert!(matches!(&owned_v6.v6ext[0], LowRentV6EhRepr::IpV6Ext6564(_)));
     assert!(matches!(&owned_v6.v6ext[1], LowRentV6EhRepr::IpV6ExtFragment(_)));
     assert!(matches!(&owned_v6.v6ext[2], LowRentV6EhRepr::IpV6Ext6564(_)));
+}
+
+#[test]
+fn roundtrip() {
+    let udp =
+        Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff };
+
+    let as_bytes = EmitUninit::emit_vec(&udp);
+    let (p_udp, ..) = ValidUdp::parse(&as_bytes[..]).unwrap();
+    assert_eq!(udp, (&p_udp).into());
+
+    let as_bytes = Emit::emit_vec(&udp);
+    let (p_udp, ..) = ValidUdp::parse(&as_bytes[..]).unwrap();
+    assert_eq!(udp, (&p_udp).into());
+
+    let v6 = Ipv6 {
+        version: 6,
+        dscp: 0,
+        ecn: Ecn::Capable1,
+        flow_label: 123456,
+        payload_len: 77,
+        next_header: IpProtocol::IPV6_HOP_BY_HOP,
+        hop_limit: 128,
+        source: Ipv6Addr::LOCALHOST,
+        destination: Ipv6Addr::UNSPECIFIED,
+        v6ext: vec![IpV6Ext6564 {
+            next_header: IpProtocol::IPV6_NO_NH,
+            ext_len: 0,
+            data: vec![0u8; 6],
+        }
+        .into()]
+        .into(),
+    };
+
+    let as_bytes = EmitUninit::emit_vec(&v6);
+    let (p_v6, ..) = ValidIpv6::parse(&as_bytes[..]).unwrap();
+    assert_eq!(v6, (&p_v6).try_into().unwrap());
+
+    let as_bytes = Emit::emit_vec(&v6);
+    let (p_v6, ..) = ValidIpv6::parse(&as_bytes[..]).unwrap();
+    assert_eq!(v6, (&p_v6).try_into().unwrap());
 }

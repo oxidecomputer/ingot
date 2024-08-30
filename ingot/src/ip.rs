@@ -157,7 +157,7 @@ impl NetworkRepr<u3> for Ipv4Flags {
 }
 
 // #[derive(Clone, Debug, Eq, PartialEq, Hash, Ingot)]
-#[derive(Clone, Ingot)]
+#[derive(Debug, Clone, Ingot, Eq, PartialEq)]
 pub struct Ipv6 {
     // #[ingot(valid = 6)]
     pub version: u4,
@@ -190,7 +190,7 @@ pub enum LowRentV6Eh {
 
 // 0x2c
 // #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
-#[derive(Clone, Ingot)]
+#[derive(Debug, Clone, Ingot, Eq, PartialEq)]
 pub struct IpV6ExtFragment {
     #[ingot(is = "u8", next_layer)]
     pub next_header: IpProtocol, // should be a type.
@@ -202,7 +202,7 @@ pub struct IpV6ExtFragment {
 }
 
 // 0x00, 0x2b, 0x3c, custom(0xfe)
-#[derive(Clone, Ingot)]
+#[derive(Debug, Clone, Ingot, Eq, PartialEq)]
 pub struct IpV6Ext6564 {
     #[ingot(is = "u8", next_layer)]
     pub next_header: IpProtocol, // should be a type.
