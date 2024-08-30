@@ -294,12 +294,14 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         }
 
         impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #ident<V> {
+            #[inline]
             fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
                 match self {
                     #( Self::#idents(v) => v.emit(buf) ),*
                 }
             }
 
+            #[inline]
             fn needs_emit(&self) -> bool {
                 match self {
                     #( Self::#idents(v) => v.needs_emit() ),*
@@ -308,12 +310,14 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         }
 
         impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #validated_ident<V> {
+            #[inline]
             fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
                 match self {
                     #( Self::#idents(v) => v.emit(buf) ),*
                 }
             }
 
+            #[inline]
             fn needs_emit(&self) -> bool {
                 match self {
                     #( Self::#idents(v) => v.needs_emit() ),*
@@ -322,12 +326,14 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         }
 
         impl ::ingot::types::Emit for #repr_head {
+            #[inline]
             fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
                 match self {
                     #( Self::#idents(v) => v.emit(buf) ),*
                 }
             }
 
+            #[inline]
             fn needs_emit(&self) -> bool {
                 match self {
                     #( Self::#idents(v) => v.needs_emit() ),*
@@ -356,6 +362,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         impl<V: ::ingot::types::SplitByteSlice> ::core::convert::TryFrom<&#validated_ident<V>> for #repr_head {
             type Error = ::ingot::types::ParseError;
 
+            #[inline]
             fn try_from(value: & #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
                 match value {
                     #( #from_ref_arms ),*
