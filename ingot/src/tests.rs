@@ -733,3 +733,35 @@ fn roundtrip() {
     let (p_v6, ..) = ValidIpv6::parse(&as_bytes[..]).unwrap();
     assert_eq!(v6, (&p_v6).try_into().unwrap());
 }
+
+#[test]
+fn ez_emit() {
+    let makeshift_stack = (
+        Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff },
+        Geneve {
+            version: 0,
+            opt_len: 0,
+            flags: GeneveFlags::CRITICAL_OPTS,
+            protocol_type: Ethertype::ETHERNET,
+            vni: 7777,
+            reserved: 0,
+            options: vec![].into(),
+        },
+    );
+
+    let out = makeshift_stack.emit_vec();
+
+    let (udp, ..) = ValidUdp::parse(&out[..8]).unwrap();
+    assert_eq!(udp.source(), 1234);
+    assert_eq!(udp.destination(), 5678);
+    assert_eq!(udp.length(), 77);
+    assert_eq!(udp.checksum(), 0xffff);
+
+    let (geneve, ..) = ValidGeneve::parse(&out[8..]).unwrap();
+    assert_eq!(geneve.version(), 0);
+    assert_eq!(geneve.opt_len(), 0);
+    assert_eq!(geneve.flags(), GeneveFlags::CRITICAL_OPTS);
+    assert_eq!(geneve.protocol_type(), Ethertype::ETHERNET);
+    assert_eq!(geneve.vni(), 7777);
+    assert_eq!(geneve.reserved(), 0);
+}

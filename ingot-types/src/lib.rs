@@ -24,6 +24,8 @@ extern crate alloc;
 
 pub mod primitives;
 
+ingot_macros::define_tuple_trait_impls!();
+
 pub trait ToOwnedPacket: NextLayer {
     type Target;
 
