@@ -1585,7 +1585,7 @@ impl StructParseDeriveCtx {
 
                     owned_emit_blocks.push(quote! {
                         let (g, rest) = #zc_ty_name::mut_from_prefix(rest)
-                            .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+                            .expect(&::alloc::format!("provided buf had insufficient bytes"));
                         #( #per_field_sets )*
                     });
 
@@ -1600,11 +1600,11 @@ impl StructParseDeriveCtx {
                     // delegate to emit.
                     owned_emit_blocks.push(quote! {
                         let (fill, rest) = rest.split_at_mut(self.#id.packet_length());
-                        self.#id.emit(fill)?;
+                        self.#id.emit_raw(fill);
                     });
                     valid_emit_blocks.push(quote! {
                         let (fill, rest) = rest.split_at_mut(self.#idx.packet_length());
-                        self.#idx.emit(fill)?;
+                        self.#idx.emit_raw(fill);
                     });
                     emit_check_clauses.push(quote! {
                         self.#idx.needs_emit()
@@ -1614,11 +1614,11 @@ impl StructParseDeriveCtx {
                     // delegate to emit.
                     owned_emit_blocks.push(quote! {
                         let (fill, rest) = rest.split_at_mut(self.#id.packet_length());
-                        self.#id.emit(fill)?;
+                        self.#id.emit_raw(fill);
                     });
                     valid_emit_blocks.push(quote! {
                         let (fill, rest) = rest.split_at_mut(self.#idx.packet_length());
-                        self.#idx.emit(fill)?;
+                        self.#idx.emit_raw(fill);
                     });
                     emit_check_clauses.push(quote! {
                         self.#idx.needs_emit()
@@ -1629,20 +1629,16 @@ impl StructParseDeriveCtx {
 
         quote! {
             impl ::ingot::types::Emit for #self_ty {
-                fn emit<V: ::ingot::types::ByteSliceMut>(&self, mut buf: V) -> ::ingot::types::ParseResult<usize> {
+                fn emit_raw<V: ::ingot::types::ByteSliceMut>(&self, mut buf: V) -> usize {
                     use ::ingot::types::Header;
                     use ::zerocopy::FromBytes;
 
                     let written = self.packet_length();
                     let rest = &mut buf[..];
 
-                    if rest.len() < written {
-                        return Err(ingot_types::ParseError::TooSmall);
-                    }
-
                     #( #owned_emit_blocks )*
 
-                    Ok(written)
+                    written
                 }
 
                 #[inline]
@@ -1652,19 +1648,15 @@ impl StructParseDeriveCtx {
             }
 
             impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #validated_ident<V> {
-                fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+                fn emit_raw<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> usize {
                     use ::ingot::types::Header;
 
                     let written = self.packet_length();
                     let rest = &mut buf[..];
 
-                    if rest.len() < written {
-                        return Err(ingot_types::ParseError::TooSmall);
-                    }
-
                     #( #valid_emit_blocks )*
 
-                    Ok(written)
+                    written
                 }
 
                 #[inline]

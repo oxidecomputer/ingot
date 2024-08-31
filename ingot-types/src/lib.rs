@@ -412,8 +412,17 @@ impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
 }
 
 pub trait Emit: Header {
-    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize>;
+    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize;
     fn needs_emit(&self) -> bool;
+
+    #[inline]
+    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize> {
+        if buf.len() < self.packet_length() {
+            return Err(ParseError::TooSmall);
+        }
+
+        Ok(self.emit_raw(buf))
+    }
 
     #[inline]
     fn emit_prefix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
@@ -422,8 +431,7 @@ pub trait Emit: Header {
         }
 
         let (into, out) = buf.split_at(self.packet_length());
-        self.emit(into)?;
-
+        self.emit_raw(into);
         Ok(out)
     }
 
@@ -436,13 +444,14 @@ pub trait Emit: Header {
         }
 
         let (out, into) = buf.split_at(l - self.packet_length());
-        self.emit(into)?;
+        self.emit_raw(into);
 
         Ok(out)
     }
 
+    /// Prefer [`Self::emit_vec`] when it is available.
     #[inline]
-    fn emit_vec(&self) -> Vec<u8> {
+    fn to_vec(&self) -> Vec<u8> {
         let len = self.packet_length();
 
         let mut out = vec![0u8; len];
@@ -455,90 +464,12 @@ pub trait Emit: Header {
 
         out
     }
-}
-
-impl<O: Emit, B: Emit> Emit for Packet<O, B> {
-    #[inline]
-    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize> {
-        match self {
-            Packet::Repr(o) => o.emit(buf),
-            Packet::Raw(b) => b.emit(buf),
-        }
-    }
 
     #[inline]
-    fn needs_emit(&self) -> bool {
-        match self {
-            Packet::Repr(_) => true,
-            Packet::Raw(b) => b.needs_emit(),
-        }
-    }
-}
-
-impl<T: Emit> Emit for Vec<T> {
-    #[inline]
-    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
-        let mut emitted = 0;
-
-        for el in self {
-            emitted += el.emit(&mut buf[emitted..])?;
-        }
-
-        Ok(emitted)
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        true
-    }
-}
-
-impl Emit for Vec<u8> {
-    #[inline]
-    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
-        if buf.len() < self.len() {
-            return Err(ParseError::TooSmall);
-        }
-
-        buf.copy_from_slice(self);
-
-        Ok(self.len())
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        true
-    }
-}
-
-impl<B: ByteSlice> Emit for RawBytes<B> {
-    #[inline]
-    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
-        if buf.len() < self.len() {
-            return Err(ParseError::TooSmall);
-        }
-
-        buf.copy_from_slice(self);
-
-        Ok(self.len())
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        false
-    }
-}
-
-/// TODO: explain this one.
-///
-/// # Safety
-/// Implementors will be given an uninitialised slice of bytes, and must
-/// not meaningfully read from its contents.
-pub unsafe trait EmitDoesNotRelyOnBufContents {}
-
-pub trait EmitUninit: Emit + EmitDoesNotRelyOnBufContents {
-    #[inline]
-    fn emit_uninit(&self, buf: &mut [MaybeUninit<u8>]) -> ParseResult<usize> {
+    fn emit_uninit(&self, buf: &mut [MaybeUninit<u8>]) -> ParseResult<usize>
+    where
+        Self: EmitDoesNotRelyOnBufContents,
+    {
         // SAFETY: `u8` does not have any validity constraints or Drop.
         // Accordingly, assuming their initialisation will not trigger
         // any adverse dropck behaviour, and any value is trivially a valid u8.
@@ -557,7 +488,10 @@ pub trait EmitUninit: Emit + EmitDoesNotRelyOnBufContents {
     // TODO: prefix and suffix?
 
     #[inline]
-    fn emit_vec(&self) -> Vec<u8> {
+    fn emit_vec(&self) -> Vec<u8>
+    where
+        Self: EmitDoesNotRelyOnBufContents,
+    {
         let len = self.packet_length();
 
         let mut out = Vec::with_capacity(len);
@@ -574,7 +508,77 @@ pub trait EmitUninit: Emit + EmitDoesNotRelyOnBufContents {
     }
 }
 
-impl<V: Emit + EmitDoesNotRelyOnBufContents> EmitUninit for V {}
+impl<O: Emit, B: Emit> Emit for Packet<O, B> {
+    #[inline]
+    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
+        match self {
+            Packet::Repr(o) => o.emit_raw(buf),
+            Packet::Raw(b) => b.emit_raw(buf),
+        }
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        match self {
+            Packet::Repr(_) => true,
+            Packet::Raw(b) => b.needs_emit(),
+        }
+    }
+}
+
+impl<T: Emit> Emit for Vec<T> {
+    #[inline]
+    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
+        let mut emitted = 0;
+
+        for el in self {
+            emitted += el.emit_raw(&mut buf[emitted..]);
+        }
+
+        emitted
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        true
+    }
+}
+
+impl Emit for Vec<u8> {
+    #[inline]
+    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
+        buf.copy_from_slice(self);
+
+        self.len()
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        true
+    }
+}
+
+impl<B: ByteSlice> Emit for RawBytes<B> {
+    #[inline]
+    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
+        buf.copy_from_slice(self);
+
+        self.len()
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        false
+    }
+}
+
+/// TODO: explain this one.
+///
+/// # Safety
+/// Implementors will be given an uninitialised slice of bytes, and must
+/// not meaningfully read from its contents. They are obligated to have
+/// written all bytes which they promise...
+pub unsafe trait EmitDoesNotRelyOnBufContents {}
 
 unsafe impl<O: EmitDoesNotRelyOnBufContents, B: EmitDoesNotRelyOnBufContents>
     EmitDoesNotRelyOnBufContents for Packet<O, B>
@@ -860,8 +864,8 @@ impl<T: Header> Header for Repeated<T> {
 
 impl<T: Emit> Emit for Repeated<T> {
     #[inline]
-    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize> {
-        self.inner.emit(buf)
+    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
+        self.inner.emit_raw(buf)
     }
 
     #[inline]
@@ -900,14 +904,10 @@ impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Emit
     for RepeatedView<B, T>
 {
     #[inline]
-    fn emit<V: ByteSliceMut>(&self, mut buf: V) -> ParseResult<usize> {
-        if buf.len() < self.inner.len() {
-            return Err(ParseError::TooSmall);
-        }
-
+    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
         buf.copy_from_slice(&self.inner);
 
-        Ok(self.inner.len())
+        self.inner.len()
     }
 
     #[inline]

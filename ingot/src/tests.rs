@@ -14,8 +14,8 @@ use ethernet::Ethertype;
 use example_chain::{OpteIn, UltimateChain, L3};
 use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
-    primitives::*, Emit, EmitUninit, Header, HeaderParse, NetworkRepr,
-    ParseChoice, ParseError, RepeatedView,
+    primitives::*, Emit, Header, HeaderParse, NetworkRepr, ParseChoice,
+    ParseError, RepeatedView,
 };
 use ip::{
     IpProtocol, IpV6Ext6564, IpV6Ext6564Ref, IpV6ExtFragmentRef,
@@ -698,11 +698,11 @@ fn roundtrip() {
     let udp =
         Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff };
 
-    let as_bytes = EmitUninit::emit_vec(&udp);
+    let as_bytes = udp.to_vec();
     let (p_udp, ..) = ValidUdp::parse(&as_bytes[..]).unwrap();
     assert_eq!(udp, (&p_udp).into());
 
-    let as_bytes = Emit::emit_vec(&udp);
+    let as_bytes = udp.emit_vec();
     let (p_udp, ..) = ValidUdp::parse(&as_bytes[..]).unwrap();
     assert_eq!(udp, (&p_udp).into());
 
@@ -725,11 +725,11 @@ fn roundtrip() {
         .into(),
     };
 
-    let as_bytes = EmitUninit::emit_vec(&v6);
+    let as_bytes = v6.to_vec();
     let (p_v6, ..) = ValidIpv6::parse(&as_bytes[..]).unwrap();
     assert_eq!(v6, (&p_v6).try_into().unwrap());
 
-    let as_bytes = Emit::emit_vec(&v6);
+    let as_bytes = v6.emit_vec();
     let (p_v6, ..) = ValidIpv6::parse(&as_bytes[..]).unwrap();
     assert_eq!(v6, (&p_v6).try_into().unwrap());
 }

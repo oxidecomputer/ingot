@@ -295,9 +295,9 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
         impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #ident<V> {
             #[inline]
-            fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+            fn emit_raw<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> usize {
                 match self {
-                    #( Self::#idents(v) => v.emit(buf) ),*
+                    #( Self::#idents(v) => v.emit_raw(buf) ),*
                 }
             }
 
@@ -311,9 +311,9 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
         impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #validated_ident<V> {
             #[inline]
-            fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+            fn emit_raw<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> usize {
                 match self {
-                    #( Self::#idents(v) => v.emit(buf) ),*
+                    #( Self::#idents(v) => v.emit_raw(buf) ),*
                 }
             }
 
@@ -327,9 +327,9 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
         impl ::ingot::types::Emit for #repr_head {
             #[inline]
-            fn emit<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> ::ingot::types::ParseResult<usize> {
+            fn emit_raw<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> usize {
                 match self {
-                    #( Self::#idents(v) => v.emit(buf) ),*
+                    #( Self::#idents(v) => v.emit_raw(buf) ),*
                 }
             }
 
