@@ -1,5 +1,5 @@
-use zerocopy::SplitByteSlice;
 use crate::{ParseError, ParseResult, Read};
+use zerocopy::SplitByteSlice;
 
 /// Convenience wrapper to use byte slices where a [`Read`] is expected.
 pub struct OneChunk<T>(Option<T>);
