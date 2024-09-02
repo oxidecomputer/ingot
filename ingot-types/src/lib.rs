@@ -23,6 +23,7 @@ pub use zerocopy::{
 extern crate alloc;
 
 pub mod primitives;
+pub mod util;
 
 ingot_macros::define_tuple_trait_impls!();
 
