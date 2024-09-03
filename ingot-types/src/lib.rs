@@ -257,6 +257,15 @@ impl<T: Header> Header for Vec<T> {
     }
 }
 
+impl<T: Header> Header for Option<T> {
+    const MINIMUM_LENGTH: usize = 0;
+
+    #[inline]
+    fn packet_length(&self) -> usize {
+        self.as_ref().map(|v| v.packet_length()).unwrap_or_default()
+    }
+}
+
 impl Header for Vec<u8> {
     const MINIMUM_LENGTH: usize = 0;
 
