@@ -29,6 +29,7 @@ impl IpProtocol {
     pub const IPV6_MOBILITY: Self = Self(135);
     pub const IPV6_HIP: Self = Self(139);
     pub const IPV6_SHIM6: Self = Self(140);
+    pub const LAST_UNASSIGNED: Self = Self(252);
     pub const IPV6_EXPERIMENT0: Self = Self(253);
     pub const IPV6_EXPERIMENT1: Self = Self(254);
 
@@ -49,6 +50,12 @@ impl IpProtocol {
     }
 }
 
+impl Default for IpProtocol {
+    fn default() -> Self {
+        Self::LAST_UNASSIGNED
+    }
+}
+
 impl NetworkRepr<u8> for IpProtocol {
     #[inline]
     fn to_network(self) -> u8 {
@@ -62,10 +69,11 @@ impl NetworkRepr<u8> for IpProtocol {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+#[ingot(impl_default)]
 pub struct Ipv4 {
-    // #[ingot(valid = "version = 4")]
+    #[ingot(default = 4)]
     pub version: u4,
-    // #[ingot(valid = "ihl >= 5")]
+    #[ingot(default = 5)]
     pub ihl: u4,
     pub dscp: u6,
     #[ingot(is = "u2")]
@@ -78,15 +86,15 @@ pub struct Ipv4 {
     pub flags: Ipv4Flags,
     pub fragment_offset: u13be,
 
-    // #[ingot(default = 128)]
+    #[ingot(default = 128)]
     pub hop_limit: u8,
     #[ingot(is = "u8", next_layer)]
-    pub protocol: IpProtocol, // should be a type.
+    pub protocol: IpProtocol,
     pub checksum: u16be,
 
-    #[ingot(is = "[u8; 4]")]
+    #[ingot(is = "[u8; 4]", default = Ipv4Addr::UNSPECIFIED)]
     pub source: Ipv4Addr,
-    #[ingot(is = "[u8; 4]")]
+    #[ingot(is = "[u8; 4]", default = Ipv4Addr::UNSPECIFIED)]
     pub destination: Ipv4Addr,
 
     #[ingot(var_len = "(ihl * 4).saturating_sub(20)")]
@@ -158,8 +166,9 @@ impl NetworkRepr<u3> for Ipv4Flags {
 
 // #[derive(Clone, Debug, Eq, PartialEq, Hash, Ingot)]
 #[derive(Debug, Clone, Ingot, Eq, PartialEq)]
+#[ingot(impl_default)]
 pub struct Ipv6 {
-    // #[ingot(valid = 6)]
+    #[ingot(default = "6")]
     pub version: u4,
     pub dscp: u6,
     #[ingot(is = "u2")]
@@ -173,9 +182,9 @@ pub struct Ipv6 {
     // #[ingot(default = 128)]
     pub hop_limit: u8,
 
-    #[ingot(is = "[u8; 16]")]
+    #[ingot(is = "[u8; 16]", default = Ipv6Addr::UNSPECIFIED)]
     pub source: Ipv6Addr,
-    #[ingot(is = "[u8; 16]")]
+    #[ingot(is = "[u8; 16]", default = Ipv6Addr::UNSPECIFIED)]
     pub destination: Ipv6Addr,
 
     #[ingot(subparse(on_next_layer))]

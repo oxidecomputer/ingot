@@ -3,6 +3,7 @@ use ingot_macros::Ingot;
 use ingot_types::{primitives::*, NetworkRepr, Vec};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+#[ingot(impl_default)]
 pub struct Tcp {
     pub source: u16be,
     pub destination: u16be,
@@ -10,9 +11,8 @@ pub struct Tcp {
     pub sequence: u32be,
     pub acknowledgement: u32be,
 
-    // #[ingot(valid = "data_offset >= 5")]
+    #[ingot(default = 5)]
     pub data_offset: u4,
-    // #[ingot(valid = 0)]
     pub reserved: u4,
     #[ingot(is = "u8")]
     pub flags: TcpFlags,
@@ -20,14 +20,13 @@ pub struct Tcp {
 
     pub checksum: u16be,
     pub urgent_ptr: u16be,
-    // #[ingot(extension)]
-    // pub tcp_opts: ???
+
     #[ingot(var_len = "(data_offset * 4).saturating_sub(20)")]
     pub options: Vec<u8>,
 }
 
 bitflags! {
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Default)]
 pub struct TcpFlags: u8 {
     const FIN = 0b0000_0001;
     const SYN = 0b0000_0010;

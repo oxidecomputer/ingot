@@ -739,13 +739,10 @@ fn ez_emit() {
     let makeshift_stack = (
         Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff },
         Geneve {
-            version: 0,
-            opt_len: 0,
             flags: GeneveFlags::CRITICAL_OPTS,
             protocol_type: Ethertype::ETHERNET,
             vni: 7777,
-            reserved: 0,
-            options: vec![].into(),
+            ..Default::default()
         },
     );
 

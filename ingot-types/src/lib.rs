@@ -835,9 +835,16 @@ impl<T, U> TryFrom<HeaderStack<(Option<T>, U)>> for HeaderStack<(T, U)> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Repeated<T> {
     inner: Vec<T>,
+}
+
+// Thanks to rustc's excellent Debug generic detection...
+impl<T> Default for Repeated<T> {
+    fn default() -> Self {
+        Self { inner: Default::default() }
+    }
 }
 
 impl<T> Repeated<T> {

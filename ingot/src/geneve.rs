@@ -5,8 +5,9 @@ use ingot_macros::Ingot;
 use ingot_types::{primitives::*, NetworkRepr};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+#[ingot(impl_default)]
 pub struct Geneve {
-    // #[ingot(valid = 0)]
+    #[ingot(default = 0)]
     pub version: u2,
     pub opt_len: u6,
     #[ingot(is = "u8")]
@@ -15,7 +16,6 @@ pub struct Geneve {
     pub protocol_type: Ethertype,
 
     pub vni: u24be,
-    // #[ingot(valid = 0)]
     pub reserved: u8,
     #[ingot(var_len = "(opt_len as usize) * 4")]
     pub options: Vec<u8>,

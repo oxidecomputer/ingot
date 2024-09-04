@@ -2,7 +2,7 @@ use ingot_macros::Ingot;
 use ingot_types::{primitives::*, NetworkRepr};
 use macaddr::MacAddr6;
 
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd, Default)]
 pub struct Ethertype(pub u16);
 
 impl Ethertype {
@@ -40,6 +40,7 @@ impl NetworkRepr<zerocopy::big_endian::U16> for Ethertype {
 }
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+#[ingot(impl_default)]
 pub struct Ethernet {
     #[ingot(is = "[u8; 6]")]
     pub destination: MacAddr6,
@@ -50,6 +51,7 @@ pub struct Ethernet {
 }
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+#[ingot(impl_default)]
 pub struct VlanBody {
     pub priority: u3,
     pub dei: u1,

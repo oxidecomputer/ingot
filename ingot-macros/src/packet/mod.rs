@@ -33,6 +33,9 @@ pub struct IngotArgs {
     ident: Ident,
     generics: Generics,
     data: ast::Data<(), FieldArgs>,
+
+    #[darling(default)]
+    impl_default: bool,
 }
 
 #[derive(Clone, FromMeta, Default, Debug)]
@@ -51,6 +54,8 @@ pub struct FieldArgs {
     var_len: Option<Expr>,
     #[darling(default)]
     subparse: Option<SubparseSpec>,
+    #[darling(default)]
+    default: Option<Expr>,
 
     ident: Option<syn::Ident>,
     ty: Type,
@@ -68,6 +73,8 @@ struct ValidField {
     /// The subelement within a `Valid` block this field
     /// is stored within. This field may *be* that subelement.
     sub_field_idx: usize,
+    /// Whether this field has a custom default specified.
+    custom_default: Option<Expr>,
 
     // per-el state.
     state: FieldState,
@@ -365,11 +372,13 @@ struct StructParseDeriveCtx {
     chunk_layout: Vec<ChunkState>,
 
     nominated_next_header: Option<Ident>,
+
+    impl_default: bool,
 }
 
 impl StructParseDeriveCtx {
     pub fn new(input: IngotArgs) -> Result<Self, syn::Error> {
-        let IngotArgs { ident, data, generics } = input;
+        let IngotArgs { ident, data, generics, impl_default } = input;
         let field_data = data.take_struct().unwrap();
         let mut validated = HashMap::new();
         let validated_order: RefCell<Vec<Shared<ValidField>>> = vec![].into();
@@ -505,6 +514,7 @@ impl StructParseDeriveCtx {
                 user_ty,
                 sub_field_idx: *sub_field_idx.borrow(),
                 state,
+                custom_default: field.default.clone(),
             };
 
             let shared_field = Rc::new(RefCell::new(valid_field));
@@ -590,6 +600,7 @@ impl StructParseDeriveCtx {
             validated_order,
             chunk_layout,
             nominated_next_header,
+            impl_default,
         })
     }
 
@@ -1692,6 +1703,56 @@ impl StructParseDeriveCtx {
             unsafe impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::EmitDoesNotRelyOnBufContents for #validated_ident<V> {}
         }
     }
+
+    fn gen_default_impl(&self) -> TokenStream {
+        let ident = &self.ident;
+
+        let defaulted_idents: Vec<_> = self
+            .validated_order
+            .iter()
+            .flat_map(|v| {
+                let v = v.borrow();
+                v.custom_default.is_none().then_some(v.ident.clone())
+            })
+            .collect();
+
+        let defaulted_tys: HashSet<_> = self
+            .validated_order
+            .iter()
+            .flat_map(|v| {
+                let v = v.borrow();
+                v.custom_default.is_none().then_some(v.user_ty.clone())
+            })
+            .collect();
+
+        let custom_defaults = self
+            .validated_order
+            .iter()
+            .flat_map(|v| {
+                let v = v.borrow();
+                v.custom_default.as_ref().map(|e| (v.ident.clone(), e.clone()))
+            })
+            .map(|(id, exp)| quote! {let #id = #exp;});
+
+        let where_clauses = defaulted_tys
+            .iter()
+            .map(|ty| quote! {#ty: ::core::default::Default});
+        let idents = self.validated.keys();
+
+        quote! {
+            impl ::core::default::Default for #ident
+            where #( #where_clauses ),*
+            {
+                fn default() -> Self {
+                    #( let #defaulted_idents = ::core::default::Default::default(); )*
+                    #( #custom_defaults )*
+                    Self {
+                        #( #idents ),*
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl ToTokens for StructParseDeriveCtx {
@@ -1709,6 +1770,7 @@ impl ToTokens for StructParseDeriveCtx {
         let zc_mod = self.gen_zc_module();
         let next_layer = self.gen_next_header_lookup();
         let owned_from = self.gen_owned_from();
+        let default_impl = self.impl_default.then_some(self.gen_default_impl());
 
         let self_ty = if self.my_explicit_generic().is_some() {
             quote! {#ident<V>}
@@ -1756,6 +1818,8 @@ impl ToTokens for StructParseDeriveCtx {
             #owned_from
 
             #next_layer
+
+            #default_impl
         });
     }
 }
