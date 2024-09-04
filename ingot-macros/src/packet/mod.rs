@@ -1558,17 +1558,31 @@ impl StructParseDeriveCtx {
             let idx = Index::from(i);
             match region {
                 ChunkState::FixedWidth { fields, .. } => {
+                    // Preemptively zero-fill any bitfields with more than
+                    // one element. This is more pessimistic than needed, but
+                    // miri requires that all byte indices which we &= or |=
+                    // have a full write before reads. We could avoid this
+                    // on the block copy portion in left-aligned LE fields or
+                    // right-aligned BE fields (but do not, yet).
+                    let mut bitfield_ct: HashMap<_, usize> = HashMap::new();
+
                     let per_field_sets = fields.iter().map(|id| self.validated.get_key_value(id).unwrap())
                         .map(|(id, field)| {
                             let field = field.borrow();
 
                             match &field.state {
-                                FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
+                                FieldState::FixedWidth { bitfield_info: Some(info), .. } => {
+                                    let info = info.parent_field.borrow();
+                                    let ct = bitfield_ct.entry(info.ident.clone())
+                                        .or_default();
+                                    *ct += 1;
+
                                     let setter = field.setter_name();
                                     quote! {g.#setter(self.#id);}
                                 },
                                 FieldState::FixedWidth { underlying_ty, .. } => {
                                     let do_into = &field.user_ty == underlying_ty;
+
                                     if do_into {
                                         quote! {
                                             g.#id = self.#id.into();
@@ -1581,11 +1595,20 @@ impl StructParseDeriveCtx {
                                 },
                                 _ => unreachable!(),
                             }
-                        });
+                        }).collect::<Vec<_>>();
+
+                    let zerofills = bitfield_ct.iter().filter_map(|(k, v)| {
+                        (*v > 1).then(|| {
+                            quote! {
+                                g.#k = Default::default();
+                            }
+                        })
+                    });
 
                     owned_emit_blocks.push(quote! {
                         let (g, rest) = #zc_ty_name::mut_from_prefix(rest)
                             .expect(&::alloc::format!("provided buf had insufficient bytes"));
+                        #( #zerofills )*
                         #( #per_field_sets )*
                     });
 
