@@ -556,6 +556,29 @@ impl<T: Emit> Emit for Vec<T> {
     }
 }
 
+impl Header for &[u8] {
+    const MINIMUM_LENGTH: usize = 0;
+
+    #[inline]
+    fn packet_length(&self) -> usize {
+        self.len()
+    }
+}
+
+impl Emit for &[u8] {
+    #[inline]
+    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
+        buf.copy_from_slice(self);
+
+        self.len()
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        false
+    }
+}
+
 impl Emit for Vec<u8> {
     #[inline]
     fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
@@ -596,6 +619,7 @@ unsafe impl<O: EmitDoesNotRelyOnBufContents, B: EmitDoesNotRelyOnBufContents>
     EmitDoesNotRelyOnBufContents for Packet<O, B>
 {
 }
+unsafe impl EmitDoesNotRelyOnBufContents for &[u8] {}
 unsafe impl EmitDoesNotRelyOnBufContents for Vec<u8> {}
 unsafe impl<B: ByteSlice> EmitDoesNotRelyOnBufContents for RawBytes<B> {}
 unsafe impl<T: EmitDoesNotRelyOnBufContents> EmitDoesNotRelyOnBufContents
