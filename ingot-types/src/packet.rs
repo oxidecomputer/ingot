@@ -30,6 +30,26 @@ pub enum IndirectPacket<O, B> {
     Raw(B),
 }
 
+#[cfg(feature = "alloc")]
+impl<O, B> From<DirectPacket<O, B>> for IndirectPacket<O, B> {
+    fn from(value: DirectPacket<O, B>) -> Self {
+        match value {
+            DirectPacket::Repr(o) => Self::Repr(o.into()),
+            DirectPacket::Raw(b) => Self::Raw(b),
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<O, B> From<IndirectPacket<O, B>> for DirectPacket<O, B> {
+    fn from(value: IndirectPacket<O, B>) -> Self {
+        match value {
+            IndirectPacket::Repr(o) => Self::Repr(*o),
+            IndirectPacket::Raw(b) => Self::Raw(b),
+        }
+    }
+}
+
 // Indirect impls.
 #[cfg(feature = "alloc")]
 impl<O, B> IndirectPacket<O, B> {
