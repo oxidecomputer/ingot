@@ -11,11 +11,11 @@ use crate::{
 };
 use alloc::{collections::LinkedList, vec::Vec};
 use ethernet::Ethertype;
-use example_chain::{OpteIn, UltimateChain, L3};
+use example_chain::{OpteIn, OpteOut, UltimateChain, L3};
 use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
     primitives::*, Emit, Header, HeaderParse, NetworkRepr, ParseChoice,
-    ParseError, RepeatedView,
+    ParseError, Parsed, RepeatedView,
 };
 use ip::{
     IpProtocol, IpV6Ext6564, IpV6Ext6564Ref, IpV6ExtFragmentRef,
@@ -418,6 +418,36 @@ fn test_opte_unconditionals() {
     let (opte_in, ..) = OpteIn::parse(&pkt[..]).unwrap();
     assert!(opte_in.inner_l3.is_none());
     assert!(opte_in.inner_ulp.is_none());
+}
+
+#[test]
+fn chunks_present_on_early_accept() {
+    #[rustfmt::skip]
+    let pkt = [
+        // ---OUTER ETH---
+        // dst
+        0xA8, 0x40, 0x25, 0x77, 0x77, 0x76,
+        // src
+        0xA8, 0x40, 0x25, 0x77, 0x77, 0x77,
+        // ethertype
+        0x08, 0x06,
+
+        // Some bytes we wish to preserve...
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    ];
+
+    let mut pkt_as_readable = LinkedList::new();
+    pkt_as_readable.push_back(pkt[..14].to_vec());
+    pkt_as_readable.push_back(pkt[14..].to_vec());
+
+    let (opte_out, a, b) = OpteOut::parse(&pkt[..]).unwrap();
+    assert_eq!(b.len(), 8);
+
+    let Parsed { stack, data, last_chunk } =
+        OpteOut::parse_read(pkt_as_readable.iter()).unwrap();
+    // panic!("{data:?}, {last_chunk:?}");
+    assert_eq!(last_chunk.packet_length(), 8);
+    assert_eq!(data.len(), 0);
 }
 
 #[test]

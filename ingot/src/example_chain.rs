@@ -71,7 +71,17 @@ fn exit_on_arp<V: ByteSlice>(eth: &ValidEthernet<V>) -> ParseControl {
 
 #[derive(Parse)]
 pub struct OpteOut<Q: ByteSlice> {
+    #[ingot(control = exit_on_arp2)]
     pub inner_eth: EthernetPacket<Q>,
     pub inner_l3: Option<L3<Q>>,
     pub inner_ulp: Option<Ulp<Q>>,
+}
+
+#[inline]
+fn exit_on_arp2<V: ByteSlice>(eth: &EthernetPacket<V>) -> ParseControl {
+    if eth.ethertype() == Ethertype::ARP {
+        ParseControl::Accept
+    } else {
+        ParseControl::Continue
+    }
 }
