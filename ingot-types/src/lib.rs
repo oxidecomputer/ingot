@@ -22,6 +22,7 @@ pub use zerocopy::{
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+pub mod packet;
 pub mod primitives;
 pub mod util;
 
@@ -33,43 +34,9 @@ pub trait ToOwnedPacket: NextLayer {
     fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target>;
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum Packet<O, B> {
-    /// Owned, in-memory representation of a ...
-    #[cfg(feature = "alloc")]
-    Repr(Box<O>),
-    /// Owned, in-memory representation of a ...
-    #[cfg(not(feature = "alloc"))]
-    Repr(O),
-    /// Packed representation of a ...
-    Raw(B),
-}
-
-impl<
-        D: Copy + Eq,
-        O: NextLayer<Denom = D> + Clone,
-        B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
-    > ToOwnedPacket for Packet<O, B>
-{
-    type Target = O;
-
-    fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target> {
-        match self {
-            Packet::Repr(o) => Ok(*o.clone()),
-            Packet::Raw(v) => v.to_owned(hint),
-        }
-    }
-}
+pub use packet::*;
 
 // TODO: genericise
-impl<'a, B: ByteSlice> From<&'a Packet<Vec<u8>, RawBytes<B>>> for Vec<u8> {
-    fn from(value: &Packet<Vec<u8>, RawBytes<B>>) -> Self {
-        match value {
-            Packet::Repr(v) => v.to_vec(),
-            Packet::Raw(v) => v.to_vec(),
-        }
-    }
-}
 
 pub enum FieldRef<'a, T: HasView<V>, V> {
     Repr(&'a T),
@@ -157,44 +124,6 @@ impl<'a, T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>>
 /// type `T` on buffer `B`.
 pub type PacketOf<T, B> = Packet<T, <T as HasView<B>>::ViewType>;
 
-impl<O, B> Packet<O, B> {
-    pub fn repr(&self) -> Option<&O> {
-        match self {
-            Packet::Repr(o) => Some(o),
-            _ => None,
-        }
-    }
-
-    pub fn repr_mut(&mut self) -> Option<&mut O> {
-        match self {
-            Packet::Repr(o) => Some(o),
-            _ => None,
-        }
-    }
-
-    pub fn raw(&self) -> Option<&B> {
-        match self {
-            Packet::Raw(b) => Some(b),
-            _ => None,
-        }
-    }
-
-    pub fn raw_mut(&mut self) -> Option<&mut B> {
-        match self {
-            Packet::Raw(b) => Some(b),
-            _ => None,
-        }
-    }
-}
-
-impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for Packet<O, B> {
-    type ViewType = B;
-}
-
-impl<O, B> HasRepr for Packet<O, B> {
-    type ReprType = O;
-}
-
 impl<T: HasView<B>, B> HasView<B> for Option<T> {
     type ViewType = T;
 }
@@ -229,23 +158,6 @@ pub trait Header {
     const MINIMUM_LENGTH: usize;
 
     fn packet_length(&self) -> usize;
-}
-
-impl<O, B> Header for Packet<O, B>
-where
-    O: Header,
-    B: Header,
-    // B: HasRepr<ReprType = O>,
-{
-    const MINIMUM_LENGTH: usize = O::MINIMUM_LENGTH;
-
-    #[inline]
-    fn packet_length(&self) -> usize {
-        match self {
-            Packet::Repr(o) => o.packet_length(),
-            Packet::Raw(b) => b.packet_length(),
-        }
-    }
 }
 
 impl<T: Header> Header for Vec<T> {
@@ -363,38 +275,6 @@ pub trait HasRepr {
 
 pub trait HeaderParse<B: SplitByteSlice>: NextLayer + Sized {
     fn parse(from: B) -> ParseResult<Success<Self, B>>;
-}
-
-// allows us to call e.g. Packet<A,ValidA>::parse if ValidA is also Parse
-// and its owned type has a matching next layer Denom.
-impl<
-        V: SplitByteSlice,
-        B: HeaderParse<V> + HasRepr + NextLayer + Into<Self>,
-    > HeaderParse<V> for Packet<B::ReprType, B>
-where
-    B: NextLayer,
-    B::ReprType: NextLayer<Denom = B::Denom>,
-{
-    #[inline]
-    fn parse(from: V) -> ParseResult<Success<Self, V>> {
-        <B as HeaderParse<V>>::parse(from)
-            .map(|(val, hint, remainder)| (val.into(), hint, remainder))
-    }
-}
-
-impl<O: NextLayer, B> NextLayer for Packet<O, B>
-where
-    B: NextLayer<Denom = O::Denom>,
-{
-    type Denom = O::Denom;
-
-    #[inline]
-    fn next_layer(&self) -> Option<Self::Denom> {
-        match self {
-            Packet::Repr(v) => v.next_layer(),
-            Packet::Raw(v) => v.next_layer(),
-        }
-    }
 }
 
 /// Takes contiguous byte slices from a packet.
@@ -520,24 +400,6 @@ pub trait Emit: Header {
     }
 }
 
-impl<O: Emit, B: Emit> Emit for Packet<O, B> {
-    #[inline]
-    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
-        match self {
-            Packet::Repr(o) => o.emit_raw(buf),
-            Packet::Raw(b) => b.emit_raw(buf),
-        }
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        match self {
-            Packet::Repr(_) => true,
-            Packet::Raw(b) => b.needs_emit(),
-        }
-    }
-}
-
 impl<T: Emit> Emit for Vec<T> {
     #[inline]
     fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
@@ -615,10 +477,6 @@ impl<B: ByteSlice> Emit for RawBytes<B> {
 /// written all bytes which they promise...
 pub unsafe trait EmitDoesNotRelyOnBufContents {}
 
-unsafe impl<O: EmitDoesNotRelyOnBufContents, B: EmitDoesNotRelyOnBufContents>
-    EmitDoesNotRelyOnBufContents for Packet<O, B>
-{
-}
 unsafe impl EmitDoesNotRelyOnBufContents for &[u8] {}
 unsafe impl EmitDoesNotRelyOnBufContents for Vec<u8> {}
 unsafe impl<B: ByteSlice> EmitDoesNotRelyOnBufContents for RawBytes<B> {}

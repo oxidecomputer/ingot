@@ -1197,8 +1197,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #get_name(&self) -> #user_ty {
                             match self {
-                                ::ingot::types::Packet::Repr(o) => o.#get_name(),
-                                ::ingot::types::Packet::Raw(b) => b.#get_name(),
+                                Self::Repr(o) => o.#get_name(),
+                                Self::Raw(b) => b.#get_name(),
                             }
                         }
                     });
@@ -1206,8 +1206,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #mut_name(&mut self, val: #user_ty) {
                             match self {
-                                ::ingot::types::Packet::Repr(o) => o.#mut_name(val),
-                                ::ingot::types::Packet::Raw(b) => b.#mut_name(val),
+                                Self::Repr(o) => o.#mut_name(val),
+                                Self::Raw(b) => b.#mut_name(val),
                             };
                         }
                     });
@@ -1222,8 +1222,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #ident(&self) -> #user_ty {
                             match self {
-                                ::ingot::types::Packet::Repr(o) => o.#ident(),
-                                ::ingot::types::Packet::Raw(b) => b.#ident(),
+                                Self::Repr(o) => o.#ident(),
+                                Self::Raw(b) => b.#ident(),
                             }
                         }
                     });
@@ -1231,8 +1231,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #mut_name(&mut self, val: #user_ty) {
                             match self {
-                                ::ingot::types::Packet::Repr(o) => o.#mut_name(val),
-                                ::ingot::types::Packet::Raw(b) => b.#mut_name(val),
+                                Self::Repr(o) => o.#mut_name(val),
+                                Self::Raw(b) => b.#mut_name(val),
                             };
                         }
                     });
@@ -1242,8 +1242,8 @@ impl StructParseDeriveCtx {
                             #[inline]
                             fn #field_ref(&self) -> &#user_ty {
                                 match self {
-                                    ::ingot::types::Packet::Repr(o) => o.#field_ref(),
-                                    ::ingot::types::Packet::Raw(b) => b.#field_ref(),
+                                    Self::Repr(o) => o.#field_ref(),
+                                    Self::Raw(b) => b.#field_ref(),
                                 }
                             }
                         });
@@ -1251,8 +1251,8 @@ impl StructParseDeriveCtx {
                             #[inline]
                             fn #field_mut(&mut self) -> &mut #user_ty {
                                 match self {
-                                    ::ingot::types::Packet::Repr(o) => o.#field_mut(),
-                                    ::ingot::types::Packet::Raw(b) => b.#field_mut(),
+                                    Self::Repr(o) => o.#field_mut(),
+                                    Self::Raw(b) => b.#field_mut(),
                                 }
                             }
                         });
@@ -1269,8 +1269,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, V> {
                             match self {
-                                ::ingot::types::Packet::Repr(o) => o.#field_ref(),
-                                ::ingot::types::Packet::Raw(b) => b.#field_ref(),
+                                Self::Repr(o) => o.#field_ref(),
+                                Self::Raw(b) => b.#field_ref(),
                             }
                         }
                     });
@@ -1278,8 +1278,8 @@ impl StructParseDeriveCtx {
                         #[inline]
                         fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, V> {
                             match self {
-                                ::ingot::types::Packet::Repr(o) => o.#field_mut(),
-                                ::ingot::types::Packet::Raw(b) => b.#field_mut(),
+                                Self::Repr(o) => o.#field_mut(),
+                                Self::Raw(b) => b.#field_mut(),
                             }
                         }
                     });
@@ -1291,22 +1291,24 @@ impl StructParseDeriveCtx {
             if trait_needs_generic {
                 // (quote!{impl<#a> #ref_def for #ident<#a>}, quote!{impl<#a> #mut_def for #ident<#a>})
                 (
-                    quote! {impl<O, B, V: ::ingot::types::ByteSlice> #ref_def<V> for ::ingot::types::Packet<O, B>},
-                    quote! {impl<O, B, V: ::ingot::types::ByteSlice> #mut_def<V> for ::ingot::types::Packet<O, B>},
+                    quote! {impl<O, B, V: ::ingot::types::ByteSlice> #ref_def<V>},
+                    quote! {impl<O, B, V: ::ingot::types::ByteSlice> #mut_def<V>},
                     quote! {#ref_def<V>},
                     quote! {#mut_def<V>},
                 )
             } else {
                 (
-                    quote! {impl<O, B> #ref_def for ::ingot::types::Packet<O, B>},
-                    quote! {impl<O, B> #mut_def for ::ingot::types::Packet<O, B>},
+                    quote! {impl<O, B> #ref_def},
+                    quote! {impl<O, B> #mut_def},
                     quote! {#ref_def},
                     quote! {#mut_def},
                 )
             };
 
+        let pkt_types = vec![quote! {}];
+
         quote! {
-            #direct_ref_head
+            #direct_ref_head for ::ingot::types::DirectPacket<O, B>
             where
                 O: #ref_part,
                 B: #ref_part,
@@ -1314,7 +1316,25 @@ impl StructParseDeriveCtx {
                 #( #packet_impls )*
             }
 
-            #direct_mut_head
+            #direct_mut_head for ::ingot::types::DirectPacket<O, B>
+            where
+                O: #mut_part,
+                B: #mut_part,
+            {
+                #( #packet_mut_impls )*
+            }
+
+            #[cfg(feature = "alloc")]
+            #direct_ref_head for ::ingot::types::IndirectPacket<O, B>
+            where
+                O: #ref_part,
+                B: #ref_part,
+            {
+                #( #packet_impls )*
+            }
+
+            #[cfg(feature = "alloc")]
+            #direct_mut_head for ::ingot::types::IndirectPacket<O, B>
             where
                 O: #mut_part,
                 B: #mut_part,
@@ -1800,18 +1820,35 @@ impl ToTokens for StructParseDeriveCtx {
                 type ReprType = #self_ty;
             }
 
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for #pkt_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for ::ingot::types::DirectPacket<#self_ty, #validated_ident<V>> {
                 #[inline]
                 fn from(value: #validated_ident<V>) -> Self {
-                    ::ingot::types::Packet::Raw(value)
+                    Self::Raw(value)
                 }
             }
 
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for #pkt_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for ::ingot::types::DirectPacket<#self_ty, #validated_ident<V>> {
                 #[inline]
                 fn from(value: #self_ty) -> Self {
                     // into used to paper over boxing / in-place.
-                    ::ingot::types::Packet::Repr(value.into())
+                    Self::Repr(value.into())
+                }
+            }
+
+            #[cfg(feature = "alloc")]
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
+                #[inline]
+                fn from(value: #validated_ident<V>) -> Self {
+                    Self::Raw(value)
+                }
+            }
+
+            #[cfg(feature = "alloc")]
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
+                #[inline]
+                fn from(value: #self_ty) -> Self {
+                    // into used to paper over boxing / in-place.
+                    Self::Repr(value.into())
                 }
             }
 

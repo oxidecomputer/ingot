@@ -2,7 +2,7 @@
 
 use crate::{
     ethernet::{EthernetPacket, EthernetRef, Ethertype, ValidEthernet},
-    geneve::GenevePacket,
+    geneve::{GenevePacket, ValidGeneve},
     icmp::{IcmpV4, IcmpV6, ValidIcmpV4, ValidIcmpV6},
     ip::{IpProtocol, Ipv4, Ipv6, Ipv6Packet, ValidIpv4, ValidIpv6},
     tcp::{Tcp, ValidTcp},
