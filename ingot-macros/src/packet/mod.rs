@@ -1324,7 +1324,7 @@ impl StructParseDeriveCtx {
                 #( #packet_mut_impls )*
             }
 
-            #[cfg(feature = "alloc")]
+            //#[cfg(feature = "alloc")]
             #direct_ref_head for ::ingot::types::IndirectPacket<O, B>
             where
                 O: #ref_part,
@@ -1333,7 +1333,7 @@ impl StructParseDeriveCtx {
                 #( #packet_impls )*
             }
 
-            #[cfg(feature = "alloc")]
+            //#[cfg(feature = "alloc")]
             #direct_mut_head for ::ingot::types::IndirectPacket<O, B>
             where
                 O: #mut_part,
@@ -1836,7 +1836,7 @@ impl ToTokens for StructParseDeriveCtx {
                 }
             }
 
-            #[cfg(feature = "alloc")]
+            //#[cfg(feature = "alloc")]
             impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
                 #[inline]
                 fn from(value: #validated_ident<V>) -> Self {
@@ -1844,7 +1844,7 @@ impl ToTokens for StructParseDeriveCtx {
                 }
             }
 
-            #[cfg(feature = "alloc")]
+            //#[cfg(feature = "alloc")]
             impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
                 #[inline]
                 fn from(value: #self_ty) -> Self {
