@@ -11,9 +11,11 @@ use core::{
     mem::MaybeUninit,
     net::{Ipv4Addr, Ipv6Addr},
     ops::{Deref, DerefMut},
+    ptr::NonNull,
 };
 #[cfg(not(feature = "alloc"))]
 pub use heapless::Vec;
+use zerocopy::{FromBytes, Immutable, IntoByteSlice, KnownLayout, Ref};
 
 pub use zerocopy::{
     ByteSlice, ByteSliceMut, SplitByteSlice, SplitByteSliceMut,
@@ -945,5 +947,53 @@ where
                 Some(Err(e))
             }
         }
+    }
+}
+
+/// A tool for converting zerocopy's `Ref<_, T>`s into `&T`/`&mut T`
+/// based on need and input B mutability.
+pub struct Accessor<B, T> {
+    item_ptr: NonNull<T>,
+    storage: PhantomData<B>,
+}
+
+impl<B: ByteSlice, T: FromBytes + KnownLayout + Immutable> Accessor<B, T> {
+    pub fn new<'a>(val: Ref<B, T>) -> Self
+    where
+        B: 'a + IntoByteSlice<'a>,
+        T: 'a,
+    {
+        let valid_ref: &T = Ref::into_ref(val);
+        Self {
+            // SAFETY:
+            // Conversion to *mut here is needed to allow loaning &mut T
+            // iff. B is also a ByteSliceMut (i.e., exclusive reference).
+            item_ptr: NonNull::from(valid_ref),
+            storage: PhantomData,
+        }
+    }
+}
+
+impl<B: ByteSlice, T: FromBytes + KnownLayout + Immutable> Deref
+    for Accessor<B, T>
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY:
+        // Self was created from a valid reference to T (guaranteed by `Ref::into_ref`).
+        unsafe { self.item_ptr.as_ref() }
+    }
+}
+
+impl<B: ByteSliceMut, T: FromBytes + KnownLayout + Immutable> DerefMut
+    for Accessor<B, T>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY:
+        // The ByteSliceMut bound informs us that the base reference must have been
+        // exclusive. Given that we have &mut self here, we can recreate the mutable
+        // reference.
+        unsafe { self.item_ptr.as_mut() }
     }
 }

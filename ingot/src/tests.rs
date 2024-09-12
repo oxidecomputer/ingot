@@ -1,5 +1,3 @@
-use core::net::{Ipv4Addr, Ipv6Addr};
-
 use crate::{
     ethernet::{Ethernet, EthernetMut, EthernetRef, ValidEthernet},
     geneve::{GeneveRef, ValidGeneve},
@@ -10,18 +8,23 @@ use crate::{
     udp::{Udp, UdpMut, UdpRef, ValidUdp},
 };
 use alloc::{collections::LinkedList, vec::Vec};
+use core::{
+    mem,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 use ethernet::Ethertype;
 use example_chain::{OpteIn, OpteOut, UltimateChain, L3};
 use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
-    primitives::*, Emit, Header, HeaderParse, NetworkRepr, ParseChoice,
-    ParseError, Parsed, RepeatedView,
+    primitives::*, Accessor, Emit, Header, HeaderParse, NetworkRepr,
+    ParseChoice, ParseError, Parsed, RepeatedView,
 };
 use ip::{
     IpProtocol, IpV6Ext6564, IpV6Ext6564Ref, IpV6ExtFragmentRef,
     LowRentV6EhRepr, ValidLowRentV6Eh,
 };
 use macaddr::MacAddr6;
+use zerocopy::IntoBytes;
 
 use super::*;
 
@@ -522,12 +525,12 @@ fn ipv6_bitset() {
             3 => {
                 eprintln!(
                     "(golden {golden:x?}, saw {:x?})",
-                    &v6.0.bytes()[..4]
+                    &v6.0.as_bytes()[..4]
                 );
                 v6.set_ecn(Ecn::Capable1);
                 eprintln!(
                     "(golden {golden:x?}, saw {:x?})",
-                    &v6.0.bytes()[..4]
+                    &v6.0.as_bytes()[..4]
                 );
             }
             4 => v6.set_flow_label(123456),
@@ -791,4 +794,24 @@ fn ez_emit() {
     assert_eq!(geneve.protocol_type(), Ethertype::ETHERNET);
     assert_eq!(geneve.vni(), 7777);
     assert_eq!(geneve.reserved(), 0);
+}
+
+#[test]
+fn accessor() {
+    let makeshift_stack = (
+        Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff },
+        Geneve {
+            flags: GeneveFlags::CRITICAL_OPTS,
+            protocol_type: Ethertype::ETHERNET,
+            vni: 7777,
+            ..Default::default()
+        },
+    );
+
+    let out = makeshift_stack.emit_vec();
+    let (udp, ..) = ValidUdp::parse(&out[..8]).unwrap();
+
+    let a = Accessor::new(udp.0);
+    assert_eq!(mem::size_of_val(&a), mem::size_of::<*mut u8>());
+    assert_eq!(u16::from(a.source), 1234);
 }

@@ -1645,7 +1645,7 @@ impl StructParseDeriveCtx {
 
                     // In borrowed variant, this resolves to a memcpy.
                     valid_emit_blocks.push(quote! {
-                        let s = self.#idx.bytes();
+                        let s = self.#idx.as_bytes();
                         let (fill, rest) = rest.split_at_mut(s.len());
                         fill.copy_from_slice(s);
                     });
@@ -1704,6 +1704,7 @@ impl StructParseDeriveCtx {
             impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #validated_ident<V> {
                 fn emit_raw<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> usize {
                     use ::ingot::types::Header;
+                    use ::zerocopy::IntoBytes;
 
                     let written = self.packet_length();
                     let rest = &mut buf[..];
