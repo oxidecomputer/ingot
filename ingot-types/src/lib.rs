@@ -997,3 +997,18 @@ impl<B: ByteSliceMut, T: FromBytes + KnownLayout + Immutable> DerefMut
         unsafe { self.item_ptr.as_mut() }
     }
 }
+
+// Used to gate impls on IndirectPacket in downstream derives.
+#[cfg(feature = "alloc")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cfg_alloc {
+    ( $( $tok:tt )* ) => { $( $tok )* }
+}
+
+#[cfg(not(feature = "alloc"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __cfg_alloc {
+    ( $( $tok:tt )* ) => {};
+}

@@ -1324,22 +1324,24 @@ impl StructParseDeriveCtx {
                 #( #packet_mut_impls )*
             }
 
-            //#[cfg(feature = "alloc")]
-            #direct_ref_head for ::ingot::types::IndirectPacket<O, B>
-            where
-                O: #ref_part,
-                B: #ref_part,
-            {
-                #( #packet_impls )*
+            ::ingot::types::__cfg_alloc!{
+                #direct_ref_head for ::ingot::types::IndirectPacket<O, B>
+                where
+                    O: #ref_part,
+                    B: #ref_part,
+                {
+                    #( #packet_impls )*
+                }
             }
 
-            //#[cfg(feature = "alloc")]
-            #direct_mut_head for ::ingot::types::IndirectPacket<O, B>
-            where
-                O: #mut_part,
-                B: #mut_part,
-            {
-                #( #packet_mut_impls )*
+            ::ingot::types::__cfg_alloc!{
+                #direct_mut_head for ::ingot::types::IndirectPacket<O, B>
+                where
+                    O: #mut_part,
+                    B: #mut_part,
+                {
+                    #( #packet_mut_impls )*
+                }
             }
         }
     }
@@ -1836,20 +1838,22 @@ impl ToTokens for StructParseDeriveCtx {
                 }
             }
 
-            //#[cfg(feature = "alloc")]
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
-                #[inline]
-                fn from(value: #validated_ident<V>) -> Self {
-                    Self::Raw(value)
+            ::ingot::types::__cfg_alloc!{
+                impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
+                    #[inline]
+                    fn from(value: #validated_ident<V>) -> Self {
+                        Self::Raw(value)
+                    }
                 }
             }
 
-            //#[cfg(feature = "alloc")]
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
-                #[inline]
-                fn from(value: #self_ty) -> Self {
-                    // into used to paper over boxing / in-place.
-                    Self::Repr(value.into())
+            ::ingot::types::__cfg_alloc!{
+                impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
+                    #[inline]
+                    fn from(value: #self_ty) -> Self {
+                        // into used to paper over boxing / in-place.
+                        Self::Repr(value.into())
+                    }
                 }
             }
 
