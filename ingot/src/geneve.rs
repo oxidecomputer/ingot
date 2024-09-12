@@ -78,6 +78,21 @@ pub enum Error {
     Unparsable,
 }
 
+impl core::error::Error for Error {}
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::TooLarge => f.write_str(
+                "supplied VNI was larger than u24::MAX (0xff_ff_ff)",
+            ),
+            Self::Unparsable => {
+                f.write_str("VNI string could not be parsed as a valid u32")
+            }
+        }
+    }
+}
+
 impl NetworkRepr<[u8; 3]> for Vni {
     fn to_network(self) -> [u8; 3] {
         self.inner
