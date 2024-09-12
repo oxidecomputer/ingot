@@ -275,6 +275,7 @@ dependencies = [
  "ingot-macros",
  "ingot-types",
  "macaddr",
+ "serde",
  "zerocopy",
 ]
 

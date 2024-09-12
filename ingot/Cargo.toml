@@ -4,14 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-alloc = []
-default = ["alloc", "ingot-types/alloc"]
+alloc = ["serde?/alloc"]
+default = ["alloc", "ingot-types/alloc", "serde"]
+serde = ["dep:serde"]
 
 [dependencies]
 bitflags.workspace = true
 ingot-macros.workspace = true
 ingot-types.workspace = true
 macaddr.workspace = true
+serde = { workspace = true, features = ["derive"], optional = true }
 zerocopy.workspace = true
 
 [dev-dependencies]

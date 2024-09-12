@@ -678,7 +678,7 @@ fn to_owned() {
     assert_eq!(owned_g.opt_len, 1);
     assert_eq!(owned_g.flags, GeneveFlags::empty());
     assert_eq!(owned_g.protocol_type, Ethertype::ETHERNET);
-    assert_eq!(owned_g.vni, 0x0004d2);
+    assert_eq!(owned_g.vni, 0x0004d2.try_into().unwrap());
     assert_eq!(owned_g.reserved, 0);
 
     assert_eq!(owned_g.options, &[0x01, 0x29, 0x00, 0x00]);
@@ -774,7 +774,7 @@ fn ez_emit() {
         Geneve {
             flags: GeneveFlags::CRITICAL_OPTS,
             protocol_type: Ethertype::ETHERNET,
-            vni: 7777,
+            vni: 7777.try_into().unwrap(),
             ..Default::default()
         },
     );
@@ -792,7 +792,7 @@ fn ez_emit() {
     assert_eq!(geneve.opt_len(), 0);
     assert_eq!(geneve.flags(), GeneveFlags::CRITICAL_OPTS);
     assert_eq!(geneve.protocol_type(), Ethertype::ETHERNET);
-    assert_eq!(geneve.vni(), 7777);
+    assert_eq!(geneve.vni(), 7777.try_into().unwrap());
     assert_eq!(geneve.reserved(), 0);
 }
 
@@ -803,7 +803,7 @@ fn accessor() {
         Geneve {
             flags: GeneveFlags::CRITICAL_OPTS,
             protocol_type: Ethertype::ETHERNET,
-            vni: 7777,
+            vni: 7777.try_into().unwrap(),
             ..Default::default()
         },
     );
