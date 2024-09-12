@@ -16,8 +16,8 @@ use ethernet::Ethertype;
 use example_chain::{OpteIn, OpteOut, UltimateChain, L3};
 use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
-    primitives::*, Accessor, Emit, Header, HeaderParse, NetworkRepr,
-    ParseChoice, ParseError, Parsed, RepeatedView,
+    primitives::*, Accessor, Emit, Header, HeaderParse, NetworkRepr, NextLayer,
+    NextLayerChoice, ParseChoice, ParseError, Parsed, RepeatedView,
 };
 use ip::{
     IpProtocol, IpV6Ext6564, IpV6Ext6564Ref, IpV6ExtFragmentRef,
@@ -614,7 +614,7 @@ fn v6_extension_headers() {
     // TODO: ergonomics
     match v6.1 {
         ingot_types::Packet::Repr(_) => panic!(),
-        ingot_types::Packet::Raw(v) => {
+        ingot_types::Packet::Raw(ref v) => {
             let mut t = v.iter(Some(IpProtocol::IPV6_HOP_BY_HOP));
             let hbh = t.next().unwrap().unwrap();
             let ValidLowRentV6Eh::IpV6Ext6564(hbh) = hbh else { panic!() };
@@ -635,6 +635,12 @@ fn v6_extension_headers() {
             assert_eq!(experiment.ext_len(), 4);
         }
     }
+
+    assert_eq!(
+        v6.1.next_layer_choice(Some(IpProtocol::IPV6_HOP_BY_HOP)),
+        Some(IpProtocol::UDP)
+    );
+    assert_eq!(v6.next_layer(), Some(IpProtocol::UDP));
 }
 
 #[test]

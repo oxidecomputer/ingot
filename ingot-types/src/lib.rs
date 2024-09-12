@@ -68,16 +68,37 @@ impl<'a, B: ByteSlice> FieldRef<'a, Vec<u8>, B> {
     }
 }
 
-// impl<'a, D, B: ByteSlice, T: HasView<B> + NextLayer<Denom=D> + Clone> ToOwnedPacket for FieldRef<'a, T, B> {
-//     type Target = T;
+impl<'a, D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
+    for FieldRef<'a, T, V>
+where
+    D: Copy + Eq,
+    PacketOf<T, V>: NextLayer<Denom = D>,
+{
+    type Denom = D;
 
-//     fn to_owned(&self, hint: Option<D>) -> T {
-//         match self {
-//             FieldRef::Repr(a) => (*a).clone(),
-//             FieldRef::Raw(a) => todo!(),
-//         }
-//     }
-// }
+    fn next_layer(&self) -> Option<Self::Denom> {
+        match self {
+            FieldRef::Repr(r) => r.next_layer(),
+            FieldRef::Raw(r) => r.next_layer(),
+        }
+    }
+}
+
+impl<'a, D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
+    NextLayerChoice<D2> for FieldRef<'a, T, V>
+where
+    D: Copy + Eq,
+    D2: Copy + Eq,
+    PacketOf<T, V>: NextLayer<Denom = D> + NextLayerChoice<D2>,
+    T: NextLayer<Denom = D>,
+{
+    fn next_layer_choice(&self, hint: Option<D2>) -> Option<Self::Denom> {
+        match self {
+            FieldRef::Repr(r) => r.next_layer_choice(hint),
+            FieldRef::Raw(r) => r.next_layer_choice(hint),
+        }
+    }
+}
 
 pub enum FieldMut<'a, T: HasView<V>, V> {
     Repr(&'a mut T),
@@ -106,6 +127,38 @@ impl<'a, T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>>
             FieldMut::Repr(t) => t.as_mut(),
             FieldMut::Raw(Packet::Repr(a)) => a.deref_mut().as_mut(),
             FieldMut::Raw(Packet::Raw(a)) => a.as_mut(),
+        }
+    }
+}
+
+impl<'a, D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
+    for FieldMut<'a, T, V>
+where
+    D: Copy + Eq,
+    PacketOf<T, V>: NextLayer<Denom = D>,
+{
+    type Denom = D;
+
+    fn next_layer(&self) -> Option<Self::Denom> {
+        match self {
+            FieldMut::Repr(r) => r.next_layer(),
+            FieldMut::Raw(r) => r.next_layer(),
+        }
+    }
+}
+
+impl<'a, D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
+    NextLayerChoice<D2> for FieldMut<'a, T, V>
+where
+    D: Copy + Eq,
+    D2: Copy + Eq,
+    PacketOf<T, V>: NextLayer<Denom = D> + NextLayerChoice<D2>,
+    T: NextLayer<Denom = D>,
+{
+    fn next_layer_choice(&self, hint: Option<D2>) -> Option<Self::Denom> {
+        match self {
+            FieldMut::Repr(r) => r.next_layer_choice(hint),
+            FieldMut::Raw(r) => r.next_layer_choice(hint),
         }
     }
 }
@@ -571,6 +624,13 @@ pub trait NextLayer {
     }
 }
 
+pub trait NextLayerChoice<Denom: Copy + Eq>: NextLayer {
+    #[inline]
+    fn next_layer_choice(&self, _hint: Option<Denom>) -> Option<Self::Denom> {
+        self.next_layer()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ParseError {
     Unspec,
@@ -802,7 +862,14 @@ impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Header
 
 impl<T: NextLayer> NextLayer for Repeated<T> {
     type Denom = T::Denom;
+
+    fn next_layer(&self) -> Option<Self::Denom> {
+        // Idea: scan to the last item
+        self.inner.last().and_then(|v| v.next_layer())
+    }
 }
+
+impl<D: Copy + Eq, T: NextLayer> NextLayerChoice<D> for Repeated<T> {}
 
 impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Emit
     for RepeatedView<B, T>
@@ -820,16 +887,6 @@ impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Emit
     }
 }
 
-// Rethink: this is next layer but requires a hint to extract...
-impl<B: ByteSlice, T: NextLayer + HasView<B>> NextLayer for RepeatedView<B, T> {
-    type Denom = T::Denom;
-
-    // #[inline]
-    // fn next_layer(&self) -> Option<Self::Denom> {
-    //     self.first_hint
-    // }
-}
-
 impl<B: ByteSlice, T: HasView<B> + NextLayer> HasView<B> for Repeated<T>
 where
     T::ViewType: NextLayer,
@@ -837,6 +894,13 @@ where
     type ViewType = RepeatedView<B, T>;
 }
 
+// 🧙‍♂️ Type magic abounds 🧙‍♂️
+// Effectively, this works by determining, for an owned type T, which
+// ViewType is associated with it and then validating that we can parse
+// it identically on B and &[u8]. This allows us to split B in
+// the right place by borrowing from its derived byteslice (noting that
+// it is very unsound to attempt to recombine slices in general, let alone
+// on arbitrary T with a deref).
 impl<B: SplitByteSlice, T: HasView<B> + NextLayer<Denom = D>, D: Copy + Eq>
     ParseChoice<B, D> for RepeatedView<B, T>
 where
@@ -852,7 +916,6 @@ where
     ) -> ParseResult<Success<Self, B>> {
         let original_len = data.deref().len();
         let mut bytes_read = 0;
-        // let first_hint = hint;
 
         while bytes_read < original_len {
             let slice = &data[bytes_read..];
@@ -868,13 +931,16 @@ where
 
         let (inner, remainder) = data.split_at(bytes_read);
 
-        // let val = Self { inner, first_hint };
         let val = Self { inner, marker: PhantomData };
 
         Ok((val, hint, remainder))
     }
 }
 
+// 🧙‍♂️ Type magic abounds 🧙‍♂️
+// This works on a similar trick as above: we reparse target Ts out from
+// the stored buffer and individually convert *those* to their owned types.
+// We do not go via B in practice.
 impl<D: Copy + Eq, B: SplitByteSlice, T: NextLayer<Denom = D> + HasView<B>>
     ToOwnedPacket for RepeatedView<B, T>
 where
@@ -947,6 +1013,46 @@ where
                 Some(Err(e))
             }
         }
+    }
+}
+
+// impl<B: ByteSlice, T: NextLayer + HasView<B>> NextLayer for RepeatedView<B, T> {
+//     type Denom = T::Denom;
+
+//     // #[inline]
+//     // fn next_layer(&self) -> Option<Self::Denom> {
+//     //     self.first_hint
+//     // }
+// }
+
+impl<
+        B: ByteSlice,
+        T: for<'a> HasView<&'a [u8]> + HasView<B> + NextLayer<Denom = D>,
+        D: Copy + Eq,
+    > NextLayer for RepeatedView<B, T>
+where
+    for<'a> <T as HasView<&'a [u8]>>::ViewType:
+        ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
+{
+    type Denom = T::Denom;
+
+    fn next_layer(&self) -> Option<Self::Denom> {
+        self.next_layer_choice(None)
+    }
+}
+
+impl<
+        B: ByteSlice,
+        T: for<'a> HasView<&'a [u8]> + HasView<B> + NextLayer<Denom = D>,
+        D: Copy + Eq,
+    > NextLayerChoice<D> for RepeatedView<B, T>
+where
+    for<'a> <T as HasView<&'a [u8]>>::ViewType:
+        ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
+{
+    fn next_layer_choice(&self, hint: Option<D>) -> Option<Self::Denom> {
+        // This applies te same trick: parse through self as
+        self.iter(hint).last().and_then(|v| v.ok()).and_then(|v| v.next_layer())
     }
 }
 

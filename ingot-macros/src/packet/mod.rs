@@ -633,19 +633,53 @@ impl StructParseDeriveCtx {
         let ident = &self.ident;
         let validated_ident = self.validated_ident();
 
-        let (denom, ref_body, owned_body) =
-            if let Some(field_ident) = &self.nominated_next_header {
-                let user_ty =
-                    &self.validated.get(field_ident).unwrap().borrow().user_ty;
+        // Ordinarily, we can use our own nominated next header.
+        // If we have a subparse which consumes this, then we need to
+        // instead query THAT.
+        let subparse_on_nl = self
+            .validated_order
+            .iter()
+            .filter_map(|v| {
+                let v = v.borrow();
+                match v.state {
+                    FieldState::Parsable { on_next_layer: true, .. } => {
+                        Some(v.ident.clone())
+                    }
+                    _ => None,
+                }
+            })
+            .next();
+
+        let (denom, ref_body, owned_body) = if let Some(field_ident) =
+            &self.nominated_next_header
+        {
+            let user_ty =
+                &self.validated.get(field_ident).unwrap().borrow().user_ty;
+            if let Some(subparse_ident) = subparse_on_nl {
+                let ref_ident = Ident::new(
+                    &format!("{subparse_ident}_ref"),
+                    subparse_ident.span(),
+                );
+                (
+                    quote! {#user_ty},
+                    quote! {
+                        use ::ingot::types::NextLayerChoice;
+                        let h0 = ::core::option::Option::Some(self.#field_ident());
+                        self.#ref_ident().next_layer_choice(h0)
+                    },
+                    quote! {self.#subparse_ident.next_layer()},
+                )
+            } else {
                 (
                     quote! {#user_ty},
                     quote! {::core::option::Option::Some(self.#field_ident())},
                     quote! {::core::option::Option::Some(self.#field_ident)},
                 )
-            } else {
-                let no_val = quote! {::core::option::Option::None};
-                (quote! {()}, no_val.clone(), no_val)
-            };
+            }
+        } else {
+            let no_val = quote! {::core::option::Option::None};
+            (quote! {()}, no_val.clone(), no_val)
+        };
 
         let owned_impl = if let Some(g) = self.my_explicit_generic() {
             quote! {

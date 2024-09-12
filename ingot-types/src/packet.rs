@@ -173,6 +173,21 @@ where
 }
 
 #[cfg(feature = "alloc")]
+impl<D: Copy + Eq, D2, O: NextLayerChoice<D> + NextLayer<Denom = D2>, B>
+    NextLayerChoice<D> for IndirectPacket<O, B>
+where
+    B: NextLayerChoice<D> + NextLayer<Denom = D2>,
+{
+    #[inline]
+    fn next_layer_choice(&self, hint: Option<D>) -> Option<Self::Denom> {
+        match self {
+            Self::Repr(v) => v.next_layer_choice(hint),
+            Self::Raw(v) => v.next_layer_choice(hint),
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
 unsafe impl<O: EmitDoesNotRelyOnBufContents, B: EmitDoesNotRelyOnBufContents>
     EmitDoesNotRelyOnBufContents for IndirectPacket<O, B>
 {
