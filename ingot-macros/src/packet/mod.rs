@@ -1749,7 +1749,7 @@ impl StructParseDeriveCtx {
                 }
             }
 
-            impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::Emit for #validated_ident<V> {
+            impl<V: ::ingot::types::ByteSlice> ::ingot::types::Emit for #validated_ident<V> {
                 fn emit_raw<B: ::ingot::types::ByteSliceMut>(&self, mut buf: B) -> usize {
                     use ::ingot::types::Header;
                     use ::zerocopy::IntoBytes;
@@ -1769,7 +1769,7 @@ impl StructParseDeriveCtx {
             }
 
             unsafe impl ::ingot::types::EmitDoesNotRelyOnBufContents for #self_ty {}
-            unsafe impl<V: ::ingot::types::ByteSliceMut> ::ingot::types::EmitDoesNotRelyOnBufContents for #validated_ident<V> {}
+            unsafe impl<V: ::ingot::types::ByteSlice> ::ingot::types::EmitDoesNotRelyOnBufContents for #validated_ident<V> {}
         }
     }
 

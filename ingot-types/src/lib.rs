@@ -353,7 +353,7 @@ impl Header for &[u8] {
 impl Emit for &[u8] {
     #[inline]
     fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
-        buf.copy_from_slice(self);
+        buf[..self.len()].copy_from_slice(self);
 
         self.len()
     }
