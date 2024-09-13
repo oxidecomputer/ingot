@@ -13,6 +13,7 @@ repository = "https://github.com/oxidecomputer/ingot"
 
 [workspace.dependencies]
 # Internal
+ingot = { path = "ingot", default-features = true }
 ingot-macros = { path = "ingot-macros", default-features = false }
 ingot-types = { path = "ingot-types", default-features = false }
 

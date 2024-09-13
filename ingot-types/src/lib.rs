@@ -984,6 +984,9 @@ impl<B: SplitByteSlice, T: FromBytes + IntoBytes + KnownLayout + Immutable>
         // as a T.
         // Unfortunately, we can't escape a Ref back into its inner B,
         // so we need to check this on the derived &[u8] first.
+        // ByteSlice / IntoByteSlice guarantee stability, e.g.
+        // that the deref, stored, and into buffers all have identical
+        // pointers and lengths.
         let len = {
             let (r, _): (Ref<&[u8], T>, _) =
                 Ref::from_prefix(buf.as_bytes())

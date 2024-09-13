@@ -350,7 +350,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             type Denom = ();
         }
 
-        impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V> for #ident<V> {
+        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #ident<V> {
             #[inline]
             fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                 #imports
@@ -365,7 +365,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         }
 
-        impl<V: ::ingot::types::SplitByteSlice> #ident<V> {
+        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #ident<V> {
             #[inline]
             pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#ident<Q::Chunk>, Q>> {
                 #imports

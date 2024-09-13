@@ -794,7 +794,8 @@ impl StructParseDeriveCtx {
             ChunkState::FixedWidth { .. } => {
                 let name = c.chunk_ty_name(&self.ident);
                 quote! {
-                    pub ::zerocopy::Ref<#type_param_ident, #private_mod_ident::#name>
+                    // pub ::zerocopy::Ref<#type_param_ident, #private_mod_ident::#name>
+                    pub ::ingot::types::Accessor<#type_param_ident, #private_mod_ident::#name>
                 }
             },
             ChunkState::VarWidth(i) | ChunkState::Parsable(i) => {
@@ -1407,7 +1408,7 @@ impl StructParseDeriveCtx {
                     // With LTO, it's 20--40% faster than splitting first
                     // before handing the bytes over.
                     segment_fragments.push(quote! {
-                        let (#val_ident, from): (::zerocopy::Ref<_, #ch_ty>, _) = ::zerocopy::Ref::from_prefix(from)
+                        let (#val_ident, from): (::ingot::types::Accessor<_, #ch_ty>, _) = ::ingot::types::Accessor::read_from_prefix(from)
                             .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
                     });
                 }
@@ -1511,7 +1512,7 @@ impl StructParseDeriveCtx {
             };
 
         quote! {
-            impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
+            impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
                 #[inline]
                 fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                     use ::ingot::types::Header;
@@ -1534,7 +1535,7 @@ impl StructParseDeriveCtx {
                 }
             }
 
-            impl<V: ::ingot::types::SplitByteSlice, AnyDenom: Copy + Eq> ::ingot::types::ParseChoice<V, AnyDenom> for #validated_ident<V> {
+            impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a, AnyDenom: Copy + Eq> ::ingot::types::ParseChoice<V, AnyDenom> for #validated_ident<V> {
                 #[inline]
                 fn parse_choice(from: V, hint: Option<AnyDenom>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                     use ::ingot::types::HeaderParse;
