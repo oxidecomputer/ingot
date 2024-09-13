@@ -223,6 +223,7 @@ fn parse_multichunk() {
     v6.set_version(6);
     assert_eq!(v6.version(), 6);
     assert_eq!(v6.next_header(), IpProtocol::UDP);
+    assert_eq!(v6.next_layer(), Some(IpProtocol::UDP));
     assert_eq!(v6.source(), Ipv6Addr::LOCALHOST);
     assert_eq!(v6.destination(), Ipv6Addr::UNSPECIFIED);
     // assert_eq!(v6.ihl(), 8);

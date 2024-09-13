@@ -664,10 +664,22 @@ impl StructParseDeriveCtx {
                     quote! {#user_ty},
                     quote! {
                         use ::ingot::types::NextLayerChoice;
+                        use ::ingot::types::Header;
                         let h0 = ::core::option::Option::Some(self.#field_ident());
-                        self.#ref_ident().next_layer_choice(h0)
+                        if self.#ref_ident().packet_length() == 0 {
+                            h0
+                        } else {
+                            self.#ref_ident().next_layer_choice(h0)
+                        }
                     },
-                    quote! {self.#subparse_ident.next_layer()},
+                    quote! {
+                        use ::ingot::types::Header;
+                        if self.#subparse_ident.packet_length() == 0 {
+                            Some(self.#field_ident)
+                        } else {
+                            self.#subparse_ident.next_layer()
+                        }
+                    },
                 )
             } else {
                 (
