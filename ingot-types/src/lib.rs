@@ -929,7 +929,8 @@ pub unsafe trait IntoBufPointer<'a>: IntoByteSlice<'a> {
     /// Convert a buffer into the *most exclusive pointer type
     /// permitted* for an [`Accessor`].
     ///
-    /// Mutability of the
+    /// Mutability of this buffer type is then used to determine
+    /// whether the pointer is in fact used as a `&mut T` or `&T`.
     ///
     /// # Safety
     /// This requires that the invariants expressed on zerocopy's
@@ -953,6 +954,14 @@ unsafe impl<'a> IntoBufPointer<'a> for &'a mut [u8] {
 
 /// A tool for converting zerocopy's `Ref<_, T>`s into `&T`/`&mut T`
 /// based on need and input B mutability.
+///
+/// This primarily reduces pointer sizes for fixed-width packet parts as
+/// an internal component of all `Valid` packets.
+///
+/// Zerocopy issue [#368](https://github.com/google/zerocopy/issues/368)
+/// would obviate the need for this, but I do not believe it is under active
+/// development. It would also open us back up to allowing any `B` rather than
+/// simply those which are [`IntoByteSlice`].
 pub struct Accessor<B, T> {
     item_ptr: *mut T,
     storage: PhantomData<B>,
