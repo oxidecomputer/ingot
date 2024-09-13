@@ -15,7 +15,10 @@ use core::{
 };
 #[cfg(not(feature = "alloc"))]
 pub use heapless::Vec;
-use zerocopy::{FromBytes, Immutable, IntoByteSlice, KnownLayout, Ref};
+use zerocopy::{
+    FromBytes, Immutable, IntoByteSlice, IntoByteSliceMut, IntoBytes,
+    KnownLayout, Ref,
+};
 
 pub use zerocopy::{
     ByteSlice, ByteSliceMut, SplitByteSlice, SplitByteSliceMut,
@@ -921,27 +924,73 @@ where
     }
 }
 
+/// Convert a buffer into the highest...
+pub unsafe trait IntoBufPointer<'a>: IntoByteSlice<'a> {
+    /// Convert a buffer into the *most exclusive pointer type
+    /// permitted* for an [`Accessor`].
+    ///
+    /// Mutability of the
+    ///
+    /// # Safety
+    /// This requires that the invariants expressed on zerocopy's
+    /// [`ByteSlice`] and [`IntoByteSlice`] around stability are upheld.
+    unsafe fn into_buf_ptr(self) -> *mut u8;
+}
+
+unsafe impl<'a> IntoBufPointer<'a> for &'a [u8] {
+    #[inline(always)]
+    unsafe fn into_buf_ptr(self) -> *mut u8 {
+        self.into_byte_slice().as_ptr() as *mut _
+    }
+}
+
+unsafe impl<'a> IntoBufPointer<'a> for &'a mut [u8] {
+    #[inline(always)]
+    unsafe fn into_buf_ptr(self) -> *mut u8 {
+        self.into_byte_slice_mut().as_mut_ptr()
+    }
+}
+
 /// A tool for converting zerocopy's `Ref<_, T>`s into `&T`/`&mut T`
 /// based on need and input B mutability.
 pub struct Accessor<B, T> {
-    item_ptr: NonNull<T>,
+    item_ptr: *mut T,
     storage: PhantomData<B>,
 }
 
-impl<B: ByteSlice, T: FromBytes + KnownLayout + Immutable> Accessor<B, T> {
-    pub fn new<'a>(val: Ref<B, T>) -> Self
+impl<B: SplitByteSlice, T: FromBytes + IntoBytes + KnownLayout + Immutable>
+    Accessor<B, T>
+{
+    pub fn read_from_prefix<'a>(buf: B) -> Result<(Self, B), ParseError>
     where
-        B: 'a + IntoByteSlice<'a>,
+        B: 'a + IntoBufPointer<'a>,
         T: 'a,
     {
-        let valid_ref: &T = Ref::into_ref(val);
-        Self {
-            // SAFETY:
-            // Conversion to *mut here is needed to allow loaning &mut T
-            // iff. B is also a ByteSliceMut (i.e., exclusive reference).
-            item_ptr: NonNull::from(valid_ref),
-            storage: PhantomData,
-        }
+        // SAFETY:
+        // We use the exact same bounds on T as Ref::into_mut,
+        // allowing us to grant both read/write access to the
+        // T depending on B's mutability.
+        // Additionally, a valid parse via Ref guarantees that ptr
+        // alignment and length are as required for the type to be considered
+        // as a T.
+        // Unfortunately, we can't escape a Ref back into its inner B,
+        // so we need to check this on the derived &[u8] first.
+        let len = {
+            let (r, _): (Ref<&[u8], T>, _) =
+                Ref::from_prefix(buf.as_bytes())
+                    .map_err(|_| ParseError::TooSmall)?;
+            Ref::bytes(&r).len()
+        };
+
+        let (keep, rest) = buf.split_at(len);
+        let acc = unsafe {
+            Self {
+                item_ptr: keep.into_buf_ptr() as *mut _,
+                storage: PhantomData,
+            }
+        };
+
+        Ok((acc, rest))
     }
 }
 
@@ -953,7 +1002,7 @@ impl<B: ByteSlice, T: FromBytes + KnownLayout + Immutable> Deref
     fn deref(&self) -> &Self::Target {
         // SAFETY:
         // Self was created from a valid reference to T (guaranteed by `Ref::into_ref`).
-        unsafe { self.item_ptr.as_ref() }
+        unsafe { &*(self.item_ptr) }
     }
 }
 
@@ -965,7 +1014,7 @@ impl<B: ByteSliceMut, T: FromBytes + KnownLayout + Immutable> DerefMut
         // The ByteSliceMut bound informs us that the base reference must have been
         // exclusive. Given that we have &mut self here, we can recreate the mutable
         // reference.
-        unsafe { self.item_ptr.as_mut() }
+        unsafe { &mut (*self.item_ptr) }
     }
 }
 

@@ -24,6 +24,7 @@ use ip::{
     LowRentV6EhRepr, ValidLowRentV6Eh,
 };
 use macaddr::MacAddr6;
+use udp::_Udp_ingot_impl::UdpPart0;
 use zerocopy::IntoBytes;
 
 use super::*;
@@ -815,10 +816,17 @@ fn accessor() {
         },
     );
 
-    let out = makeshift_stack.emit_vec();
+    let mut out = makeshift_stack.emit_vec();
     let (udp, ..) = ValidUdp::parse(&out[..8]).unwrap();
 
-    let a = Accessor::new(udp.0);
+    let (a, _): (Accessor<_, UdpPart0>, _) =
+        Accessor::read_from_prefix(&out[..8]).unwrap();
     assert_eq!(mem::size_of_val(&a), mem::size_of::<*mut u8>());
     assert_eq!(u16::from(a.source), 1234);
+
+    let (mut a, _): (Accessor<_, UdpPart0>, _) =
+        Accessor::read_from_prefix(&mut out[..8]).unwrap();
+    assert_eq!(mem::size_of_val(&a), mem::size_of::<*mut u8>());
+    a.destination = 8989.into();
+    assert_eq!(u16::from(a.destination), 8989);
 }
