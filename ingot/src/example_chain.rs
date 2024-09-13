@@ -18,22 +18,18 @@ use zerocopy::ByteSlice;
 
 #[choice(on = Ethertype)]
 pub enum L3 {
-    // #[ingot(generic)]
     Ipv4 = Ethertype::IPV4,
-    // #[ingot(generic)]
     Ipv6 = Ethertype::IPV6,
 }
 
 #[choice(on = IpProtocol)]
 pub enum L4 {
-    // #[ingot(generic)]
     Tcp = IpProtocol::TCP,
     Udp = IpProtocol::UDP,
 }
 
 #[choice(on = IpProtocol)]
 pub enum Ulp {
-    // #[ingot(generic)]
     Tcp = IpProtocol::TCP,
     Udp = IpProtocol::UDP,
     IcmpV4 = IpProtocol::ICMP,
@@ -44,7 +40,6 @@ pub enum Ulp {
 pub struct UltimateChain<Q: ByteSlice> {
     pub eth: EthernetPacket<Q>,
     pub l3: L3<Q>,
-    // l4: L4<Q>,
     #[ingot(from = "L4<Q>")]
     pub l4: UdpPacket<Q>,
 }

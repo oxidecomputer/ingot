@@ -1,4 +1,4 @@
-//! test text hello.
+//! Zero-copy packet handling made easy.
 
 #![no_std]
 

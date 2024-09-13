@@ -78,7 +78,6 @@ pub struct Ipv4 {
     pub dscp: u6,
     #[ingot(is = "u2")]
     pub ecn: Ecn,
-    // #[ingot(payload_len() + packet_len())]
     pub total_len: u16be,
 
     pub identification: u16be,
@@ -179,7 +178,7 @@ pub struct Ipv6 {
     pub payload_len: u16be,
     #[ingot(is = "u8", next_layer)]
     pub next_header: IpProtocol,
-    // #[ingot(default = 128)]
+    #[ingot(default = 128)]
     pub hop_limit: u8,
 
     #[ingot(is = "[u8; 16]", default = Ipv6Addr::UNSPECIFIED)]
