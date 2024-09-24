@@ -340,9 +340,15 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         parse_points.push(contents);
         onechunk_parse_points.push(ns_contents);
-        valid_fields.push(quote! {
-            pub #fname: <#base_ty as ::ingot::types::HasView<#type_param>>::ViewType
-        });
+        if optional.is_some() {
+            valid_fields.push(quote! {
+                pub #fname: ::core::option::Option<<#base_ty as ::ingot::types::HasView<#type_param>>::ViewType>
+            });
+        } else {
+            valid_fields.push(quote! {
+                pub #fname: <#base_ty as ::ingot::types::HasView<#type_param>>::ViewType
+            });
+        }
     }
 
     let accept_state = quote! {
