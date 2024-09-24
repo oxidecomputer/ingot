@@ -371,7 +371,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 pub #fname: ::core::option::Option<<#target_ty as ::ingot::types::HasView<#type_param>>::ViewType>
             });
             into_fields.push(quote! {
-                let #fname = val.#fname.map(#bare_ty::from).map(Into::into);
+                let #fname = val.#fname.map(Into::into);
             });
         } else {
             valid_fields.push(quote! {
@@ -400,14 +400,14 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             #( #valid_fields ),*
         }
 
-        // impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for #ident<V> {
-        //     #[inline]
-        //     fn from(val: #validated_ident<V>) -> Self {
-        //         #( #into_fields )*
+        impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for #ident<V> {
+            #[inline]
+            fn from(val: #validated_ident<V>) -> Self {
+                #( #into_fields )*
 
-        //         #ctor
-        //     }
-        // }
+                #ctor
+            }
+        }
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #ident<V> {
             type Denom = ();
