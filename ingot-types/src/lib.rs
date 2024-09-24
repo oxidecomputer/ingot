@@ -1,7 +1,5 @@
 #![no_std]
 
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
 use alloc::vec;
 #[cfg(feature = "alloc")]
 pub use alloc::vec::Vec;
@@ -11,7 +9,6 @@ use core::{
     mem::MaybeUninit,
     net::{Ipv4Addr, Ipv6Addr},
     ops::{Deref, DerefMut},
-    ptr::NonNull,
 };
 #[cfg(not(feature = "alloc"))]
 pub use heapless::Vec;
@@ -241,11 +238,10 @@ pub trait Emit: Header {
 
     #[inline]
     fn emit_prefix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
-        if buf.len() < self.packet_length() {
-            return Err(ParseError::TooSmall);
-        }
+        let (into, out) = buf
+            .split_at(self.packet_length())
+            .map_err(|_| ParseError::TooSmall)?;
 
-        let (into, out) = buf.split_at(self.packet_length());
         self.emit_raw(into);
         Ok(out)
     }
@@ -254,11 +250,10 @@ pub trait Emit: Header {
     fn emit_suffix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
         let l = buf.len();
 
-        if l < self.packet_length() {
-            return Err(ParseError::TooSmall);
-        }
+        let (into, out) = buf
+            .split_at(l - self.packet_length())
+            .map_err(|_| ParseError::TooSmall)?;
 
-        let (out, into) = buf.split_at(l - self.packet_length());
         self.emit_raw(into);
 
         Ok(out)
@@ -797,7 +792,11 @@ where
             }
         }
 
-        let (inner, remainder) = data.split_at(bytes_read);
+        // SAFETY:
+        // We have read exactly bytes_read from data already, and
+        // ByteSlice requires the base ptr + len on derived byteslices
+        // to be identical/stable.
+        let (inner, remainder) = unsafe { data.split_at_unchecked(bytes_read) };
 
         let val = Self { inner, marker: PhantomData };
 
@@ -924,17 +923,25 @@ where
     }
 }
 
-/// Convert a buffer into the highest...
+/// Convert a byte slice into a pointer to its base.
+///
+/// # Safety
+/// This requires that the invariants expressed on zerocopy's
+/// [`ByteSlice`] and [`IntoByteSlice`] around stability are upheld.
 pub unsafe trait IntoBufPointer<'a>: IntoByteSlice<'a> {
     /// Convert a buffer into the *most exclusive pointer type
-    /// permitted* for an [`Accessor`].
+    /// permitted*, to be read by an [`Accessor`].
     ///
-    /// Mutability of this buffer type is then used to determine
+    /// The pointer must be cast to a `*mut u8` regardless of
+    /// the source's mutability. Mutability of this buffer type
+    /// ([`ByteSlice`]/[`ByteSliceMut`]) is then used to determine
     /// whether the pointer is in fact used as a `&mut T` or `&T`.
     ///
     /// # Safety
     /// This requires that the invariants expressed on zerocopy's
-    /// [`ByteSlice`] and [`IntoByteSlice`] around stability are upheld.
+    /// [`ByteSlice`] and [`IntoByteSlice`] around stability are upheld,
+    /// and the pointer *must* be derived from [`IntoByteSlice::into_byte_slice`]
+    /// or [`IntoByteSliceMut::into_byte_slice_mut`].
     unsafe fn into_buf_ptr(self) -> *mut u8;
 }
 
@@ -994,12 +1001,16 @@ impl<B: SplitByteSlice, T: FromBytes + IntoBytes + KnownLayout + Immutable>
             Ref::bytes(&r).len()
         };
 
-        let (keep, rest) = buf.split_at(len);
-        let acc = unsafe {
-            Self {
-                item_ptr: keep.into_buf_ptr() as *mut _,
-                storage: PhantomData,
-            }
+        let (acc, rest) = unsafe {
+            let (keep, rest) = buf.split_at_unchecked(len);
+
+            (
+                Self {
+                    item_ptr: keep.into_buf_ptr() as *mut _,
+                    storage: PhantomData,
+                },
+                rest,
+            )
         };
 
         Ok((acc, rest))

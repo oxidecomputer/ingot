@@ -1352,8 +1352,6 @@ impl StructParseDeriveCtx {
                 )
             };
 
-        let pkt_types = vec![quote! {}];
-
         quote! {
             #direct_ref_head for ::ingot::types::DirectPacket<O, B>
             where
@@ -1422,11 +1420,9 @@ impl StructParseDeriveCtx {
                         #preamble
 
                         let chunk_len = (#len_expr) as usize;
-                        if from.as_ref().len() < chunk_len {
-                            return ::core::result::Result::Err(::ingot::types::ParseError::TooSmall);
-                        }
 
-                        let (varlen, from) = from.split_at(chunk_len);
+                        let (varlen, from) = from.split_at(chunk_len)
+                            .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
                         let #val_ident = ::ingot::types::Packet::Raw(varlen.into());
                     });
                 }
@@ -1677,13 +1673,14 @@ impl StructParseDeriveCtx {
                             }
                         }).collect::<Vec<_>>();
 
-                    let zerofills = bitfield_ct.iter().filter_map(|(k, v)| {
-                        (*v > 1).then(|| {
+                    let zerofills = bitfield_ct
+                        .iter()
+                        .filter(|(_, v)| **v > 1)
+                        .map(|(k, _)| {
                             quote! {
                                 g.#k = Default::default();
                             }
-                        })
-                    });
+                        });
 
                     owned_emit_blocks.push(quote! {
                         let (g, rest) = #zc_ty_name::mut_from_prefix(rest)

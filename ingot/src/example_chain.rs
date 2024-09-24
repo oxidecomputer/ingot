@@ -1,19 +1,15 @@
 // TODO: uncork later.
 
-use core::ffi::c_void;
-
 use crate::{
-    ethernet::{
-        Ethernet, EthernetPacket, EthernetRef, Ethertype, ValidEthernet,
-    },
-    geneve::{Geneve, GenevePacket, ValidGeneve},
+    ethernet::{EthernetPacket, EthernetRef, Ethertype, ValidEthernet},
+    geneve::GenevePacket,
     icmp::{IcmpV4, IcmpV6, ValidIcmpV4, ValidIcmpV6},
     ip::{IpProtocol, Ipv4, Ipv6, Ipv6Packet, ValidIpv4, ValidIpv6},
     tcp::{Tcp, ValidTcp},
     udp::{Udp, UdpPacket, ValidUdp},
 };
 use ingot_macros::{choice, Parse};
-use ingot_types::{Packet, ParseControl};
+use ingot_types::ParseControl;
 use zerocopy::ByteSlice;
 
 #[choice(on = Ethertype)]
