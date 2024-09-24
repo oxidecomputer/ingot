@@ -366,9 +366,9 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         parse_points.push(contents);
         onechunk_parse_points.push(ns_contents);
-        if optional.is_some() {
+        if let Some(prior_target) = optional {
             valid_fields.push(quote! {
-                pub #fname: ::core::option::Option<<#target_ty as ::ingot::types::HasView<#type_param>>::ViewType>
+                pub #fname: ::core::option::Option<<#prior_target as ::ingot::types::HasView<#type_param>>::ViewType>
             });
             into_fields.push(quote! {
                 let #fname = val.#fname.map(Into::into);
