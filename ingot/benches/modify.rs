@@ -1,6 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use ingot::{
-    example_chain::{OpteIn, OpteOut, UltimateChain},
+    example_chain::{
+        OpteIn, OpteOut, UltimateChain, ValidOpteIn, ValidOpteOut,
+    },
     udp::{UdpMut, UdpRef, ValidUdp},
 };
 use ingot_types::HeaderParse;
@@ -161,8 +163,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("parse-stack-opte-in", |b| {
         b.iter(|| OpteIn::parse(black_box(&opte_in_pkt[..])).unwrap())
     });
+    c.bench_function("parse-valid-opte-in", |b| {
+        b.iter(|| ValidOpteIn::parse(black_box(&opte_in_pkt[..])).unwrap())
+    });
     c.bench_function("parse-stack-opte-out", |b| {
         b.iter(|| OpteOut::parse(black_box(&opte_out_pkt[..])).unwrap())
+    });
+    c.bench_function("parse-valid-opte-out", |b| {
+        b.iter(|| ValidOpteOut::parse(black_box(&opte_out_pkt[..])).unwrap())
     });
     // c.bench_function("parsy2-stack-opte-in", |b| {
     //     b.iter(|| OpteIn::parsy2(black_box(&opte_in_pkt[..])).unwrap())

@@ -368,6 +368,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             #( #valid_fields ),*
         }
 
+        // TODO: impl into.
+
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #ident<V> {
             type Denom = ();
         }
@@ -390,19 +392,19 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             type Denom = ();
         }
 
-        // impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
-        //     #[inline]
-        //     fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
-        //         #imports
+        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
+            #[inline]
+            fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+                #imports
 
-        //         let slice = from;
-        //         #accept_state
+                let slice = from;
+                #accept_state
 
-        //         #( #onechunk_parse_points )*
+                #( #onechunk_parse_points )*
 
-        //         Ok((#ctor, None, slice))
-        //     }
-        // }
+                Ok((#ctor, None, slice))
+            }
+        }
 
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #ident<V> {
             #[inline]
@@ -428,28 +430,28 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         }
 
-        // impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #validated_ident<V> {
-        //     #[inline]
-        //     pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#validated_ident<Q::Chunk>, Q>> {
-        //         #imports
+        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #validated_ident<V> {
+            #[inline]
+            pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#validated_ident<Q::Chunk>, Q>> {
+                #imports
 
-        //         let slice = data.next_chunk()?;
-        //         #accept_state
+                let slice = data.next_chunk()?;
+                #accept_state
 
-        //         #( #parse_points )*
+                #( #parse_points )*
 
-        //         let last_chunk = match remainder.len() {
-        //             // Attempt to pull another slice out.
-        //             0 => data.next_chunk().ok(),
-        //             _ => Some(remainder),
-        //         };
+                let last_chunk = match remainder.len() {
+                    // Attempt to pull another slice out.
+                    0 => data.next_chunk().ok(),
+                    _ => Some(remainder),
+                };
 
-        //         ::core::result::Result::Ok(::ingot::types::Parsed {
-        //             stack: ::ingot::types::HeaderStack(#ctor),
-        //             data,
-        //             last_chunk,
-        //         })
-        //     }
-        // }
+                ::core::result::Result::Ok(::ingot::types::Parsed {
+                    stack: ::ingot::types::HeaderStack(#ctor),
+                    data,
+                    last_chunk,
+                })
+            }
+        }
     }
 }
