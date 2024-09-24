@@ -3,7 +3,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::{
     spanned::Spanned, Data, DeriveInput, Error, Field, GenericArgument, Path,
-    PathArguments, Token, Type, TypeInfer, TypePath,
+    PathArguments, Token, Type, TypeInfer, TypeParam, TypePath,
 };
 
 #[derive(FromDeriveInput)]
@@ -28,9 +28,8 @@ struct AnalysedField {
 }
 
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
-    // TODO: enforce no lifetimes, one type param.
-
-    let DeriveInput { ref ident, ref data, .. } = input;
+    let DeriveInput { ref ident, ref data, ref generics, .. } = input;
+    let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
 
     let Data::Struct(data) = data else {
         return Error::new(
@@ -40,8 +39,27 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         .into_compile_error();
     };
 
+    if let Some(lifetime) = generics.lifetimes().next() {
+        return Error::new(
+            lifetime.span(),
+            "packet parsing cannot have explicit lifetimes",
+        )
+        .into_compile_error();
+    }
+
+    let type_params: Vec<_> = generics.type_params().cloned().collect();
+    if type_params.is_empty() || type_params.len() > 1 {
+        return Error::new(
+            generics.span(),
+            "parsed packets must be generic over exactly one buffer type",
+        )
+        .into_compile_error();
+    }
+    let type_param = &type_params[0].ident;
+
     let mut parse_points: Vec<TokenStream> = vec![];
     let mut onechunk_parse_points: Vec<TokenStream> = vec![];
+    let mut valid_fields: Vec<TokenStream> = vec![];
 
     let mut analysed = vec![];
     for (i, field) in data.fields.iter().enumerate() {
@@ -108,8 +126,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     let all_fnames = analysed.iter().map(|v| &v.fname).collect::<Vec<_>>();
 
     let ctor = match data.fields {
-        syn::Fields::Named(_) => quote! { #ident{ #( #all_fnames ),* } },
-        syn::Fields::Unnamed(_) => quote! { #ident( #( #all_fnames ),* ) },
+        syn::Fields::Named(_) => quote! { Self { #( #all_fnames ),* } },
+        syn::Fields::Unnamed(_) => quote! { Self ( #( #all_fnames ),* ) },
         syn::Fields::Unit => {
             return Error::new(
                 input.span(),
@@ -186,39 +204,30 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         });
 
-        let mut local_ty = match optional {
+        let base_ty = match optional {
             Some(ty) => ty.clone(),
             None => syn::Type::Path(first_ty.clone()),
         };
+        let mut local_ty = base_ty.clone();
 
-        if i == 0 {
-            // Hacky generic handling.
-            if let Type::Path(ref mut t) = local_ty {
-                t.qself = None;
-                if let Some(el) = t.path.segments.last_mut() {
-                    el.arguments = PathArguments::None;
-                }
-            }
-        } else {
-            // Hackier generic handling.
-            // let mut local_ty = first_ty.clone();
-            if let Type::Path(ref mut t) = local_ty {
-                t.qself = None;
-                if let Some(el) = t.path.segments.last_mut() {
-                    // replace all generic args with inferred.
-                    match &mut el.arguments {
-                        PathArguments::AngleBracketed(args) => {
-                            for arg in args.args.iter_mut() {
-                                if let GenericArgument::Type(t) = arg {
-                                    *t = Type::Infer(TypeInfer {
-                                        underscore_token: Token![_](t.span()),
-                                    })
-                                }
+        // Hackier generic handling.
+        // let mut local_ty = first_ty.clone();
+        if let Type::Path(ref mut t) = local_ty {
+            t.qself = None;
+            if let Some(el) = t.path.segments.last_mut() {
+                // replace all generic args with inferred.
+                match &mut el.arguments {
+                    PathArguments::AngleBracketed(args) => {
+                        for arg in args.args.iter_mut() {
+                            if let GenericArgument::Type(t) = arg {
+                                *t = Type::Infer(TypeInfer {
+                                    underscore_token: Token![_](t.span()),
+                                })
                             }
                         }
-                        PathArguments::None => todo!(),
-                        PathArguments::Parenthesized(_) => todo!(),
                     }
+                    PathArguments::None => todo!(),
+                    PathArguments::Parenthesized(_) => todo!(),
                 }
             }
         }
@@ -234,7 +243,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     let (#fname, remainder, hint) = if accepted {
                         (::core::option::Option::None, slice, None)
                     } else {
-                        let #destructure = #local_ty::parse(slice)?;
+                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)?;
                         #hint_frag
                         (::core::option::Option::Some(#fname), remainder)
                     };
@@ -253,7 +262,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         } else {
             (
                 quote! {
-                    let #destructure = #local_ty::parse(slice)?;
+                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)?;
                     // #hint_frag
                 },
                 quote! {
@@ -331,6 +340,9 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         parse_points.push(contents);
         onechunk_parse_points.push(ns_contents);
+        valid_fields.push(quote! {
+            pub #fname: <#base_ty as ::ingot::types::HasView<#type_param>>::ViewType
+        });
     }
 
     let accept_state = quote! {
@@ -346,6 +358,10 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     quote! {
+        pub struct #validated_ident<#type_param: ByteSlice> {
+            #( #valid_fields ),*
+        }
+
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #ident<V> {
             type Denom = ();
         }
@@ -354,7 +370,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             #[inline]
             fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                 #imports
-                // #( #define_all_optionals )*
 
                 let slice = from;
                 #accept_state
@@ -365,11 +380,28 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         }
 
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #validated_ident<V> {
+            type Denom = ();
+        }
+
+        // impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
+        //     #[inline]
+        //     fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+        //         #imports
+
+        //         let slice = from;
+        //         #accept_state
+
+        //         #( #onechunk_parse_points )*
+
+        //         Ok((#ctor, None, slice))
+        //     }
+        // }
+
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #ident<V> {
             #[inline]
             pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#ident<Q::Chunk>, Q>> {
                 #imports
-                // #( #define_all_optionals )*
 
                 let slice = data.next_chunk()?;
                 #accept_state
@@ -389,5 +421,29 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 })
             }
         }
+
+        // impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #validated_ident<V> {
+        //     #[inline]
+        //     pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#validated_ident<Q::Chunk>, Q>> {
+        //         #imports
+
+        //         let slice = data.next_chunk()?;
+        //         #accept_state
+
+        //         #( #parse_points )*
+
+        //         let last_chunk = match remainder.len() {
+        //             // Attempt to pull another slice out.
+        //             0 => data.next_chunk().ok(),
+        //             _ => Some(remainder),
+        //         };
+
+        //         ::core::result::Result::Ok(::ingot::types::Parsed {
+        //             stack: ::ingot::types::HeaderStack(#ctor),
+        //             data,
+        //             last_chunk,
+        //         })
+        //     }
+        // }
     }
 }
