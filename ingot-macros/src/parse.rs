@@ -25,6 +25,7 @@ struct AnalysedField {
     // holds an inner type
     optional: Option<Type>,
     fname: Ident,
+    target_ty: TypePath,
 }
 
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
@@ -60,6 +61,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     let mut parse_points: Vec<TokenStream> = vec![];
     let mut onechunk_parse_points: Vec<TokenStream> = vec![];
     let mut valid_fields: Vec<TokenStream> = vec![];
+    let mut into_fields: Vec<TokenStream> = vec![];
 
     let mut analysed = vec![];
     for (i, field) in data.fields.iter().enumerate() {
@@ -108,6 +110,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             first_ty,
             optional,
             fname,
+            target_ty: ty.clone(),
         });
     }
 
@@ -138,7 +141,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     };
 
     let n_fields = data.fields.len();
-    for (i, AnalysedField { first_ty, optional, fname, args, .. }) in
+    for (i, AnalysedField { first_ty, optional, fname, args, target_ty, .. }) in
         analysed.iter().enumerate()
     {
         let hint_frag = if i < n_fields {
@@ -209,9 +212,9 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             None => syn::Type::Path(first_ty.clone()),
         };
         let mut local_ty = base_ty.clone();
+        let mut bare_ty = target_ty.clone();
+        let mut target_ty = target_ty.clone();
 
-        // Hackier generic handling.
-        // let mut local_ty = first_ty.clone();
         if let Type::Path(ref mut t) = local_ty {
             t.qself = None;
             if let Some(el) = t.path.segments.last_mut() {
@@ -230,6 +233,29 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     PathArguments::Parenthesized(_) => todo!(),
                 }
             }
+        }
+
+        // target_ty.qself = None;
+        // if let Some(el) = target_ty.path.segments.last_mut() {
+        //     // replace all generic args with inferred.
+        //     match &mut el.arguments {
+        //         PathArguments::AngleBracketed(args) => {
+        //             for arg in args.args.iter_mut() {
+        //                 if let GenericArgument::Type(t) = arg {
+        //                     *t = Type::Infer(TypeInfer {
+        //                         underscore_token: Token![_](t.span()),
+        //                     })
+        //                 }
+        //             }
+        //         }
+        //         PathArguments::None => todo!(),
+        //         PathArguments::Parenthesized(_) => todo!(),
+        //     }
+        // }
+
+        bare_ty.qself = None;
+        if let Some(el) = bare_ty.path.segments.last_mut() {
+            el.arguments = PathArguments::None;
         }
 
         let destructure = quote! {
@@ -342,11 +368,17 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         onechunk_parse_points.push(ns_contents);
         if optional.is_some() {
             valid_fields.push(quote! {
-                pub #fname: ::core::option::Option<<#base_ty as ::ingot::types::HasView<#type_param>>::ViewType>
+                pub #fname: ::core::option::Option<<#target_ty as ::ingot::types::HasView<#type_param>>::ViewType>
+            });
+            into_fields.push(quote! {
+                let #fname = val.#fname.map(#bare_ty::from).map(Into::into);
             });
         } else {
             valid_fields.push(quote! {
-                pub #fname: <#base_ty as ::ingot::types::HasView<#type_param>>::ViewType
+                pub #fname: <#target_ty as ::ingot::types::HasView<#type_param>>::ViewType
+            });
+            into_fields.push(quote! {
+                let #fname = #bare_ty::from(val.#fname).into();
             });
         }
     }
@@ -368,7 +400,14 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             #( #valid_fields ),*
         }
 
-        // TODO: impl into.
+        // impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for #ident<V> {
+        //     #[inline]
+        //     fn from(val: #validated_ident<V>) -> Self {
+        //         #( #into_fields )*
+
+        //         #ctor
+        //     }
+        // }
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #ident<V> {
             type Denom = ();

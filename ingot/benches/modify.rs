@@ -2,6 +2,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use ingot::{
     example_chain::{
         OpteIn, OpteOut, UltimateChain, ValidOpteIn, ValidOpteOut,
+        ValidUltimateChain,
     },
     udp::{UdpMut, UdpRef, ValidUdp},
 };
@@ -153,6 +154,11 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
     c.bench_function("parse-stack-v6", |b| {
         b.iter(|| UltimateChain::parse(black_box(&pkt_body_v6[..])).unwrap())
+    });
+    c.bench_function("parse-valid-stack-v6", |b| {
+        b.iter(|| {
+            ValidUltimateChain::parse(black_box(&pkt_body_v6[..])).unwrap()
+        })
     });
     c.bench_function("parse-read-v4", |b| {
         b.iter(|| {

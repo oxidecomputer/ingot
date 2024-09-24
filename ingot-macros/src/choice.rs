@@ -160,6 +160,18 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
                     }
                 }
             }
+
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#validated_ident<V>> for #valid_field_ident<V> {
+                type Error = ::ingot::types::ParseError;
+
+                #[inline]
+                fn try_from(value: #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
+                    match value {
+                        #validated_ident::#id(v) => Ok(v.into()),
+                        _ => ::core::result::Result::Err(::ingot::types::ParseError::Unwanted),
+                    }
+                }
+            }
         });
     }
 
