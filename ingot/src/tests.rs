@@ -1,7 +1,18 @@
-use alloc::collections::LinkedList;
-use alloc::vec::Vec;
-use ingot_types::Header;
-use ingot_types::HeaderParse;
+use core::net::{Ipv4Addr, Ipv6Addr};
+
+use crate::{
+    ethernet::{Ethernet, EthernetMut, EthernetRef, ValidEthernet},
+    geneve::{Geneve, GeneveMut, GeneveRef, ValidGeneve},
+    ip::{
+        Ecn, Ipv4, Ipv4Mut, Ipv4Ref, Ipv6, Ipv6Mut, Ipv6Ref, ValidIpv4,
+        ValidIpv6,
+    },
+    udp::{Udp, UdpMut, UdpRef, ValidUdp},
+};
+use alloc::{collections::LinkedList, vec::Vec};
+use example_chain::{OpteIn, UltimateChain, L3};
+use ingot_types::{primitives::*, Header, HeaderParse};
+use macaddr::MacAddr6;
 
 use super::*;
 

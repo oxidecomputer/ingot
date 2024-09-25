@@ -1,31 +1,21 @@
 use bitfield::PrimitiveInBitfield;
-use darling::ast;
-use darling::ast::Fields;
-use darling::ast::GenericParamExt;
-use darling::FromDeriveInput;
-use darling::FromField;
-use darling::FromMeta;
-use proc_macro2::Ident;
-use proc_macro2::Span;
-use proc_macro2::TokenStream;
-use quote::quote;
-use quote::ToTokens;
+use darling::{
+    ast,
+    ast::{Fields, GenericParamExt},
+    FromDeriveInput, FromField, FromMeta,
+};
+use proc_macro2::{Ident, Span, TokenStream};
+use quote::{quote, ToTokens};
 use regex::Regex;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::rc::Rc;
-use syn::parse_quote;
-use syn::spanned::Spanned;
-use syn::visit::Visit;
-use syn::Error;
-use syn::Expr;
-use syn::ExprLit;
-use syn::Generics;
-use syn::Lit;
-use syn::Type;
-use syn::TypeArray;
-use syn::TypeParam;
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
+use syn::{
+    parse_quote, spanned::Spanned, visit::Visit, Error, Expr, ExprLit,
+    Generics, Lit, Type, TypeArray, TypeParam,
+};
 
 mod bitfield;
 

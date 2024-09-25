@@ -1,15 +1,10 @@
-use criterion::criterion_group;
-use criterion::criterion_main;
-use criterion::Criterion;
-use ingot::OpteIn;
-use ingot::OpteOut;
-use ingot::UdpMut;
-use ingot::UdpRef;
-use ingot::UltimateChain;
-use ingot::ValidUdp;
+use criterion::{criterion_group, criterion_main, Criterion};
+use ingot::{
+    example_chain::{OpteIn, OpteOut, UltimateChain},
+    udp::{UdpMut, UdpRef, ValidUdp},
+};
 use ingot_types::HeaderParse;
-use std::collections::LinkedList;
-use std::hint::black_box;
+use std::{collections::LinkedList, hint::black_box};
 
 fn parse_udp(buf: &[u8]) -> ValidUdp<&[u8]> {
     ValidUdp::parse(buf).unwrap().0

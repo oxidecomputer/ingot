@@ -1,8 +1,7 @@
 use super::*;
 use proc_macro2::TokenStream;
 use quote::quote;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone, Debug)]
 pub struct PrimitiveInBitfield {

@@ -20,6 +20,7 @@ ingot-types = { path = "ingot-types", default-features = false }
 bitflags = "2"
 darling = "0.20"
 heapless = "0.8"
+itertools = "0.13"
 macaddr = { version = "1", default-features = false }
 prettyplease = "0.2"
 proc-macro2 = { version = "1" }
@@ -27,11 +28,6 @@ quote = "1.0"
 regex = "1"
 syn = { version = "2", features = ["visit"] }
 zerocopy = { version = "0.8.0-alpha.16", features = ["derive"] }
-
-# temp external
-pnet_packet = { version = "0.35", default-features = false }
-pnet_macros = "0.35"
-pnet_macros_support = "0.35"
 
 # External dev-deps
 criterion = "0.5"

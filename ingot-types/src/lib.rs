@@ -4,19 +4,40 @@
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
-use core::convert::Infallible;
-use core::net::Ipv4Addr;
-use core::net::Ipv6Addr;
+use core::{
+    convert::Infallible,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 #[cfg(not(feature = "alloc"))]
 use heapless::Vec;
-use zerocopy::ByteSlice;
-use zerocopy::ByteSliceMut;
+
+pub use zerocopy::{
+    ByteSlice, ByteSliceMut, SplitByteSlice, SplitByteSliceMut,
+};
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
 pub mod primitives {
-    pub use pnet_macros_support::types::*;
+    #![allow(non_camel_case_types)]
+
+    pub type u1 = u8;
+    pub type u2 = u8;
+    pub type u3 = u8;
+    pub type u4 = u8;
+    pub type u5 = u8;
+    pub type u6 = u8;
+    pub type u7 = u8;
+
+    pub type i1 = i8;
+    pub type i2 = i8;
+    pub type i3 = i8;
+    pub type i4 = i8;
+    pub type i5 = i8;
+    pub type i6 = i8;
+    pub type i7 = i8;
+
+    ingot_macros::define_primitive_types!();
 }
 
 pub enum Packet<O, B> {

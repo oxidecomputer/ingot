@@ -1,13 +1,7 @@
-use darling::ast::NestedMeta;
-use darling::Error as DarlingError;
-use darling::FromMeta;
-use darling::FromVariant;
-use proc_macro2::Ident;
-use proc_macro2::TokenStream;
+use darling::{ast::NestedMeta, Error as DarlingError, FromMeta, FromVariant};
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
-use syn::spanned::Spanned;
-use syn::Error;
-use syn::Path;
+use syn::{spanned::Spanned, Error, Path};
 
 #[derive(FromMeta)]
 struct ChoiceArgs {
@@ -120,7 +114,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
                 fn try_from(value: #ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
                         #ident::#id(v) => Ok(v),
-                        _ => ::core::result::Result::Err(ParseError::Unwanted),
+                        _ => ::core::result::Result::Err(::ingot_types::ParseError::Unwanted),
                     }
                 }
             }
@@ -131,7 +125,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
                 fn try_from(value: #validated_ident<V>) -> ::core::result::Result<Self, Self::Error> {
                     match value {
                         #validated_ident::#id(v) => Ok(v.into()),
-                        _ => ::core::result::Result::Err(ParseError::Unwanted),
+                        _ => ::core::result::Result::Err(::ingot_types::ParseError::Unwanted),
                     }
                 }
             }

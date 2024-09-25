@@ -1,21 +1,10 @@
-use darling::FromDeriveInput;
-use darling::FromField;
-use proc_macro2::Ident;
-use proc_macro2::TokenStream;
-use quote::format_ident;
-use quote::quote;
-use syn::spanned::Spanned;
-use syn::Data;
-use syn::DeriveInput;
-use syn::Error;
-use syn::Field;
-use syn::GenericArgument;
-use syn::Path;
-use syn::PathArguments;
-use syn::Token;
-use syn::Type;
-use syn::TypeInfer;
-use syn::TypePath;
+use darling::{FromDeriveInput, FromField};
+use proc_macro2::{Ident, TokenStream};
+use quote::{format_ident, quote};
+use syn::{
+    spanned::Spanned, Data, DeriveInput, Error, Field, GenericArgument, Path,
+    PathArguments, Token, Type, TypeInfer, TypePath,
+};
 
 #[derive(FromDeriveInput)]
 #[darling(supports(struct_named, struct_tuple))]
@@ -360,6 +349,13 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         let mut accepted = false;
     };
 
+    let imports = quote! {
+        use ::ingot::types::HasView;
+        use ::ingot::types::NextLayer;
+        use ::ingot::types::ParseChoice;
+        use ::ingot::types::HeaderParse;
+    };
+
     quote! {
         impl<V: ::ingot_types::Chunk> ::ingot_types::HasBuf for #ident<V> {
             type BufType = V;
@@ -368,6 +364,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         impl<V: ::ingot_types::Chunk> ::ingot_types::HeaderParse for #ident<V> {
             type Target = Self;
             fn parse(from: V) -> ::ingot_types::ParseResult<(Self, V)> {
+                #imports
                 // #( #define_all_optionals )*
 
                 let slice = from;
@@ -381,6 +378,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         impl<V: ::ingot_types::Chunk> #ident<V> {
             pub fn parse_read<Q: ::ingot_types::Read<Chunk = V>>(mut data: Q) -> ::ingot_types::ParseResult<::ingot_types::Parsed<#ident<Q::Chunk>, Q>> {
+                #imports
                 // #( #define_all_optionals )*
 
                 let slice = data.next_chunk()?;

@@ -1,7 +1,8 @@
 use darling::FromDeriveInput;
 use parse::ParserArgs;
-use syn::parse_macro_input;
-use syn::ItemEnum;
+use proc_macro2::Span;
+use quote::quote;
+use syn::{parse_macro_input, Ident, ItemEnum};
 
 mod choice;
 mod packet;
@@ -39,4 +40,53 @@ pub fn choice(
 ) -> proc_macro::TokenStream {
     let item = syn::parse_macro_input!(item as ItemEnum);
     choice::attr_impl(attr.into(), item).into()
+}
+
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+enum IntClass {
+    BigEndian,
+    LittleEndian,
+    HostEndian,
+}
+
+impl IntClass {
+    pub fn suffix(&self) -> &str {
+        match self {
+            IntClass::BigEndian => "be",
+            IntClass::LittleEndian => "le",
+            IntClass::HostEndian => "he",
+        }
+    }
+}
+
+#[proc_macro]
+pub fn define_primitive_types(
+    _arg: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    // TODO: signed integers.
+    let prefixes = ["u"];
+    let bitwidths = 9..=128usize;
+    let suffixes =
+        [IntClass::BigEndian, IntClass::LittleEndian, IntClass::HostEndian];
+
+    let mut body = vec![];
+    for (prefix, width, suffix) in
+        itertools::iproduct!(prefixes, bitwidths, suffixes)
+    {
+        let t_name = Ident::new(
+            &format!("{prefix}{width}{}", suffix.suffix()),
+            Span::call_site(),
+        );
+        let expand_width = width.next_power_of_two();
+        let base_name =
+            Ident::new(&format!("{prefix}{expand_width}"), Span::call_site());
+        body.push(quote! {
+            pub type #t_name = #base_name;
+        })
+    }
+
+    quote! {
+        #( #body )*
+    }
+    .into()
 }
