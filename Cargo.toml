@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "oxpacket",
+    "oxpacket-macros",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MPL-2.0"
+repository = "https://github.com/oxidecomputer/opte"
+
+[workspace.dependencies]
+# Internal
+oxpacket-macros = { path = "oxpacket-macros", default-features = false }
+
+# External
+darling = "0.20"
+proc-macro2 = { version = "1" }
+quote = "1.0"
+syn = "2"
+
+[profile.release]
+debug = 2

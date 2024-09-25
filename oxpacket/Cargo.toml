@@ -1,0 +1,11 @@
+[package]
+name = "oxpacket"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+alloc = []
+default = ["alloc"]
+
+[dependencies]
+oxpacket-macros.workspace = true
