@@ -5,7 +5,6 @@ use bitflags::bitflags;
 use core::marker::PhantomPinned;
 use core::net::Ipv4Addr;
 use core::net::Ipv6Addr;
-use ingot_macros::choice;
 use ingot_macros::Ingot;
 use ingot_macros::Parse;
 use ingot_types::Chunk;
@@ -22,6 +21,8 @@ use ingot_types::VarBytes;
 use macaddr::MacAddr6;
 use pnet_macros_support::types::*;
 use zerocopy::ByteSliceMut;
+
+pub use ingot_macros::*;
 
 #[cfg(feature = "alloc")]
 #[allow(unused)]

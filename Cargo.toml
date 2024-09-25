@@ -38,3 +38,4 @@ criterion = "0.5"
 
 [profile.release]
 debug = 2
+lto = true
