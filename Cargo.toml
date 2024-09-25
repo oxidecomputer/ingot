@@ -14,11 +14,14 @@ repository = "https://github.com/oxidecomputer/ingot"
 [workspace.dependencies]
 # Internal
 ingot-macros = { path = "ingot-macros", default-features = false }
+ingot-types = { path = "ingot-types", default-features = false }
 
 # External
 darling = "0.20"
+macaddr = "1"
 proc-macro2 = { version = "1" }
 quote = "1.0"
+regex = "1"
 syn = "2"
 
 # temp external

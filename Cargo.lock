@@ -65,6 +65,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
+name = "ingot"
+version = "0.1.0"
+dependencies = [
+ "ingot-macros",
+ "ingot-types",
+ "macaddr",
+ "pnet_macros",
+ "pnet_macros_support",
+ "pnet_packet",
+]
+
+[[package]]
+name = "ingot-macros"
+version = "0.1.0"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "syn",
+]
+
+[[package]]
+name = "ingot-types"
+version = "0.1.0"
+dependencies = [
+ "pnet_macros_support",
+]
+
+[[package]]
+name = "macaddr"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baee0bbc17ce759db233beb01648088061bf678383130602a298e6998eedb2d8"
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -75,26 +111,6 @@ name = "no-std-net"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43794a0ace135be66a25d3ae77d41b91615fb68ae937f904090203e81f755b65"
-
-[[package]]
-name = "oxpacket"
-version = "0.1.0"
-dependencies = [
- "oxpacket-macros",
- "pnet_macros",
- "pnet_macros_support",
- "pnet_packet",
-]
-
-[[package]]
-name = "oxpacket-macros"
-version = "0.1.0"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "pnet_base"

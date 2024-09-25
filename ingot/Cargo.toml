@@ -8,7 +8,9 @@ alloc = []
 default = ["alloc"]
 
 [dependencies]
-oxpacket-macros.workspace = true
+ingot-macros.workspace = true
+ingot-types.workspace = true
+macaddr.workspace = true
 pnet_packet.workspace = true
 pnet_macros.workspace = true
 pnet_macros_support.workspace = true

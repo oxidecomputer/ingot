@@ -2,10 +2,14 @@
 
 use alloc::vec::Vec;
 use core::convert::Infallible;
+use core::net::Ipv4Addr;
+use core::net::Ipv6Addr;
 use core::pin::Pin;
-use oxpacket_macros::Parse;
-
-use pnet_macros::packet;
+use ingot_macros::Ingot;
+use ingot_macros::Parse;
+use ingot_types::Packet as KyPacket;
+use macaddr::MacAddr6;
+use pnet_macros::packet as lpacket;
 use pnet_macros_support::types::*;
 use pnet_packet::FromPacket;
 
@@ -21,7 +25,12 @@ use pnet_packet::FromPacket;
 // that we can safely split borrows in an adjacent struct.
 // and we need to think of a non-alloc way to repr variable width data in
 // the struct definition
-#[packet]
+
+// extra features we want?
+// - computed fields, where possible.
+// -
+
+#[lpacket]
 pub struct Fragment {
     pub next_header: u8,
     pub reserved: u8,
@@ -29,9 +38,34 @@ pub struct Fragment {
     pub res: u2,
     pub more_frags: u1,
     pub ident: u32be,
-
     #[payload]
     pub payload: Vec<u8>,
+}
+
+#[derive(Ingot)]
+pub struct Ethernet {
+    #[ingot(is = "[u8; 6]")]
+    pub destination: MacAddr6,
+    #[ingot(is = "[u8; 6]")]
+    pub source: MacAddr6,
+    pub ethertype: u16be,
+    // #[ingot(extension)]
+    // pub vlans: ???
+}
+
+#[derive(Ingot)]
+pub struct Ipv6 {
+    pub version: u4,
+    pub dscp: u6,
+    pub ecn: u2,
+    pub flow_label: u20be,
+    #[ingot(is = "[u8; 16]")]
+    pub source: Ipv6Addr,
+    #[ingot(is = "[u8; 16]")]
+    pub destination: Ipv6Addr,
+    pub ethertype: u16be,
+    // #[ingot(extension)]
+    // pub vlans: ???
 }
 
 pub trait FragmentRef {
@@ -96,10 +130,6 @@ impl FragmentMut for Fragment {
 }
 
 // Temp name while I'm still fighting libpnet for namespace.
-pub enum KyPacket<O, B> {
-    Repr(O),
-    Raw(B),
-}
 
 impl<O, B> FragmentRef for KyPacket<O, B>
 where

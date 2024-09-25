@@ -6,3 +6,4 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+pnet_macros_support.workspace = true

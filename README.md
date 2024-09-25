@@ -1,4 +1,3 @@
-# ingot
-Bare-metal, zero-copy packet manipulation
+# Ingot -- bare metal packets
 
-(Like libpnet with transparent handlers, some parser combinators, and owned/adjacent reprs).
+TODO
