@@ -2111,7 +2111,7 @@ fn bits_in_primitive(ident: &Ident) -> Result<FixedWidthAnalysis, syn::Error> {
 
     // validation rules:
     // 1) begins with 'u'.
-    // 2) followed by number 1--64. Retval.
+    // 2) followed by number 1--128. Retval.
     // 3) if >=8, followed by endianness.
     let re = Regex::new(r"^u([0-9]+)(be|le|he)?$").unwrap();
     let Some(fields) = re.captures(&name) else {

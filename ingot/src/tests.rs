@@ -817,7 +817,7 @@ fn accessor() {
     );
 
     let mut out = makeshift_stack.emit_vec();
-    let (udp, ..) = ValidUdp::parse(&out[..8]).unwrap();
+    let _ = ValidUdp::parse(&out[..8]).unwrap();
 
     let (a, _): (Accessor<_, UdpPart0>, _) =
         Accessor::read_from_prefix(&out[..8]).unwrap();

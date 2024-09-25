@@ -3,7 +3,7 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::{
     spanned::Spanned, Data, DeriveInput, Error, Field, GenericArgument, Path,
-    PathArguments, Token, Type, TypeInfer, TypeParam, TypePath,
+    PathArguments, Token, Type, TypeInfer, TypePath,
 };
 
 #[derive(FromDeriveInput)]
@@ -213,7 +213,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         };
         let mut local_ty = base_ty.clone();
         let mut bare_ty = target_ty.clone();
-        let mut target_ty = target_ty.clone();
 
         if let Type::Path(ref mut t) = local_ty {
             t.qself = None;
