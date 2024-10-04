@@ -26,6 +26,7 @@ pub use zerocopy::{
 extern crate alloc;
 
 mod accessor;
+mod emit;
 mod error;
 pub mod field;
 pub mod packet;
@@ -37,6 +38,7 @@ pub mod util;
 ingot_macros::define_tuple_trait_impls!();
 
 pub use accessor::Accessor;
+pub use emit::*;
 pub use error::*;
 pub use field::*;
 pub use packet::*;
@@ -46,46 +48,24 @@ pub use packet::*;
 ///
 /// This trait is used to support cases which are ambiguous on their own,
 /// such as [`Repeated`] views over extension headers.
+///
+/// [`Repeated`]: util::Repeated
 pub trait ToOwnedPacket: NextLayer {
     type Target;
 
     fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target>;
 }
 
-impl<T: HasView<B>, B> HasView<B> for Option<T> {
-    type ViewType = T;
-}
-
-impl<T: HasRepr> HasRepr for Option<T> {
-    type ReprType = T;
-}
-
-///
-#[cfg(feature = "alloc")]
-pub type VarBytes<V> = Packet<Vec<u8>, V>;
-#[cfg(not(feature = "alloc"))]
-pub type VarBytes<V> = Packet<Vec<u8, 256>, V>;
-
-impl<B: ByteSlice> HasView<B> for Vec<u8> {
-    type ViewType = RawBytes<B>;
-}
-
-impl<B: ByteSlice, const N: usize> HasView<B> for heapless::Vec<u8, N> {
-    type ViewType = RawBytes<B>;
-}
-
-impl<V: ByteSlice> From<&VarBytes<V>> for Vec<u8> {
-    fn from(value: &VarBytes<V>) -> Self {
-        match value {
-            Packet::Repr(v) => *v.clone(),
-            Packet::Raw(v) => v.to_vec(),
-        }
-    }
-}
-
+/// Base trait for header/packet types.
 pub trait Header {
+    /// The minimum number of bytes a packet of this kind occupies
+    /// when serialised.
     const MINIMUM_LENGTH: usize;
 
+    /// The number of bytes which this packet would occupy when serialised.
+    ///
+    /// This should always return a value greater than or equal to
+    /// [`Header::MINIMUM_LENGTH`].
     fn packet_length(&self) -> usize;
 }
 
@@ -116,96 +96,51 @@ impl Header for Vec<u8> {
     }
 }
 
-pub struct RawBytes<B: ByteSlice>(B);
-
-impl<B: ByteSlice> From<B> for RawBytes<B> {
-    #[inline]
-    fn from(value: B) -> Self {
-        Self(value)
-    }
-}
-
-impl<B: ByteSlice> Deref for RawBytes<B> {
-    type Target = B;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<B: ByteSlice> DerefMut for RawBytes<B> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl<B: ByteSlice> AsRef<[u8]> for RawBytes<B> {
-    #[inline]
-    fn as_ref(&self) -> &[u8] {
-        &self[..]
-    }
-}
-
-impl<B: ByteSliceMut> AsMut<[u8]> for RawBytes<B> {
-    #[inline]
-    fn as_mut(&mut self) -> &mut [u8] {
-        &mut self[..]
-    }
-}
-
-impl<B: ByteSlice> From<RawBytes<B>> for Vec<u8> {
-    fn from(val: RawBytes<B>) -> Self {
-        val.to_vec()
-    }
-}
-
-impl<B: ByteSlice> Header for RawBytes<B> {
-    const MINIMUM_LENGTH: usize = 0;
-
-    #[inline]
-    fn packet_length(&self) -> usize {
-        self.len()
-    }
-}
-
-impl<V: ByteSlice> AsRef<[u8]> for VarBytes<V> {
-    #[inline]
-    fn as_ref(&self) -> &[u8] {
-        match self {
-            Packet::Repr(o) => o.as_ref(),
-            Packet::Raw(b) => b.as_ref(),
-        }
-    }
-}
-
-impl<V: ByteSliceMut> AsMut<[u8]> for VarBytes<V> {
-    #[inline]
-    fn as_mut(&mut self) -> &mut [u8] {
-        match self {
-            Packet::Repr(o) => o.as_mut(),
-            Packet::Raw(b) => b.as_mut(),
-        }
-    }
-}
-
+/// A type which has a corresponding view-type over any buffer `B`.
 pub trait HasView<B> {
     type ViewType;
 }
 
+/// A type which has a corresponding static/owned representation type.
 pub trait HasRepr {
     type ReprType;
 }
 
+impl<T: HasView<B>, B> HasView<B> for Option<T> {
+    type ViewType = T;
+}
+
+impl<T: HasRepr> HasRepr for Option<T> {
+    type ReprType = T;
+}
+
+/// A header/packet type which can be unconditionally parsed from any
+/// buffer `B`.
 pub trait HeaderParse<B: SplitByteSlice>: NextLayer + Sized {
+    /// Parse a view-type from a given buffer.
     fn parse(from: B) -> ParseResult<Success<Self, B>>;
+}
+
+/// A header/packet type which may require a hint to be parsed from
+/// any buffer `B`.
+pub trait ParseChoice<B: SplitByteSlice, Denom: Copy + Eq>:
+    Sized + NextLayer
+{
+    /// Parse a view-type from a given buffer, using an optional
+    /// hint of type `Denom`.
+    fn parse_choice(
+        data: B,
+        hint: Option<Denom>,
+    ) -> ParseResult<Success<Self, B>>;
 }
 
 /// An iterator over contiguous byte slices which can be parsed
 /// as a packet.
 pub trait Read {
+    /// The type of each byte slice.
     type Chunk: SplitByteSlice;
+
+    /// Attempts to fetch the next available byte slice from `self`.
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk>;
 }
 
@@ -229,119 +164,6 @@ impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
     }
 }
 
-pub trait Emit: Header {
-    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize;
-    fn needs_emit(&self) -> bool;
-
-    #[inline]
-    fn emit<V: ByteSliceMut>(&self, buf: V) -> ParseResult<usize> {
-        if buf.len() < self.packet_length() {
-            return Err(ParseError::TooSmall);
-        }
-
-        Ok(self.emit_raw(buf))
-    }
-
-    #[inline]
-    fn emit_prefix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
-        let (into, out) = buf
-            .split_at(self.packet_length())
-            .map_err(|_| ParseError::TooSmall)?;
-
-        self.emit_raw(into);
-        Ok(out)
-    }
-
-    #[inline]
-    fn emit_suffix<V: SplitByteSliceMut>(&self, buf: V) -> ParseResult<V> {
-        let l = buf.len();
-
-        let (into, out) = buf
-            .split_at(l - self.packet_length())
-            .map_err(|_| ParseError::TooSmall)?;
-
-        self.emit_raw(into);
-
-        Ok(out)
-    }
-
-    /// Prefer [`Self::emit_vec`] when it is available.
-    #[inline]
-    fn to_vec(&self) -> Vec<u8> {
-        let len = self.packet_length();
-
-        let mut out = vec![0u8; len];
-
-        let o_len = self.emit(&mut out[..]).expect(
-            "mismatch between packet requested length and required length",
-        );
-
-        assert_eq!(o_len, len);
-
-        out
-    }
-
-    #[inline]
-    fn emit_uninit(&self, buf: &mut [MaybeUninit<u8>]) -> ParseResult<usize>
-    where
-        Self: EmitDoesNotRelyOnBufContents,
-    {
-        // SAFETY: `u8` does not have any validity constraints or Drop.
-        // Accordingly, assuming their initialisation will not trigger
-        // any adverse dropck behaviour, and any value is trivially a valid u8.
-        // We are here if the implementor *promises* not to rely on
-        // buf's contents.
-        // We do not return a reference to the initialised region,
-        // it is up to the caller to inform their datastructre that
-        // bytes are initialised.
-
-        // NOTE: reimpl'ing `slice_assume_init_mut` (unstable).
-        let buf = unsafe { &mut *(buf as *mut [_] as *mut [u8]) };
-
-        self.emit(buf)
-    }
-
-    // TODO: prefix and suffix?
-
-    #[inline]
-    fn emit_vec(&self) -> Vec<u8>
-    where
-        Self: EmitDoesNotRelyOnBufContents,
-    {
-        let len = self.packet_length();
-
-        let mut out = Vec::with_capacity(len);
-
-        let o_len = self.emit_uninit(out.spare_capacity_mut()).expect(
-            "mismatch between packet requested length and required length",
-        );
-        assert_eq!(o_len, len);
-        unsafe {
-            out.set_len(o_len);
-        }
-
-        out
-    }
-}
-
-impl<T: Emit> Emit for Vec<T> {
-    #[inline]
-    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
-        let mut emitted = 0;
-
-        for el in self {
-            emitted += el.emit_raw(&mut buf[emitted..]);
-        }
-
-        emitted
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        true
-    }
-}
-
 impl Header for &[u8] {
     const MINIMUM_LENGTH: usize = 0;
 
@@ -351,100 +173,74 @@ impl Header for &[u8] {
     }
 }
 
-impl Emit for &[u8] {
-    #[inline]
-    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
-        buf[..self.len()].copy_from_slice(self);
-
-        self.len()
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        false
-    }
-}
-
-impl Emit for Vec<u8> {
-    #[inline]
-    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
-        buf.copy_from_slice(self);
-
-        self.len()
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        true
-    }
-}
-
-impl<B: ByteSlice> Emit for RawBytes<B> {
-    #[inline]
-    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
-        buf.copy_from_slice(self);
-
-        self.len()
-    }
-
-    #[inline]
-    fn needs_emit(&self) -> bool {
-        false
-    }
-}
-
-/// TODO: explain this one.
-///
-/// # Safety
-/// Implementors will be given an uninitialised slice of bytes, and must
-/// not meaningfully read from its contents. They are obligated to have
-/// written all bytes which they promise...
-pub unsafe trait EmitDoesNotRelyOnBufContents {}
-
-// Safety: We know this holds true for all our derived emits, by design.
-unsafe impl EmitDoesNotRelyOnBufContents for &[u8] {}
-unsafe impl EmitDoesNotRelyOnBufContents for Vec<u8> {}
-unsafe impl<B: ByteSlice> EmitDoesNotRelyOnBufContents for RawBytes<B> {}
-unsafe impl<T: EmitDoesNotRelyOnBufContents> EmitDoesNotRelyOnBufContents
-    for Vec<T>
-{
-}
-
+/// Helper alias for methods which return tuples of
+/// `(header, next_layer_hint, buf_remainder)`.
 pub type Success<T, B> = (T, Option<<T as NextLayer>::Denom>, B);
 
+/// Headers which can be queried for a hint, used to select the
+/// next layer in a packet.
 pub trait NextLayer {
+    /// The type of this header's next-layer hint.
     type Denom: Copy;
 
+    /// Retrieve this header's next-layer hint, if possible.
     #[inline]
     fn next_layer(&self) -> Option<Self::Denom> {
         None
     }
 }
 
+/// Headers which can be queried for a hint, but require an input hint
+/// to parse this information.
 pub trait NextLayerChoice<Denom: Copy + Eq>: NextLayer {
+    /// Retrieve this header's next-layer hint, if possible.
     #[inline]
     fn next_layer_choice(&self, _hint: Option<Denom>) -> Option<Self::Denom> {
         self.next_layer()
     }
 }
 
-pub trait ParseChoice<V: SplitByteSlice, Denom: Copy + Eq>:
-    Sized + NextLayer
-{
-    fn parse_choice(
-        data: V,
-        hint: Option<Denom>,
-    ) -> ParseResult<Success<Self, V>>;
-}
-
+/// Action to be taken as part of an `#[ingot(control)]` block
+/// during packet parsing.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ParseControl {
-    Accept,
+    /// Proceeds with parsing the remaining layers of a packet.
     Continue,
+    /// Accepts the packet if all remaining fields are `Option`al,
+    /// terminating parsing.
+    Accept,
+    /// Explicitly rejects the packet.
     Reject,
 }
 
+/// Types which can be converted to and from bitstrings and byte arrays
+/// for serialisation as fields of network packets.
+///
+/// This can be used for better type-checking (e.g., `bitfield`s or newtypes).
+/// We might represent a next-header type using a primitive:
+/// ```rust
+/// # use ingot_types::{primitives::u16be, NetworkRepr};
+/// #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd, Default)]
+/// struct Ethertype(u16);
+///
+/// impl NetworkRepr<u16be> for Ethertype {
+///     #[inline]
+///     fn to_network(self) -> u16be {
+///         self.0
+///     }
+///
+///     #[inline]
+///     fn from_network(val: u16be) -> Self {
+///         Self(val)
+///     }
+/// }
+/// ```
+///
+/// ...or, a byte array (such as `[u8; 16]`).
 pub trait NetworkRepr<U: Copy> {
+    /// Converts a local value into raw bytes or integer type.
     fn to_network(self) -> U;
+    /// Converts a raw value into a local type.
     fn from_network(val: U) -> Self;
 }
 
@@ -484,21 +280,17 @@ impl NetworkRepr<[u8; 6]> for macaddr::MacAddr6 {
     }
 }
 
+/// Successful return value from parsing a full packet header stack
+/// over a base packet buffer which is [`Read`].
 pub struct Parsed<Stack, RawPkt: Read> {
-    // this needs to be a struct with all the right names.
+    /// A fully-parsed header stack.
     pub stack: Stack,
-    // want generic data type here:
-    // can be:
-    //  ref or owned
-    //  contig or chunked
-    //  can be optional iff the proto stack is all dynamic!
-    // what is right emit API?
-    // need to wrap in a cursor, kinda.
-    pub data: RawPkt,
-
+    /// The remainder of the last chunk accessed during parsing.
     pub last_chunk: Option<RawPkt::Chunk>,
-    // Not yet, but soon.
-    // _self_referential: PhantomPinned,
+    /// The leftover packet cursor.
+    ///
+    /// Remaining bytes can be accessed using [`Read`].
+    pub data: RawPkt,
 }
 
 impl<Stack, RawPkt: Read> Parsed<Stack, RawPkt> {

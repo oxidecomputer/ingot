@@ -1,4 +1,4 @@
-//!
+//! `Packet` equivalents for header fields accessed by reference.
 
 use super::*;
 

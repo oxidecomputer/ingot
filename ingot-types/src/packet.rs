@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 pub use alloc::vec::Vec;
 #[allow(unused)]
 use heapless::Vec as HVec;
+use primitives::RawBytes;
 
 #[cfg(not(feature = "alloc"))]
 pub type Packet<O, B> = DirectPacket<O, B>;
@@ -67,7 +68,9 @@ impl<O, B> From<IndirectPacket<O, B>> for DirectPacket<O, B> {
     }
 }
 
+//
 // Indirect impls.
+//
 #[cfg(feature = "alloc")]
 impl<O, B> IndirectPacket<O, B> {
     pub fn repr(&self) -> Option<&O> {
