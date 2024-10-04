@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use ingot::{
     example_chain::{
-        OpteIn, OpteOut, UltimateChain, ValidOpteIn, ValidOpteOut,
+        GenericUlp, GeneveOverV6Tunnel, UdpParser, ValidOpteIn, ValidOpteOut,
         ValidUltimateChain,
     },
     udp::{UdpMut, UdpRef, ValidUdp},
@@ -136,24 +136,27 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     actual_chain_v4.push_front(pkt_body_v4[14..34].to_vec());
     actual_chain_v4.push_front(pkt_body_v4[0..14].to_vec());
 
-    println!("size IN  is {}", core::mem::size_of::<OpteIn<&[u8]>>());
-    println!("size OUT is {}", core::mem::size_of::<OpteOut<&[u8]>>());
+    println!(
+        "size IN  is {}",
+        core::mem::size_of::<GeneveOverV6Tunnel<&[u8]>>()
+    );
+    println!("size OUT is {}", core::mem::size_of::<GenericUlp<&[u8]>>());
 
     c.bench_function("parse-udp", |b| {
         b.iter(|| black_box(parse_udp(black_box(&pkt_body_v4[34..42]))))
     });
     c.bench_function("parse-stack-v4", |b| {
-        b.iter(|| UltimateChain::parse(black_box(&pkt_body_v4[..])).unwrap())
+        b.iter(|| UdpParser::parse(black_box(&pkt_body_v4[..])).unwrap())
     });
     c.bench_function("parse-and-decr-v4", |b| {
         b.iter(|| {
             let (mut hdrs, ..) =
-                UltimateChain::parse(black_box(&mut pkt_body_v4[..])).unwrap();
+                UdpParser::parse(black_box(&mut pkt_body_v4[..])).unwrap();
             black_box(hdrs.l4.set_destination(hdrs.l4.destination() - 1));
         })
     });
     c.bench_function("parse-stack-v6", |b| {
-        b.iter(|| UltimateChain::parse(black_box(&pkt_body_v6[..])).unwrap())
+        b.iter(|| UdpParser::parse(black_box(&pkt_body_v6[..])).unwrap())
     });
     c.bench_function("parse-valid-stack-v6", |b| {
         b.iter(|| {
@@ -162,18 +165,19 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     });
     c.bench_function("parse-read-v4", |b| {
         b.iter(|| {
-            UltimateChain::parse_read(black_box(actual_chain_v4.iter()))
-                .unwrap()
+            UdpParser::parse_read(black_box(actual_chain_v4.iter())).unwrap()
         })
     });
     c.bench_function("parse-stack-opte-in", |b| {
-        b.iter(|| OpteIn::parse(black_box(&opte_in_pkt[..])).unwrap())
+        b.iter(|| {
+            GeneveOverV6Tunnel::parse(black_box(&opte_in_pkt[..])).unwrap()
+        })
     });
     c.bench_function("parse-valid-opte-in", |b| {
         b.iter(|| ValidOpteIn::parse(black_box(&opte_in_pkt[..])).unwrap())
     });
     c.bench_function("parse-stack-opte-out", |b| {
-        b.iter(|| OpteOut::parse(black_box(&opte_out_pkt[..])).unwrap())
+        b.iter(|| GenericUlp::parse(black_box(&opte_out_pkt[..])).unwrap())
     });
     c.bench_function("parse-valid-opte-out", |b| {
         b.iter(|| ValidOpteOut::parse(black_box(&opte_out_pkt[..])).unwrap())

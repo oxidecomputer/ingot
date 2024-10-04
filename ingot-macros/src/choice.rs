@@ -197,6 +197,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
     quote! {
         // #[derive(Clone)]
+        /// Test text hello?
         pub enum #ident<V: ::ingot::types::ByteSlice> {
             #( #top_vars ),*
         }

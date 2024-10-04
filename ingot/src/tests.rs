@@ -13,7 +13,7 @@ use core::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 use ethernet::Ethertype;
-use example_chain::{OpteIn, OpteOut, UltimateChain, L3};
+use example_chain::{GenericUlp, GeneveOverV6Tunnel, UdpParser, L3};
 use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
     primitives::*, Accessor, Emit, Header, HeaderParse, NetworkRepr, NextLayer,
@@ -98,8 +98,8 @@ fn does_this_chain_stuff_compile() {
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
     }
 
-    let _ = UltimateChain::parse(&mut buf2[..]).unwrap();
-    let (mystack, ..) = UltimateChain::parse(&buf2[..]).unwrap();
+    let _ = UdpParser::parse(&mut buf2[..]).unwrap();
+    let (mystack, ..) = UdpParser::parse(&buf2[..]).unwrap();
 
     match mystack.l3 {
         L3::Ipv4(v) => v.hop_limit(),
@@ -149,7 +149,7 @@ fn variable_len_fields_in_chain() {
         udp.set_checksum(0xffff);
     }
 
-    let (mystack, ..) = UltimateChain::parse(&buf2[..]).unwrap();
+    let (mystack, ..) = UdpParser::parse(&buf2[..]).unwrap();
 
     assert_eq!(
         mystack.eth.source(),
@@ -210,7 +210,7 @@ fn parse_multichunk() {
     my_multi.push_back(udp_bytes);
     my_multi.push_back(body_bytes);
 
-    let mut mystack = UltimateChain::parse_read(my_multi.iter_mut()).unwrap();
+    let mut mystack = UdpParser::parse_read(my_multi.iter_mut()).unwrap();
 
     let hdr = mystack.headers_mut();
 
@@ -411,7 +411,7 @@ fn test_opte_unconditionals() {
         0x04, 0x05, 0x06, 0x07,
     ];
 
-    let (mut opte_in, ..) = OpteIn::parse(&mut pkt[..]).unwrap();
+    let (mut opte_in, ..) = GeneveOverV6Tunnel::parse(&mut pkt[..]).unwrap();
 
     assert_eq!(opte_in.outer_encap.options_ref().as_ref().len(), 4);
     assert_eq!(opte_in.inner_eth.ethertype(), Ethertype::IPV4);
@@ -420,7 +420,7 @@ fn test_opte_unconditionals() {
 
     // Now, try out pretending we're ARP and early exiting.
     opte_in.inner_eth.set_ethertype(Ethertype::ARP);
-    let (opte_in, ..) = OpteIn::parse(&pkt[..]).unwrap();
+    let (opte_in, ..) = GeneveOverV6Tunnel::parse(&pkt[..]).unwrap();
     assert!(opte_in.inner_l3.is_none());
     assert!(opte_in.inner_ulp.is_none());
 }
@@ -445,11 +445,11 @@ fn chunks_present_on_early_accept() {
     pkt_as_readable.push_back(pkt[..14].to_vec());
     pkt_as_readable.push_back(pkt[14..].to_vec());
 
-    let (opte_out, a, b) = OpteOut::parse(&pkt[..]).unwrap();
+    let (opte_out, a, b) = GenericUlp::parse(&pkt[..]).unwrap();
     assert_eq!(b.len(), 8);
 
     let Parsed { stack, data, last_chunk } =
-        OpteOut::parse_read(pkt_as_readable.iter()).unwrap();
+        GenericUlp::parse_read(pkt_as_readable.iter()).unwrap();
     // panic!("{data:?}, {last_chunk:?}");
     assert_eq!(last_chunk.packet_length(), 8);
     assert_eq!(data.len(), 0);

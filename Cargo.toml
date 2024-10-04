@@ -29,7 +29,7 @@ quote = "1.0"
 regex = "1"
 serde = { version = "1", default-features = false }
 syn = { version = "2", features = ["visit"] }
-zerocopy = { version = "0.8.0-alpha.25", features = ["derive"] }
+zerocopy = { version = "0.8", features = ["derive"] }
 
 # External dev-deps
 criterion = "0.5"

@@ -1,4 +1,4 @@
-// TODO: uncork later.
+//! Example uses of the [`Parse`] and [`choice`] macros.
 
 use crate::{
     ethernet::{EthernetPacket, EthernetRef, Ethertype, ValidEthernet},
@@ -12,18 +12,22 @@ use ingot_macros::{choice, Parse};
 use ingot_types::ParseControl;
 use zerocopy::ByteSlice;
 
+/// An IPv4 or IPv6 header, determined by an input [`Ethertype`].
 #[choice(on = Ethertype)]
 pub enum L3 {
     Ipv4 = Ethertype::IPV4,
     Ipv6 = Ethertype::IPV6,
 }
 
+/// A TCP or UDP header, determined by an [`IpProtocol`] from an IPv4/v6
+/// packet.
 #[choice(on = IpProtocol)]
 pub enum L4 {
     Tcp = IpProtocol::TCP,
     Udp = IpProtocol::UDP,
 }
 
+/// An upper-layer protocol header: [`L4`], including ICMP(v6).
 #[choice(on = IpProtocol)]
 pub enum Ulp {
     Tcp = IpProtocol::TCP,
@@ -32,16 +36,18 @@ pub enum Ulp {
     IcmpV6 = IpProtocol::ICMP_V6,
 }
 
+/// A parser which decodes all IPv4/v6 UDP packets, carried over Ethernet.
 #[derive(Parse)]
-pub struct UltimateChain<Q: ByteSlice> {
+pub struct UdpParser<Q: ByteSlice> {
     pub eth: EthernetPacket<Q>,
     pub l3: L3<Q>,
     #[ingot(from = "L4<Q>")]
     pub l4: UdpPacket<Q>,
 }
 
+/// A parser which decodes an inner frame, wrapped by an external Geneve packet.
 #[derive(Parse)]
-pub struct OpteIn<Q: ByteSlice> {
+pub struct GeneveOverV6Tunnel<Q: ByteSlice> {
     pub outer_eth: EthernetPacket<Q>,
     #[ingot(from = "L3<Q>")]
     pub outer_v6: Ipv6Packet<Q>,
@@ -55,6 +61,8 @@ pub struct OpteIn<Q: ByteSlice> {
     pub inner_ulp: Option<Ulp<Q>>,
 }
 
+/// A parser control which terminates successfully if a packet's
+/// body is an ARP packet.
 #[inline]
 fn exit_on_arp<V: ByteSlice>(eth: &ValidEthernet<V>) -> ParseControl {
     if eth.ethertype() == Ethertype::ARP {
@@ -64,78 +72,11 @@ fn exit_on_arp<V: ByteSlice>(eth: &ValidEthernet<V>) -> ParseControl {
     }
 }
 
+/// A parser which decodes a TCP/UDP frame over either IPv4/v6.
 #[derive(Parse)]
-pub struct OpteOut<Q: ByteSlice> {
+pub struct GenericUlp<Q: ByteSlice> {
     #[ingot(control = exit_on_arp)]
     pub inner_eth: EthernetPacket<Q>,
     pub inner_l3: Option<L3<Q>>,
     pub inner_ulp: Option<Ulp<Q>>,
 }
-
-// impl<
-//         'a,
-//         V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a,
-//     > ::ingot::types::HeaderParse<V> for ValidOpteOut<V> {
-//         #[inline]
-//         fn parse(
-//             from: V,
-//         ) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
-//             use ::ingot::types::HasView;
-//             use ::ingot::types::NextLayer;
-//             use ::ingot::types::ParseChoice;
-//             use ::ingot::types::HeaderParse;
-//             let slice = from;
-//             let mut can_accept = false;
-//             let mut accepted = false;
-//             can_accept = true;
-//             let (inner_eth, hint, remainder) = <EthernetPacket<_> as HasView<_>>::ViewType::parse(slice)?;
-//             match exit_on_arp2(&inner_eth.into()) {
-//                 ::ingot::types::ParseControl::Continue => {}
-//                 ::ingot::types::ParseControl::Accept if can_accept => {
-//                     accepted = true;
-//                 }
-//                 ::ingot::types::ParseControl::Accept => {
-//                     return ::core::result::Result::Err(
-//                         ::ingot::types::ParseError::CannotAccept,
-//                     );
-//                 }
-//                 ::ingot::types::ParseControl::Reject => {
-//                     return ::core::result::Result::Err(
-//                         ::ingot::types::ParseError::Reject,
-//                     );
-//                 }
-//             }
-//             let slice = remainder;
-//             let inner_eth = inner_eth.try_into()?;
-//             let (inner_l3, remainder, hint) = if accepted {
-//                 (::core::option::Option::None, slice, None)
-//             } else {
-//                 // let (inner_l3, hint, remainder) = <L3<
-//                 //     _,
-//                 // > as HasView<_>>::ViewType::parse_choice(slice, hint)?;
-//                 let (inner_l3, hint, remainder) = ValidL3::parse_choice(slice, hint)?;
-//                 (::core::option::Option::Some(inner_l3), remainder, hint)
-//             };
-//             let slice = remainder;
-//             let inner_l3 = inner_l3.map(|v| v.try_into()).transpose()?;
-//             let (inner_ulp, remainder, hint) = if accepted {
-//                 (::core::option::Option::None, slice, None)
-//             } else {
-//                 let (inner_ulp, hint, remainder) = <Ulp<
-//                     _,
-//                 > as HasView<_>>::ViewType::parse_choice(slice, hint)?;
-//                 (::core::option::Option::Some(inner_ulp), remainder, hint)
-//             };
-//             let slice = remainder;
-//             let inner_ulp = inner_ulp.map(|v| v.try_into()).transpose()?;
-//             Ok((
-//                 Self {
-//                     inner_eth,
-//                     inner_l3,
-//                     inner_ulp,
-//                 },
-//                 None,
-//                 slice,
-//             ))
-//         }
-//     }

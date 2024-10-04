@@ -1,3 +1,6 @@
+//! Primitive types and core traits needed to generate and use
+//! `ingot` packets.
+
 #![no_std]
 
 use alloc::vec;

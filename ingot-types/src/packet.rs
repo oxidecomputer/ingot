@@ -1,3 +1,5 @@
+//! An abstraction layer over in-buffer and owned packets and headers.
+
 use super::*;
 
 #[cfg(feature = "alloc")]
@@ -13,21 +15,31 @@ pub type Packet<O, B> = DirectPacket<O, B>;
 #[cfg(feature = "alloc")]
 pub type Packet<O, B> = IndirectPacket<O, B>;
 
+/// A header which is either owned or read from a buffer.
+///
+/// Generated traits which allow reading/modifying/emitting either type
+/// are re-implemented on the `Packet` types.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum DirectPacket<O, B> {
-    /// Owned, in-memory representation of a ...
+    /// Owned representation of a header.
     Repr(O),
-    /// Packed representation of a ...
+    /// Packed representation of a header, read from an existing buffer.
     Raw(B),
 }
 
+/// A header which is either owned or read from a buffer, which
+/// heap-allocates if the data is owned.
+///
+/// Generally, use of boxed `Repr` values reduces output struct sizes
+/// when parsing full packets and is preferred when compiling with the
+/// `alloc` feature. See [`DirectPacket`] if stack allocation is needed.
 #[cfg(feature = "alloc")]
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IndirectPacket<O, B> {
-    /// Owned, in-memory representation of a ...
+    /// Owned, in-memory representation of a header.
     #[cfg(feature = "alloc")]
     Repr(Box<O>),
-    /// Packed representation of a ...
+    /// Packed representation of a header, read from an existing buffer.
     Raw(B),
 }
 
@@ -139,8 +151,9 @@ where
     }
 }
 
-// allows us to call e.g. Packet<A,ValidA>::parse if ValidA is also Parse
-// and its owned type has a matching next layer Denom.
+// This implementation allows us to call e.g. Packet<A,ValidA>::parse
+// if ValidA is also Parse, and its owned type has a matching next layer
+// Denom.
 #[cfg(feature = "alloc")]
 impl<
         V: SplitByteSlice,
@@ -262,15 +275,6 @@ impl<
     }
 }
 
-// impl<'a, B: ByteSlice, const N: usize> From<&'a DirectPacket<HVec<u8, N>, RawBytes<B>>> for HVec<u8, N> {
-//     fn from(value: &DirectPacket<HVec<u8, N>, RawBytes<B>>) -> Self {
-//         match value {
-//             DirectPacket::Repr(v) => v.,
-//             DirectPacket::Raw(v) => v.to_vec(),
-//         }
-//     }
-// }
-
 impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for DirectPacket<O, B> {
     type ViewType = B;
 }
@@ -295,8 +299,9 @@ where
     }
 }
 
-// allows us to call e.g. Packet<A,ValidA>::parse if ValidA is also Parse
-// and its owned type has a matching next layer Denom.
+// This implementation allows us to call e.g. Packet<A,ValidA>::parse
+// if ValidA is also Parse, and its owned type has a matching next layer
+// Denom.
 impl<
         V: SplitByteSlice,
         B: HeaderParse<V> + HasRepr + NextLayer + Into<Self>,
