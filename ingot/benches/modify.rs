@@ -1,8 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use ingot::{
     example_chain::{
-        GenericUlp, GeneveOverV6Tunnel, UdpParser, ValidOpteIn, ValidOpteOut,
-        ValidUltimateChain,
+        GenericUlp, GeneveOverV6Tunnel, UdpParser, ValidGenericUlp,
+        ValidGeneveOverV6Tunnel, ValidUdpParser,
     },
     udp::{UdpMut, UdpRef, ValidUdp},
 };
@@ -159,9 +159,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| UdpParser::parse(black_box(&pkt_body_v6[..])).unwrap())
     });
     c.bench_function("parse-valid-stack-v6", |b| {
-        b.iter(|| {
-            ValidUltimateChain::parse(black_box(&pkt_body_v6[..])).unwrap()
-        })
+        b.iter(|| ValidUdpParser::parse(black_box(&pkt_body_v6[..])).unwrap())
     });
     c.bench_function("parse-read-v4", |b| {
         b.iter(|| {
@@ -174,13 +172,15 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         })
     });
     c.bench_function("parse-valid-opte-in", |b| {
-        b.iter(|| ValidOpteIn::parse(black_box(&opte_in_pkt[..])).unwrap())
+        b.iter(|| {
+            ValidGeneveOverV6Tunnel::parse(black_box(&opte_in_pkt[..])).unwrap()
+        })
     });
     c.bench_function("parse-stack-opte-out", |b| {
         b.iter(|| GenericUlp::parse(black_box(&opte_out_pkt[..])).unwrap())
     });
     c.bench_function("parse-valid-opte-out", |b| {
-        b.iter(|| ValidOpteOut::parse(black_box(&opte_out_pkt[..])).unwrap())
+        b.iter(|| ValidGenericUlp::parse(black_box(&opte_out_pkt[..])).unwrap())
     });
     // c.bench_function("parsy2-stack-opte-in", |b| {
     //     b.iter(|| OpteIn::parsy2(black_box(&opte_in_pkt[..])).unwrap())

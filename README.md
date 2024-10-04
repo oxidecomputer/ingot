@@ -10,11 +10,10 @@ Ingot takes heavy inspiration from [`libpnet`](https://github.com/libpnet/libpne
 * Ingot allows packet parsing over split buffers, e.g., illumos `mblk_t`s. Accordingly, individual headers do not have `payload` fields.
 * Variable-width packet segments (options, extensions) can be replaced with their owned representation, even when their parent is a zero-copy view. This makes it easier to alter options in place, if needed.
 
-
-
 ## Performance
 NOTE: because ingot is based upon the third-party library `zerocopy`, compiling your binaries with LTO enabled is crucial for maximising performance.
 
 ## Current limitations
 * Packet bitfields cannot currently be specified with little-endian integers.
 * Ingot does not yet support no-`alloc` use.
+* To locally define packets through the `Ingot` macro, you must import the `zerocopy` crate into your own project.

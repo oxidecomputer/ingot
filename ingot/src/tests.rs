@@ -16,8 +16,8 @@ use ethernet::Ethertype;
 use example_chain::{GenericUlp, GeneveOverV6Tunnel, UdpParser, L3};
 use geneve::{Geneve, GeneveFlags};
 use ingot_types::{
-    primitives::*, Accessor, Emit, Header, HeaderParse, NetworkRepr, NextLayer,
-    NextLayerChoice, ParseChoice, ParseError, Parsed, RepeatedView,
+    primitives::*, util::RepeatedView, Accessor, Emit, Header, HeaderParse,
+    NetworkRepr, NextLayer, NextLayerChoice, ParseChoice, ParseError, Parsed,
 };
 use ip::{
     IpProtocol, IpV6Ext6564, IpV6Ext6564Ref, IpV6ExtFragmentRef,
@@ -445,10 +445,10 @@ fn chunks_present_on_early_accept() {
     pkt_as_readable.push_back(pkt[..14].to_vec());
     pkt_as_readable.push_back(pkt[14..].to_vec());
 
-    let (opte_out, a, b) = GenericUlp::parse(&pkt[..]).unwrap();
+    let (_, _, b) = GenericUlp::parse(&pkt[..]).unwrap();
     assert_eq!(b.len(), 8);
 
-    let Parsed { stack, data, last_chunk } =
+    let Parsed { data, last_chunk, .. } =
         GenericUlp::parse_read(pkt_as_readable.iter()).unwrap();
     // panic!("{data:?}, {last_chunk:?}");
     assert_eq!(last_chunk.packet_length(), 8);

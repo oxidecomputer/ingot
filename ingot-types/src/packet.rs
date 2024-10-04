@@ -15,6 +15,10 @@ pub type Packet<O, B> = DirectPacket<O, B>;
 #[cfg(feature = "alloc")]
 pub type Packet<O, B> = IndirectPacket<O, B>;
 
+/// The `Packet` type corresponding to an owned representation
+/// type `T` on buffer `B`.
+pub type PacketOf<T, B> = Packet<T, <T as HasView<B>>::ViewType>;
+
 /// A header which is either owned or read from a buffer.
 ///
 /// Generated traits which allow reading/modifying/emitting either type

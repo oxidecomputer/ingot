@@ -1,5 +1,9 @@
+//!
+
 use super::*;
 
+/// An equivalent to [`Packet`] for header fields which are accessed by
+/// shared reference.
 pub enum FieldRef<'a, T: HasView<V>, V> {
     Repr(&'a T),
     Raw(&'a PacketOf<T, V>),
@@ -75,6 +79,8 @@ where
     }
 }
 
+/// An equivalent to [`Packet`] for header fields which are accessed by
+/// mutable reference.
 pub enum FieldMut<'a, T: HasView<V>, V> {
     Repr(&'a mut T),
     Raw(&'a mut PacketOf<T, V>),

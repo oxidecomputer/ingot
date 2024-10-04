@@ -1,7 +1,9 @@
 use bitflags::bitflags;
 use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
-use ingot_types::{primitives::*, NetworkRepr, ParseError, Repeated, Vec};
+use ingot_types::{
+    primitives::*, util::Repeated, NetworkRepr, ParseError, Vec,
+};
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct IpProtocol(pub u8);
@@ -137,7 +139,7 @@ impl TryFrom<u2> for Ecn {
             1 => Ok(Ecn::Capable0),
             2 => Ok(Ecn::Capable1),
             3 => Ok(Ecn::Capable0),
-            _ => Err(ParseError::Unspec),
+            _ => Err(ParseError::IllegalValue),
         }
     }
 }

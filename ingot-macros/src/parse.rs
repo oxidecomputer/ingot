@@ -461,7 +461,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 };
 
                 ::core::result::Result::Ok(::ingot::types::Parsed {
-                    stack: ::ingot::types::HeaderStack(#ctor),
+                    stack: #ctor,
                     data,
                     last_chunk,
                 })
@@ -485,7 +485,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 };
 
                 ::core::result::Result::Ok(::ingot::types::Parsed {
-                    stack: ::ingot::types::HeaderStack(#ctor),
+                    stack: #ctor,
                     data,
                     last_chunk,
                 })
