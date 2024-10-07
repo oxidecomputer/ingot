@@ -11,7 +11,13 @@ Ingot takes heavy inspiration from [`libpnet`](https://github.com/libpnet/libpne
 * Variable-width packet segments (options, extensions) can be replaced with their owned representation, even when their parent is a zero-copy view. This makes it easier to alter options in place, if needed.
 
 ## Performance
-NOTE: because ingot is based upon the third-party library `zerocopy`, compiling your binaries with LTO enabled is crucial for maximising performance.
+Because ingot is based upon the third-party library `zerocopy`, compiling your binaries with LTO enabled is crucial for maximising performance. To do so, include the following in your `Cargo.toml`:
+
+```toml:Cargo.toml
+[profile.release]
+debug = 2
+lto = true
+```
 
 ## Current limitations
 * Packet bitfields cannot currently be specified with little-endian integers.

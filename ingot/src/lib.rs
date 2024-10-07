@@ -15,6 +15,7 @@
 //!
 //! Headers define *owned* and *borrowed* versions of their contents, with shared
 //! traits to use and modify each individually or through the `Packet` abstraction.
+//! Base traits, primitive types, and assorted helpers are defined in [`ingot_types`].
 
 #![no_std]
 

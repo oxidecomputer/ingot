@@ -1,4 +1,4 @@
-//! Utilities for parsing
+//! Utilities for parsing more complex packet types or specific inputs.
 
 use super::*;
 use crate::{ParseError, ParseResult, Read};
