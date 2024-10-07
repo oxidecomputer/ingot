@@ -38,8 +38,14 @@ impl<T> Default for Repeated<T> {
 }
 
 impl<T> Repeated<T> {
+    /// Wrap a list of `T`s in the [`Repeated`] newtype.
     pub fn new(data: Vec<T>) -> Self {
         Self { inner: data }
+    }
+
+    /// Unwrap a list of `T`s from the [`Repeated`] newtype.
+    pub fn into_inner(self) -> Vec<T> {
+        self.inner
     }
 }
 
@@ -230,11 +236,17 @@ impl<
         D: Copy + Eq,
     > RepeatedView<B, T>
 {
+    /// Iterates over all sub-parsed elements.
+    ///
+    /// Offsets are not stored, so individual elements are re-parsed one by one.
     pub fn iter(&self, hint: Option<D>) -> RepeatedViewIter<T> {
         RepeatedViewIter { slice: &self.inner[..], hint }
     }
 }
 
+/// An iterator over all parsable values contained within a [`RepeatedView`].
+///
+/// Offsets are not stored, so individual elements are re-parsed one by one.
 pub struct RepeatedViewIter<'a, T: HasView<&'a [u8]> + NextLayer> {
     slice: &'a [u8],
     hint: Option<T::Denom>,

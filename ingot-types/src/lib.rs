@@ -2,6 +2,7 @@
 //! `ingot` packets.
 
 #![no_std]
+#![deny(missing_docs)]
 
 use alloc::vec;
 #[cfg(feature = "alloc")]
@@ -51,8 +52,11 @@ pub use packet::*;
 ///
 /// [`Repeated`]: util::Repeated
 pub trait ToOwnedPacket: NextLayer {
+    /// The output type of this conversion.
     type Target;
 
+    /// Converts a borrowed view of a header into an owned version, possibly
+    /// reparsing to do so with the aid of `hint`.
     fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target>;
 }
 
@@ -98,11 +102,14 @@ impl Header for Vec<u8> {
 
 /// A type which has a corresponding view-type over any buffer `B`.
 pub trait HasView<B> {
+    /// The type containing an equivalent to `Self`, as a network packet
+    /// in a buffer `B`.
     type ViewType;
 }
 
 /// A type which has a corresponding static/owned representation type.
 pub trait HasRepr {
+    /// The type containing an equivalent to `Self`, as an owned struct.
     type ReprType;
 }
 
@@ -294,10 +301,12 @@ pub struct Parsed<Stack, RawPkt: Read> {
 }
 
 impl<Stack, RawPkt: Read> Parsed<Stack, RawPkt> {
+    /// Return a reference to the set of parsed headers.
     pub fn headers(&self) -> &Stack {
         &self.stack
     }
 
+    /// Return a reference to the remainder of the last used chunk.
     pub fn body(&self) -> Option<&RawPkt::Chunk> {
         self.last_chunk.as_ref()
     }
@@ -307,10 +316,12 @@ impl<Stack, RawPkt: Read> Parsed<Stack, RawPkt>
 where
     RawPkt::Chunk: ByteSliceMut,
 {
+    /// Return a mutable reference to the set of parsed headers.
     pub fn headers_mut(&mut self) -> &mut Stack {
         &mut self.stack
     }
 
+    /// Return a mutable reference to the remainder of the last used chunk.
     pub fn body_mut(&mut self) -> Option<&mut RawPkt::Chunk> {
         self.last_chunk.as_mut()
     }

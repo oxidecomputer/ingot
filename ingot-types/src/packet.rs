@@ -11,9 +11,12 @@ use heapless::Vec as HVec;
 use primitives::RawBytes;
 
 #[cfg(not(feature = "alloc"))]
+/// Convenience type choosing [`DirectPacket`] when `IndirectPacket` is
+/// unavailable.
 pub type Packet<O, B> = DirectPacket<O, B>;
 
 #[cfg(feature = "alloc")]
+/// Convenience type preferring [`IndirectPacket`] when available.
 pub type Packet<O, B> = IndirectPacket<O, B>;
 
 /// The `Packet` type corresponding to an owned representation
@@ -73,6 +76,8 @@ impl<O, B> From<IndirectPacket<O, B>> for DirectPacket<O, B> {
 //
 #[cfg(feature = "alloc")]
 impl<O, B> IndirectPacket<O, B> {
+    /// Return a reference to this packet's contents if
+    /// they are owned.
     pub fn repr(&self) -> Option<&O> {
         match self {
             Self::Repr(o) => Some(o),
@@ -80,6 +85,8 @@ impl<O, B> IndirectPacket<O, B> {
         }
     }
 
+    /// Return a mutable reference to this packet's contents if
+    /// they are owned.
     pub fn repr_mut(&mut self) -> Option<&mut O> {
         match self {
             Self::Repr(o) => Some(o),
@@ -87,6 +94,8 @@ impl<O, B> IndirectPacket<O, B> {
         }
     }
 
+    /// Return a reference to this packet's contents if
+    /// they are borrowed.
     pub fn raw(&self) -> Option<&B> {
         match self {
             Self::Raw(b) => Some(b),
@@ -94,6 +103,8 @@ impl<O, B> IndirectPacket<O, B> {
         }
     }
 
+    /// Return a mutable reference to this packet's contents if
+    /// they are borrowed.
     pub fn raw_mut(&mut self) -> Option<&mut B> {
         match self {
             Self::Raw(b) => Some(b),
@@ -237,6 +248,8 @@ impl<O: Emit, B: Emit> Emit for IndirectPacket<O, B> {
 // Direct impls.
 //
 impl<O, B> DirectPacket<O, B> {
+    /// Return a reference to this packet's contents if
+    /// they are owned.
     pub fn repr(&self) -> Option<&O> {
         match self {
             Self::Repr(o) => Some(o),
@@ -244,6 +257,8 @@ impl<O, B> DirectPacket<O, B> {
         }
     }
 
+    /// Return a mutable reference to this packet's contents if
+    /// they are owned.
     pub fn repr_mut(&mut self) -> Option<&mut O> {
         match self {
             Self::Repr(o) => Some(o),
@@ -251,6 +266,8 @@ impl<O, B> DirectPacket<O, B> {
         }
     }
 
+    /// Return a reference to this packet's contents if
+    /// they are borrowed.
     pub fn raw(&self) -> Option<&B> {
         match self {
             Self::Raw(b) => Some(b),
@@ -258,6 +275,8 @@ impl<O, B> DirectPacket<O, B> {
         }
     }
 
+    /// Return a mutable reference to this packet's contents if
+    /// they are borrowed.
     pub fn raw_mut(&mut self) -> Option<&mut B> {
         match self {
             Self::Raw(b) => Some(b),

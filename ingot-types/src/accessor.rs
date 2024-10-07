@@ -21,15 +21,17 @@ pub struct Accessor<B, T> {
 impl<B: SplitByteSlice, T: FromBytes + IntoBytes + KnownLayout + Immutable>
     Accessor<B, T>
 {
+    /// Parses out a fixed-width packet chunk `T` from the start of a given
+    /// buffer.
     pub fn read_from_prefix<'a>(buf: B) -> Result<(Self, B), ParseError>
     where
         B: 'a + IntoBufPointer<'a>,
         T: 'a,
     {
         // SAFETY:
-        // We use the exact same bounds on T as Ref::into_mut,
-        // allowing us to grant both read/write access to the
-        // T depending on B's mutability.
+        // We use the exact same bounds on T as Ref::into_mut from zerocopy,
+        // allowing us to grant both read/write access to the T depending
+        // on B's mutability.
         // Additionally, a valid parse via Ref guarantees that ptr
         // alignment and length are as required for the type to be considered
         // as a T.

@@ -1,6 +1,9 @@
-//! Primitive types -- integers of known endianness, and 
+//! Primitive types -- integers of known endianness,
+//! and base buffer types.
 
+// The type aliases here are *fairly* self-describing.
 #![allow(non_camel_case_types)]
+#![allow(missing_docs)]
 
 use super::*;
 
@@ -19,7 +22,6 @@ pub type i4 = i8;
 pub type i5 = i8;
 pub type i6 = i8;
 pub type i7 = i8;
-
 ingot_macros::define_primitive_types!();
 
 #[cfg(feature = "alloc")]

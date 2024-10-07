@@ -1,6 +1,11 @@
 use core::convert::Infallible;
+// use core::error::Error; //TODO
 
+/// Convenience type for fallible operations done while parsing headers.
 pub type ParseResult<T> = Result<T, ParseError>;
+
+/// Convenience type for fallible operations done while parsing full packets.
+pub type PacketParseResult<T> = Result<T, PacketParseError>;
 
 /// An error encountered while parsing an individual header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -35,4 +40,11 @@ impl From<Infallible> for ParseError {
 }
 
 // TODO: below.
-pub struct ParsePacketError;
+/// TODO.
+#[allow(dead_code)]
+pub struct PacketParseError {
+    label: CRstr,
+    inner: ParseError,
+}
+
+struct CRstr;

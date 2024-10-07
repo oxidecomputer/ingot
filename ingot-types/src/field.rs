@@ -5,7 +5,10 @@ use super::*;
 /// An equivalent to [`Packet`] for header fields which are accessed by
 /// shared reference.
 pub enum FieldRef<'a, T: HasView<V>, V> {
+    /// Reference to the owned representation of a field.
     Repr(&'a T),
+    /// Reference to a field in a borrowed header, which may be owned
+    /// or borrowed depdendent on past modifications.
     Raw(&'a PacketOf<T, V>),
 }
 
@@ -38,6 +41,7 @@ where
 }
 
 impl<'a, B: ByteSlice> FieldRef<'a, Vec<u8>, B> {
+    /// Copy this field out into a list of its raw bytes.
     pub fn to_owned(&self) -> Vec<u8> {
         match self {
             FieldRef::Repr(a) => a.to_vec(),
@@ -82,7 +86,10 @@ where
 /// An equivalent to [`Packet`] for header fields which are accessed by
 /// mutable reference.
 pub enum FieldMut<'a, T: HasView<V>, V> {
+    /// Mutable reference to the owned representation of a field.
     Repr(&'a mut T),
+    /// Mutable reference to a field in a borrowed header, which may
+    /// be owned or borrowed depdendent on past modifications.
     Raw(&'a mut PacketOf<T, V>),
 }
 
