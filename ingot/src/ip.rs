@@ -198,8 +198,7 @@ pub enum LowRentV6Eh {
 }
 
 // 0x2c
-// #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
-#[derive(Debug, Clone, Ingot, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 pub struct IpV6ExtFragment {
     #[ingot(is = "u8", next_layer)]
     pub next_header: IpProtocol, // should be a type.

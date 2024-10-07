@@ -23,8 +23,10 @@ mod bitfield;
 type Shared<T> = Rc<RefCell<T>>;
 
 pub fn derive(input: IngotArgs) -> TokenStream {
-    let x = StructParseDeriveCtx::new(input.clone()).unwrap();
-    x.into_token_stream()
+    match StructParseDeriveCtx::new(input.clone()) {
+        Ok(x) => x.into_token_stream(),
+        Err(e) => e.into_compile_error(),
+    }
 }
 
 #[derive(Clone, FromDeriveInput)]
@@ -379,7 +381,12 @@ struct StructParseDeriveCtx {
 impl StructParseDeriveCtx {
     pub fn new(input: IngotArgs) -> Result<Self, syn::Error> {
         let IngotArgs { ident, data, generics, impl_default } = input;
-        let field_data = data.take_struct().unwrap();
+        let Some(field_data) = data.take_struct() else {
+            return Err(Error::new(
+                ident.span(),
+                "header definition is not a valid struct",
+            ));
+        };
         let mut validated = HashMap::new();
         let validated_order: RefCell<Vec<Shared<ValidField>>> = vec![].into();
         let mut nominated_next_header = None;
@@ -435,6 +442,13 @@ impl StructParseDeriveCtx {
                     Ok(())
                 }
             }
+        };
+
+        if field_data.is_empty() {
+            return Err(Error::new(
+                ident.span(),
+                "header definition contains no fields",
+            ));
         };
 
         // first pass: split struct into discrete chunks, ensure byte

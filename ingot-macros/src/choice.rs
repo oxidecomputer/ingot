@@ -11,10 +11,7 @@ struct ChoiceArgs {
 
 #[derive(FromVariant)]
 #[darling(attributes(ingot))]
-struct VariantArgs {
-    #[darling(default)]
-    generic: bool,
-}
+struct VariantArgs {}
 
 pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     let attr_args = match NestedMeta::parse_meta_list(attr) {
@@ -52,12 +49,8 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
     let mut unpacks: Vec<TokenStream> = vec![];
 
-    let mut needs_generic = false;
-
     for var in &item.variants {
-        let state = VariantArgs::from_variant(var).unwrap();
-
-        needs_generic |= state.generic;
+        let _state = VariantArgs::from_variant(var).unwrap();
 
         let Some((_, disc)) = &var.discriminant else {
             return Error::new(
@@ -68,10 +61,8 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         };
 
         let id = &var.ident;
-        let field_ident = if state.generic {
-            quote! {#id<V>}
-        } else {
-            quote! {#id}
+        let field_ident = quote! {
+            #id
         };
 
         let valid_field_ident = Ident::new(&format!("Valid{id}"), ident.span());
@@ -175,11 +166,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         });
     }
 
-    let repr_head = if needs_generic {
-        quote! {#repr_ident<V>}
-    } else {
-        quote! {#repr_ident}
-    };
+    let repr_head = quote! {#repr_ident};
 
     let choice_convert = map_on.map(|v| {
         quote! {

@@ -131,9 +131,7 @@ impl<
 }
 
 #[cfg(feature = "alloc")]
-impl<'a, B: ByteSlice> From<&'a IndirectPacket<Vec<u8>, RawBytes<B>>>
-    for Vec<u8>
-{
+impl<B: ByteSlice> From<&IndirectPacket<Vec<u8>, RawBytes<B>>> for Vec<u8> {
     fn from(value: &Packet<Vec<u8>, RawBytes<B>>) -> Self {
         match value {
             Packet::Repr(v) => v.to_vec(),

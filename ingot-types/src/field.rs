@@ -12,8 +12,8 @@ pub enum FieldRef<'a, T: HasView<V>, V> {
     Raw(&'a PacketOf<T, V>),
 }
 
-impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
-    AsRef<[u8]> for FieldRef<'a, T, V>
+impl<T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>> AsRef<[u8]>
+    for FieldRef<'_, T, V>
 {
     #[inline]
     fn as_ref(&self) -> &[u8] {
@@ -25,7 +25,7 @@ impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
     }
 }
 
-impl<'a, T: Header + HasView<V>, V> Header for FieldRef<'a, T, V>
+impl<T: Header + HasView<V>, V> Header for FieldRef<'_, T, V>
 where
     T::ViewType: Header,
 {
@@ -40,7 +40,7 @@ where
     }
 }
 
-impl<'a, B: ByteSlice> FieldRef<'a, Vec<u8>, B> {
+impl<B: ByteSlice> FieldRef<'_, Vec<u8>, B> {
     /// Copy this field out into a list of its raw bytes.
     pub fn to_owned(&self) -> Vec<u8> {
         match self {
@@ -51,8 +51,8 @@ impl<'a, B: ByteSlice> FieldRef<'a, Vec<u8>, B> {
     }
 }
 
-impl<'a, D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
-    for FieldRef<'a, T, V>
+impl<D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
+    for FieldRef<'_, T, V>
 where
     D: Copy + Eq,
     PacketOf<T, V>: NextLayer<Denom = D>,
@@ -67,8 +67,8 @@ where
     }
 }
 
-impl<'a, D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
-    NextLayerChoice<D2> for FieldRef<'a, T, V>
+impl<D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
+    NextLayerChoice<D2> for FieldRef<'_, T, V>
 where
     D: Copy + Eq,
     D2: Copy + Eq,
@@ -93,8 +93,8 @@ pub enum FieldMut<'a, T: HasView<V>, V> {
     Raw(&'a mut PacketOf<T, V>),
 }
 
-impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
-    AsRef<[u8]> for FieldMut<'a, T, V>
+impl<T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>> AsRef<[u8]>
+    for FieldMut<'_, T, V>
 {
     #[inline]
     fn as_ref(&self) -> &[u8] {
@@ -106,7 +106,7 @@ impl<'a, T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>>
     }
 }
 
-impl<'a, T: Header + HasView<V>, V> Header for FieldMut<'a, T, V>
+impl<T: Header + HasView<V>, V> Header for FieldMut<'_, T, V>
 where
     T::ViewType: Header,
 {
@@ -121,8 +121,8 @@ where
     }
 }
 
-impl<'a, T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>>
-    AsMut<[u8]> for FieldMut<'a, T, V>
+impl<T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>> AsMut<[u8]>
+    for FieldMut<'_, T, V>
 {
     #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
@@ -134,8 +134,8 @@ impl<'a, T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>>
     }
 }
 
-impl<'a, D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
-    for FieldMut<'a, T, V>
+impl<D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
+    for FieldMut<'_, T, V>
 where
     D: Copy + Eq,
     PacketOf<T, V>: NextLayer<Denom = D>,
@@ -150,8 +150,8 @@ where
     }
 }
 
-impl<'a, D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
-    NextLayerChoice<D2> for FieldMut<'a, T, V>
+impl<D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
+    NextLayerChoice<D2> for FieldMut<'_, T, V>
 where
     D: Copy + Eq,
     D2: Copy + Eq,
