@@ -1,8 +1,26 @@
 #![doc = include_str!("../../README.md")]
+//! # Usage
+//! Packets and headers are defined using the procedural macros
+//! [`Ingot`] (headers), [`choice`] (selecting between headers), and
+//! [`Parse`] (chains of individual layers).
+//!
+//! The documentation for each macro (as well as the packet and header types)
+//! defined here double as examples of their use.
+//!
+//! Headers can be used directly (as with any other rust struct), or using
+//! protocol-specific traits and the `Packet` type when we need to hold mixed
+//! owned/borrowed data.
+//!
+//! ![Visual relationship between owned and borrowed types in Ingot.](https://raw.githubusercontent.com/oxidecomputer/ingot/refs/heads/prototype/model.svg?token=GHSAT0AAAAAACJJQVH7NSUC23YG654MM5KWZYEDKPA "Visual relationship between owned and borrowed types in Ingot.")
+//!
+//! Headers define *owned* and *borrowed* versions of their contents, with shared
+//! traits to use and modify each individually or through the `Packet` abstraction.
+
 #![no_std]
 
 // This lets us consistently use ::ingot::types regardless
-// of call site in the macro.
+// of call site in the macro (i.e., our code or downstream user
+// packets).
 extern crate self as ingot;
 
 #[cfg(feature = "alloc")]

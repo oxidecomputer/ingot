@@ -90,6 +90,8 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// Ingot will define `ValidMyHdr::parse`, implement `Emit` on both types,
 /// and will define the traits `MyHdrRef` and `MyHdrMut` for both types.
 /// Both types can reference one another via the `HasView` and `HasRepr` traits.
+/// `ValidMyHdr` will be split into a series of fixed-width and variable-width
+/// chunks internally -- these can be directly accessed if required.
 ///
 /// ## Top-level attributes
 /// * `#[ingot(impl_default)]` – derives `Default` on the owned struct using
@@ -97,7 +99,7 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///
 /// ## Per-field attributes
 /// * `#[ingot(is = "<type>")]` – allows the use of higher-level types and conversions
-///   of fields using the `NetworkRepr` trait. The field will be parsed as the primitive
+///   of fields using the `NetworkRepr` trait. The field will be parsed as the primitive 
 ///   `<type>` before converting to the desired type.
 /// * `#[ingot(default = <expr>)]` – specifies a default value for this field
 ///   when deriving `Default`.
