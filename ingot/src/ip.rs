@@ -176,7 +176,6 @@ pub struct Ipv6 {
     pub ecn: Ecn,
     pub flow_label: u20be,
 
-    // #[ingot(payload_len)]
     pub payload_len: u16be,
     #[ingot(is = "u8", next_layer)]
     pub next_header: IpProtocol,

@@ -14,10 +14,11 @@ use core::{
 };
 use ethernet::Ethertype;
 use example_chain::{GenericUlp, GeneveOverV6Tunnel, UdpParser, L3};
-use geneve::{Geneve, GeneveFlags};
+use geneve::{Geneve, GeneveFlags, GeneveOpt, GeneveOptionType};
 use ingot_types::{
     primitives::*, util::RepeatedView, Accessor, Emit, Header, HeaderParse,
     NetworkRepr, NextLayer, NextLayerChoice, ParseChoice, ParseError, Parsed,
+    ToOwnedPacket,
 };
 use ip::{
     IpProtocol, IpV6Ext6564, IpV6Ext6564Ref, IpV6ExtFragmentRef,
@@ -413,7 +414,7 @@ fn test_opte_unconditionals() {
 
     let (mut opte_in, ..) = GeneveOverV6Tunnel::parse(&mut pkt[..]).unwrap();
 
-    assert_eq!(opte_in.outer_encap.options_ref().as_ref().len(), 4);
+    assert_eq!(opte_in.outer_encap.options_ref().packet_length(), 4);
     assert_eq!(opte_in.inner_eth.ethertype(), Ethertype::IPV4);
     assert!(opte_in.inner_l3.is_some());
     assert!(opte_in.inner_ulp.is_some());
@@ -485,7 +486,7 @@ fn varlen_geneve() {
         // option class
         0x01, 0x29,
         // crt + type
-        0x00,
+        0x47,
         // rsvd + len
         0x00,
     ];
@@ -495,6 +496,20 @@ fn varlen_geneve() {
 
     let (g, ..) = ValidGeneve::parse(&g_opt[..]).unwrap();
     assert_eq!(g.packet_length(), 12);
+
+    let a = g.1.raw().unwrap();
+    let parsed_opt = a.to_owned(None).unwrap();
+    assert_eq!(parsed_opt.len(), 1);
+    assert_eq!(
+        parsed_opt[0],
+        GeneveOpt {
+            class: 0x0129,
+            option_type: GeneveOptionType(0x47),
+            reserved: 0,
+            length: 0,
+            data: vec![]
+        }
+    );
 }
 
 #[test]
@@ -681,7 +696,7 @@ fn to_owned() {
 
     let (g, ..) = ValidGeneve::parse(&g_opt[..]).unwrap();
 
-    let owned_g = Geneve::from(&g);
+    let owned_g = Geneve::try_from(&g).unwrap();
     assert_eq!(owned_g.version, 0);
     assert_eq!(owned_g.opt_len, 1);
     assert_eq!(owned_g.flags, GeneveFlags::empty());
@@ -689,7 +704,10 @@ fn to_owned() {
     assert_eq!(owned_g.vni, 0x0004d2.try_into().unwrap());
     assert_eq!(owned_g.reserved, 0);
 
-    assert_eq!(owned_g.options, &[0x01, 0x29, 0x00, 0x00]);
+    assert_eq!(
+        &owned_g.options[..],
+        &[GeneveOpt { class: 0x0129, ..Default::default() }]
+    );
 
     #[rustfmt::skip]
     let bytes = [
@@ -776,7 +794,7 @@ fn roundtrip() {
 }
 
 #[test]
-fn ez_emit() {
+fn easy_emit() {
     let makeshift_stack = (
         Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff },
         Geneve {

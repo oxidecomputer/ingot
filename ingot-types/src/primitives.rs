@@ -24,6 +24,16 @@ pub type i6 = i8;
 pub type i7 = i8;
 ingot_macros::define_primitive_types!();
 
+impl NetworkRepr<u1> for bool {
+    fn to_network(self) -> u1 {
+        self as u1
+    }
+
+    fn from_network(val: u1) -> Self {
+        val != 0
+    }
+}
+
 #[cfg(feature = "alloc")]
 /// Buffer type which can be owned or a view.
 pub type VarBytes<V> = Packet<Vec<u8>, V>;

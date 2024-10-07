@@ -199,14 +199,19 @@ where
 // This works on a similar trick as above: we reparse target Ts out from
 // the stored buffer and individually convert *those* to their owned types.
 // We do not go via B in practice.
-impl<D: Copy + Eq, B: SplitByteSlice, T: NextLayer<Denom = D> + HasView<B>>
-    ToOwnedPacket for RepeatedView<B, T>
+impl<
+        D: Copy + Eq,
+        B: SplitByteSlice,
+        T: NextLayer<Denom = D> + HasView<B>,
+        E,
+    > ToOwnedPacket for RepeatedView<B, T>
 where
     T: for<'a> HasView<&'a [u8]>,
     for<'a> <T as HasView<&'a [u8]>>::ViewType:
         ParseChoice<&'a [u8], D> + NextLayer<Denom = D>,
-    for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType:
-        TryInto<T, Error = ParseError>,
+    for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType: TryInto<T, Error = E>,
+    // Bound needed to account for `Infallible` errors via pure `From`/`Into`.
+    ParseError: From<E>,
 {
     type Target = Repeated<T>;
 

@@ -4,7 +4,7 @@ use crate::ethernet::Ethertype;
 use bitflags::bitflags;
 use ingot::types::Vec;
 use ingot_macros::Ingot;
-use ingot_types::{primitives::*, NetworkRepr};
+use ingot_types::{primitives::*, util::Repeated, NetworkRepr};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -13,19 +13,32 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct Geneve {
+    /// The Geneve protocol version used by this packet.
+    ///
+    /// Currently `0` is the only valid value. Other values
+    /// must be dropped by *transit devices*.
     #[ingot(default = 0)]
     pub version: u2,
+    /// The length of `options` in 4-byte blocks.
     pub opt_len: u6,
+    /// Flags concerning tunnel state pertinent to endpoints.
     #[ingot(is = "u8")]
     pub flags: GeneveFlags,
+    /// The type of the internal payload, following the ethertype
+    /// convention.
     #[ingot(is = "u16be")]
+    #[ingot(default = Ethertype::ETHERNET)]
     pub protocol_type: Ethertype,
-
+    /// The identifier of this packet's given virtual network.
     #[ingot(is = "[u8; 3]")]
     pub vni: Vni,
+    /// Unused fields.
+    ///
+    /// Must be sent as `0`, and ignored by recipients.
     pub reserved: u8,
-    #[ingot(var_len = "(opt_len as usize) * 4")]
-    pub options: Vec<u8>,
+    /// Tunnel-specific options.
+    #[ingot(var_len = "(opt_len as usize) * 4", subparse())]
+    pub options: Repeated<GeneveOpt>,
 }
 
 bitflags! {
@@ -46,27 +59,61 @@ impl NetworkRepr<u8> for GeneveFlags {
     }
 }
 
-/// Option field carried as part of a [`Geneve`] header.
-#[derive(Ingot)]
-pub struct GeneveOpt {
-    pub class: u16be,
-    // NOTE: MSB is the 'critical' flag.
-    pub ty: u8,
-    pub reserved: u3,
-    pub length: u5,
-    #[ingot(var_len = "(length as usize) * 4")]
-    pub options: Vec<u8>,
+/// Indicator of the format of a Geneve option, when combined with
+/// an organisation-specific class.
+#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd, Default)]
+pub struct GeneveOptionType(pub u8);
+
+impl NetworkRepr<u8> for GeneveOptionType {
+    fn to_network(self) -> u8 {
+        self.0
+    }
+
+    fn from_network(val: u8) -> Self {
+        Self(val)
+    }
 }
 
-// TODO: uncork above.
+impl GeneveOptionType {
+    /// Denotes whether this option is 'critical': a critical packet
+    /// must be dropped by a *tunnel endpoint* which does not recognise
+    /// the `(class, option_type)` pair.
+    pub fn is_critical(&self) -> bool {
+        (self.0 >> 7) == 1
+    }
+}
+
+/// Option field carried as part of a [`Geneve`] header.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
+#[ingot(impl_default)]
+pub struct GeneveOpt {
+    /// Namespace for the [`option_type`] field, corresponding to an organisation in the
+    /// [IANA registry](https://www.iana.org/assignments/nvo3/nvo3.xhtml).
+    ///
+    /// [`option_type`]: GeneveOpt::option_type
+    pub class: u16be,
+    /// Indicator of the format of [`data`], when combined with [`class`].
+    ///
+    /// [`data`]: GeneveOpt::data
+    /// [`class`]: GeneveOpt::class
+    #[ingot(is = "u8")]
+    pub option_type: GeneveOptionType,
+    /// Currently reserved bits -- these must be sent as `0`, and not
+    /// validated by tunnel endpoints/forwarders.
+    pub reserved: u3,
+    /// The length of `data` in 4-byte blocks.
+    pub length: u5,
+    /// Data held by this geneve option.
+    #[ingot(var_len = "(length as usize) * 4")]
+    pub data: Vec<u8>,
+}
 
 /// A Geneve Virtual Network Identifier (VNI).
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Vni {
-    // A VNI is 24-bit. By storing it this way we don't have to check
-    // the value on the opte-core side to know if it's a valid VNI, we
-    // just decode the bytes.
+    // A VNI is 24-bit. By storing it this way we don't have to re-check
+    // the value to know if it's a valid VNI, we just decode the bytes.
     //
     // The bytes are in network order.
     inner: [u8; 3],

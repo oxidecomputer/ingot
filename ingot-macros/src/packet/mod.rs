@@ -794,7 +794,6 @@ impl StructParseDeriveCtx {
             ChunkState::FixedWidth { .. } => {
                 let name = c.chunk_ty_name(&self.ident);
                 quote! {
-                    // pub ::zerocopy::Ref<#type_param_ident, #private_mod_ident::#name>
                     pub ::ingot::types::Accessor<#type_param_ident, #private_mod_ident::#name>
                 }
             },
@@ -1438,38 +1437,28 @@ impl StructParseDeriveCtx {
                     };
 
                     // Hacky generic handling.
-                    if *on_next_layer {
-                        if let Type::Path(ref mut t) = genless_user_ty {
-                            t.qself = None;
-                            if let Some(el) = t.path.segments.last_mut() {
-                                // replace all generic args with inferred.
-                                match &mut el.arguments {
-                                    PathArguments::AngleBracketed(args) => {
-                                        for arg in args.args.iter_mut() {
-                                            if let GenericArgument::Type(t) =
-                                                arg
-                                            {
-                                                *t = Type::Infer(TypeInfer {
-                                                    underscore_token: Token![_](
-                                                        t.span(),
-                                                    ),
-                                                })
-                                            }
-                                        }
-                                    }
-                                    PathArguments::None => {}
-                                    PathArguments::Parenthesized(_) => todo!(),
-                                }
-                            }
-                        }
-                    } else if let Type::Path(ref mut t) = genless_user_ty {
+                    if let Type::Path(ref mut t) = genless_user_ty {
                         t.qself = None;
                         if let Some(el) = t.path.segments.last_mut() {
-                            el.arguments = PathArguments::None;
+                            // replace all generic args with inferred.
+                            match &mut el.arguments {
+                                PathArguments::AngleBracketed(args) => {
+                                    for arg in args.args.iter_mut() {
+                                        if let GenericArgument::Type(t) = arg {
+                                            *t = Type::Infer(TypeInfer {
+                                                underscore_token: Token![_](
+                                                    t.span(),
+                                                ),
+                                            })
+                                        }
+                                    }
+                                }
+                                PathArguments::None => {}
+                                PathArguments::Parenthesized(_) => todo!(),
+                            }
                         }
                     }
 
-                    // TODO: length fn integration
                     let (preamble, len_expr) = field
                         .resolved_length_fn(self)
                         .map(|(a, b)| (Some(a), Some(b)))
@@ -1480,13 +1469,31 @@ impl StructParseDeriveCtx {
                         let hint_lkup = self.gen_private_hint_lookup(i);
                         segment_fragments.push(quote! {
                             #hint_lkup
-                            // Discard hint
-                            let (#val_ident, mut hint, from) = <#genless_user_ty as HasView<_>>::ViewType::parse_choice(from, hint)?;
+                        });
+                    }
+
+                    if let Some(len_expr) = len_expr {
+                        segment_fragments.push(quote! {
+                            #preamble;
+
+                            let chunk_len = (#len_expr) as usize;
+
+                            let (varlen, from) = from.split_at(chunk_len)
+                                .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+
+                            let (#val_ident, mut hint, _) =
+                                <#genless_user_ty as HasView<_>>::ViewType::parse_choice(
+                                    varlen, hint
+                                )?;
                             let #val_ident = ::ingot::types::Packet::Raw(#val_ident.into());
                         });
                     } else {
                         segment_fragments.push(quote! {
-                            let (#val_ident, h2, from) = #genless_user_ty::parse(from)?;
+                            let (#val_ident, mut hint, from) =
+                                <#genless_user_ty as HasView<_>>::ViewType::parse_choice(
+                                    from, hint
+                                )?;
+                            let #val_ident = ::ingot::types::Packet::Raw(#val_ident.into());
                         });
                     }
                 }
@@ -1586,8 +1593,21 @@ impl StructParseDeriveCtx {
             field_names.push(f_ident);
         }
 
+        let to_owned_impl = quote! {
+            impl <V: ::ingot::types::SplitByteSlice> ::ingot::types::ToOwnedPacket for #validated_ident<V> {
+                type Target = #self_ty;
+
+                #[inline]
+                fn to_owned(&self, _hint: Option<Self::Denom>) -> ::ingot::types::ParseResult<Self::Target> {
+                    #self_ty::try_from(self).map_err(::ingot::types::ParseError::from)
+                }
+            }
+        };
+
         if !fallible {
             quote! {
+                #to_owned_impl
+
                 impl<V: ::ingot::types::ByteSlice> ::core::convert::From<&#validated_ident<V>> for #self_ty {
                     #[inline]
                     fn from(val: &#validated_ident<V>) -> Self {
@@ -1600,6 +1620,8 @@ impl StructParseDeriveCtx {
             }
         } else {
             quote! {
+                #to_owned_impl
+
                 impl<V: ::ingot::types::SplitByteSlice> ::core::convert::TryFrom<&#validated_ident<V>> for #self_ty {
                     type Error = ::ingot::types::ParseError;
 
