@@ -63,7 +63,7 @@ pub struct TestFunFields {
 }
 
 #[test]
-fn are_my_fragment_traits_sane() {
+fn base_parse_and_type_conversion() {
     let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH + Ipv6::MINIMUM_LENGTH];
     let (mut eth, .., rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
 
@@ -75,14 +75,11 @@ fn are_my_fragment_traits_sane() {
     eth.set_source(MacAddr6::broadcast());
     assert_eq!(eth.source(), MacAddr6::broadcast());
 
-    // v6.set_source(Ipv6Addr::LOCALHOST);
-    // assert_eq!(v6.source(), Ipv6Addr::LOCALHOST);
-
     Ecn::try_from(1u8).unwrap();
 }
 
 #[test]
-fn does_this_chain_stuff_compile() {
+fn parse_header_chain_with_narrowing() {
     let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
         + Ipv4::MINIMUM_LENGTH
         + Udp::MINIMUM_LENGTH];
@@ -116,7 +113,7 @@ fn does_this_chain_stuff_compile() {
 }
 
 #[test]
-fn variable_len_fields_in_chain() {
+fn variable_len_fields_in_header_chain() {
     const V4_EXTRA: usize = 12;
     let mut buf2 = [0u8; Ethernet::MINIMUM_LENGTH
         + Ipv4::MINIMUM_LENGTH
@@ -180,7 +177,7 @@ fn variable_len_fields_in_chain() {
 }
 
 #[test]
-fn parse_multichunk() {
+fn parse_header_chain_multichunk() {
     let mut eth_bytes = vec![0u8; Ethernet::MINIMUM_LENGTH];
     let mut v6_bytes = vec![0u8; Ipv6::MINIMUM_LENGTH];
     // 0 is a valid v6 EH -- need to init it before parse.
@@ -248,7 +245,7 @@ fn parse_multichunk() {
 }
 
 #[test]
-fn field_accesses_of_all_kinds() {
+fn unaligned_bitfield_read_write() {
     // type has len: 24B
     #[rustfmt::skip]
     let mut base_bytes = [
@@ -341,7 +338,7 @@ fn field_accesses_of_all_kinds() {
 }
 
 #[test]
-fn test_opte_unconditionals() {
+fn test_tunnelled_unconditionals() {
     #[rustfmt::skip]
     let mut pkt = [
         // ---OUTER ETH---
@@ -515,7 +512,7 @@ fn varlen_geneve() {
 }
 
 #[test]
-fn ipv6_bitset() {
+fn bitset_fields_do_not_disturb_neighbours() {
     let golden = [0x6A, 0x61, 0xe2, 0x40];
     #[rustfmt::skip]
     let mut pkt = [
@@ -588,7 +585,7 @@ fn ipv6_bitset() {
 }
 
 #[test]
-fn v6_extension_headers() {
+fn v6_repeat_extension_headers() {
     #[rustfmt::skip]
     let bytes = [
         // ---OUTER v6---
@@ -663,7 +660,7 @@ fn v6_extension_headers() {
 }
 
 #[test]
-fn loopy() {
+fn repeated_on_standard_header() {
     let bytes = [0u8; 24];
     let _ = ValidUdp::<&[u8]>::parse_choice(&bytes[..], Some(())).unwrap();
     let _ =
@@ -748,14 +745,13 @@ fn to_owned() {
     let (v6, ..) = ValidIpv6::parse(&bytes[..]).unwrap();
     let owned_v6 = Ipv6::try_from(&v6).unwrap();
 
-    // let a = &owned_v6.v6ext[0];
     assert!(matches!(&owned_v6.v6ext[0], LowRentV6EhRepr::IpV6Ext6564(_)));
     assert!(matches!(&owned_v6.v6ext[1], LowRentV6EhRepr::IpV6ExtFragment(_)));
     assert!(matches!(&owned_v6.v6ext[2], LowRentV6EhRepr::IpV6Ext6564(_)));
 }
 
 #[test]
-fn roundtrip() {
+fn roundtrip_emit_parse_unchanged() {
     let udp =
         Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff };
 
@@ -796,7 +792,7 @@ fn roundtrip() {
 }
 
 #[test]
-fn easy_emit() {
+fn easy_tuple_emit() {
     let makeshift_stack = (
         Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff },
         Geneve {
@@ -899,7 +895,7 @@ fn parse_reports_error_location() {
 }
 
 #[test]
-fn accessor() {
+fn accessor_functions_safely() {
     let makeshift_stack = (
         Udp { source: 1234, destination: 5678, length: 77, checksum: 0xffff },
         Geneve {
