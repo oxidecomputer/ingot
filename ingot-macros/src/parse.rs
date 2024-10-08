@@ -28,6 +28,24 @@ struct AnalysedField {
     target_ty: TypePath,
 }
 
+impl AnalysedField {
+    fn crstr_name(&self) -> Ident {
+        Ident::new(
+            &format!("{}_LABEL", self.fname).to_uppercase(),
+            self.fname.span(),
+        )
+    }
+
+    fn crstr_defn(&self) -> TokenStream {
+        let fname_str = format!("{}\0", self.fname);
+        let fname_ident = self.crstr_name();
+        quote! {
+            static #fname_ident: ::ingot::types::CRStr =
+                ::ingot::types::CRStr::new_unchecked(#fname_str);
+        }
+    }
+}
+
 pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     let DeriveInput { ref ident, ref data, ref generics, .. } = input;
     let validated_ident = Ident::new(&format!("Valid{ident}"), ident.span());
@@ -62,6 +80,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     let mut onechunk_parse_points: Vec<TokenStream> = vec![];
     let mut valid_fields: Vec<TokenStream> = vec![];
     let mut into_fields: Vec<TokenStream> = vec![];
+    let mut layer_name_defs: Vec<TokenStream> = vec![];
 
     let mut analysed = vec![];
     for (i, field) in data.fields.iter().enumerate() {
@@ -104,14 +123,18 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             format_ident!("f_{i}")
         };
 
-        analysed.push(AnalysedField {
+        let done = AnalysedField {
             args,
             field: field.clone(),
             first_ty,
             optional,
             fname,
             target_ty: ty.clone(),
-        });
+        };
+
+        layer_name_defs.push(done.crstr_defn());
+
+        analysed.push(done);
     }
 
     // handle the case where we have a sled of Option<>s at the end
@@ -140,10 +163,24 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         }
     };
 
+    let mut first_err_location = None;
     let n_fields = data.fields.len();
-    for (i, AnalysedField { first_ty, optional, fname, args, target_ty, .. }) in
-        analysed.iter().enumerate()
+    for (
+        i,
+        analysed @ AnalysedField {
+            first_ty,
+            optional,
+            fname,
+            args,
+            target_ty,
+            ..
+        },
+    ) in analysed.iter().enumerate()
     {
+        let err_location = analysed.crstr_name();
+        if first_err_location.is_none() {
+            first_err_location = Some(err_location.clone());
+        }
         let hint_frag = if i < n_fields {
             // next.ty
             // let first_ty = next.first_ty
@@ -156,11 +193,13 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         let conv_frag = if optional.is_none() {
             quote! {
-                let #fname = #fname.try_into()?;
+                let #fname = #fname.try_into()
+                    .map_err(|e| ::ingot::types::PacketParseError::new(::ingot::types::ParseError::from(e), &#err_location))?;
             }
         } else {
             quote! {
-                let #fname = #fname.map(|v| v.try_into()).transpose()?;
+                let #fname = #fname.map(|v| v.try_into()).transpose()
+                    .map_err(|e| ::ingot::types::PacketParseError::new(::ingot::types::ParseError::from(e), &#err_location))?;
             }
         };
 
@@ -171,7 +210,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         } else {
             quote! {
                 let slice = if remainder.as_ref().is_empty() {
-                    data.next_chunk()?
+                    data.next_chunk()
+                        .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?
                 } else {
                     remainder
                 };
@@ -195,12 +235,18 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     },
                     ::ingot::types::ParseControl::Accept => {
                         return ::core::result::Result::Err(
-                            ::ingot::types::ParseError::CannotAccept
+                            ::ingot::types::PacketParseError::new(
+                                ::ingot::types::ParseError::CannotAccept,
+                                &#err_location
+                            )
                         );
                     }
                     ::ingot::types::ParseControl::Reject => {
                         return ::core::result::Result::Err(
-                            ::ingot::types::ParseError::Reject
+                            ::ingot::types::PacketParseError::new(
+                                ::ingot::types::ParseError::Reject,
+                                &#err_location
+                            )
                         );
                     },
                 }
@@ -234,24 +280,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             }
         }
 
-        // target_ty.qself = None;
-        // if let Some(el) = target_ty.path.segments.last_mut() {
-        //     // replace all generic args with inferred.
-        //     match &mut el.arguments {
-        //         PathArguments::AngleBracketed(args) => {
-        //             for arg in args.args.iter_mut() {
-        //                 if let GenericArgument::Type(t) = arg {
-        //                     *t = Type::Infer(TypeInfer {
-        //                         underscore_token: Token![_](t.span()),
-        //                     })
-        //                 }
-        //             }
-        //         }
-        //         PathArguments::None => todo!(),
-        //         PathArguments::Parenthesized(_) => todo!(),
-        //     }
-        // }
-
         bare_ty.qself = None;
         if let Some(el) = bare_ty.path.segments.last_mut() {
             el.arguments = PathArguments::None;
@@ -268,7 +296,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     let (#fname, remainder, hint) = if accepted {
                         (::core::option::Option::None, slice, None)
                     } else {
-                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)?;
+                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)
+                            .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
                         #hint_frag
                         (::core::option::Option::Some(#fname), remainder)
                     };
@@ -278,8 +307,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                         // should this be last??
                         (::core::option::Option::None, slice, None)
                     } else {
-                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)?;
-                        // #hint_frag
+                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)
+                            .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
                         (::core::option::Option::Some(#fname), remainder, hint)
                     };
                 },
@@ -287,12 +316,12 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         } else {
             (
                 quote! {
-                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)?;
-                    // #hint_frag
+                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)
+                        .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
                 },
                 quote! {
-                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)?;
-                    // #hint_frag
+                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)
+                        .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
                 },
             )
         };
@@ -310,21 +339,18 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 quote! {
                     #parse_chunk
                     #ctl_fn_chunk
-                    // #hint_frag
                     #slice_frag
                     #conv_frag
                 },
                 quote! {
                     #parse_chunk
                     #ctl_fn_chunk
-                    // #hint_frag
                     let slice = remainder;
                     #conv_frag
                 },
             )
         } else {
             // Hackier generic handling.
-            // let mut local_ty = first_ty.clone();
             if let Type::Path(ref mut t) = local_ty {
                 t.qself = None;
                 if let Some(el) = t.path.segments.last_mut() {
@@ -349,14 +375,12 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 quote! {
                     #parse_choice
                     #ctl_fn_chunk
-                    // #hint_frag
                     #slice_frag
                     #conv_frag
                 },
                 quote! {
                     #parse_choice
                     #ctl_fn_chunk
-                    // #hint_frag
                     let slice = remainder;
                     #conv_frag
                 },
@@ -381,6 +405,14 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             });
         }
     }
+
+    let Some(first_err_location) = first_err_location else {
+        return Error::new(
+            input.span(),
+            "packet must contain at least one header",
+        )
+        .into_compile_error();
+    };
 
     let accept_state = quote! {
         let mut can_accept = false;
@@ -415,14 +447,8 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #ident<V> {
             #[inline]
             fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
-                #imports
-
-                let slice = from;
-                #accept_state
-
-                #( #onechunk_parse_points )*
-
-                Ok((#ctor, None, slice))
+                Self::parse_slice(from)
+                    .map_err(|e| e.into())
             }
         }
 
@@ -433,7 +459,16 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
             #[inline]
             fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+                Self::parse_slice(from)
+                    .map_err(|e| e.into())
+            }
+        }
+
+        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #ident<V> {
+            #[inline]
+            pub fn parse_slice(from: V) -> ::ingot::types::PacketParseResult<::ingot::types::Success<Self, V>> {
                 #imports
+                #( #layer_name_defs )*
 
                 let slice = from;
                 #accept_state
@@ -442,14 +477,14 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
                 Ok((#ctor, None, slice))
             }
-        }
 
-        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #ident<V> {
             #[inline]
-            pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#ident<Q::Chunk>, Q>> {
+            pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::PacketParseResult<::ingot::types::Parsed<#ident<Q::Chunk>, Q>> {
                 #imports
+                #( #layer_name_defs )*
 
-                let slice = data.next_chunk()?;
+                let slice = data.next_chunk()
+                    .map_err(|e| ::ingot::types::PacketParseError::new(e, &#first_err_location))?;
                 #accept_state
 
                 #( #parse_points )*
@@ -470,10 +505,27 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> #validated_ident<V> {
             #[inline]
-            pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q) -> ::ingot::types::ParseResult<::ingot::types::Parsed<#validated_ident<Q::Chunk>, Q>> {
+            pub fn parse_slice(from: V) -> ::ingot::types::PacketParseResult<::ingot::types::Success<Self, V>> {
                 #imports
+                #( #layer_name_defs )*
 
-                let slice = data.next_chunk()?;
+                let slice = from;
+                #accept_state
+
+                #( #onechunk_parse_points )*
+
+                Ok((#ctor, None, slice))
+            }
+
+            #[inline]
+            pub fn parse_read<Q: ::ingot::types::Read<Chunk = V>>(mut data: Q)
+                -> ::ingot::types::PacketParseResult<::ingot::types::Parsed<#validated_ident<Q::Chunk>, Q>>
+            {
+                #imports
+                #( #layer_name_defs )*
+
+                let slice = data.next_chunk()
+                    .map_err(|e| ::ingot::types::PacketParseError::new(e, &#first_err_location))?;
                 #accept_state
 
                 #( #parse_points )*

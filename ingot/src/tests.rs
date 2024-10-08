@@ -1,3 +1,5 @@
+#![allow(clippy::unusual_byte_groupings)]
+
 use crate::{
     ethernet::{Ethernet, EthernetMut, EthernetRef, ValidEthernet},
     geneve::{GeneveRef, ValidGeneve},
@@ -134,7 +136,7 @@ fn variable_len_fields_in_chain() {
         ipv4.set_destination(Ipv4Addr::from([192, 168, 0, 255]));
         ipv4.set_ihl(5 + (V4_EXTRA as u8 / 4));
 
-        for (i, b) in (&mut rest[..V4_EXTRA]).iter_mut().enumerate() {
+        for (i, b) in (rest[..V4_EXTRA]).iter_mut().enumerate() {
             *b = i as u8;
         }
     }
@@ -451,7 +453,7 @@ fn chunks_present_on_early_accept() {
 
     let Parsed { data, last_chunk, .. } =
         GenericUlp::parse_read(pkt_as_readable.iter()).unwrap();
-    // panic!("{data:?}, {last_chunk:?}");
+
     assert_eq!(last_chunk.packet_length(), 8);
     assert_eq!(data.len(), 0);
 }
@@ -820,6 +822,80 @@ fn easy_emit() {
     assert_eq!(geneve.protocol_type(), Ethertype::ETHERNET);
     assert_eq!(geneve.vni(), 7777.try_into().unwrap());
     assert_eq!(geneve.reserved(), 0);
+}
+
+#[test]
+fn parse_reports_error_location() {
+    #[rustfmt::skip]
+    let would_be_valid = [
+        // ---INNER ETH---
+        // dst (guest)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x10,
+        // src (gateway)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01,
+        // ethertype (v4)
+        0x08, 0x00,
+
+        // ---INNER v4---
+        0x45, 0x00, 0x00, 28 + 8,
+        0x00, 0x00, 0x00, 0x00,
+        0xf0, 0x11, 0x00, 0x00,
+        8, 8, 8, 8,
+        192, 168, 0, 5,
+
+        // ---INNER UDP---
+        0x00, 0x80, 0x00, 53,
+        0x00, 0x08, 0x00, 0x00,
+    ];
+
+    let Err(e) = GenericUlp::parse_slice(&would_be_valid[..4]) else {
+        panic!("failed to reject truncated packet");
+    };
+    assert_eq!(e.error(), ParseError::TooSmall);
+    assert_eq!(e.header().as_str(), "inner_eth");
+
+    let Err(e) = GenericUlp::parse_slice(&would_be_valid[..14]) else {
+        panic!("failed to reject truncated packet");
+    };
+    assert_eq!(e.error(), ParseError::TooSmall);
+    assert_eq!(e.header().as_str(), "inner_l3");
+
+    let Err(e) =
+        GenericUlp::parse_slice(&would_be_valid[..would_be_valid.len() - 1])
+    else {
+        panic!("failed to reject truncated packet");
+    };
+    assert_eq!(e.error(), ParseError::TooSmall);
+    assert_eq!(e.header().as_str(), "inner_ulp");
+
+    #[rustfmt::skip]
+    let would_be_unwanted = [
+        // ---INNER ETH---
+        // dst (guest)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x10,
+        // src (gateway)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01,
+        // ethertype (v4)
+        0x08, 0x00,
+
+        // ---INNER v4---
+        0x45, 0x00, 0x00, 28 + 8,
+        0x00, 0x00, 0x00, 0x00,
+        0xf0, 0x59, 0x00, 0x00,
+        //    ^^^^ OSPF
+        8, 8, 8, 8,
+        192, 168, 0, 5,
+
+        // ---arbitrary rejected payload---
+        0x00, 0x80, 0x00, 53,
+        0x00, 0x08, 0x00, 0x00,
+    ];
+
+    let Err(e) = GenericUlp::parse_slice(&would_be_unwanted[..]) else {
+        panic!("failed to reject truncated packet");
+    };
+    assert_eq!(e.error(), ParseError::Unwanted);
+    assert_eq!(e.header().as_str(), "inner_ulp");
 }
 
 #[test]

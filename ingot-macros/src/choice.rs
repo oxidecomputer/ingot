@@ -183,13 +183,10 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     let idents: Vec<_> = item.variants.iter().map(|item| &item.ident).collect();
 
     quote! {
-        // #[derive(Clone)]
-        /// Test text hello?
         pub enum #ident<V: ::ingot::types::ByteSlice> {
             #( #top_vars ),*
         }
 
-        // #[derive(Clone)]
         pub enum #validated_ident<V: ::ingot::types::ByteSlice> {
             #( #validated_vars ),*
         }
