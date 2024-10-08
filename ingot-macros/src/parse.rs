@@ -182,8 +182,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             first_err_location = Some(err_location.clone());
         }
         let hint_frag = if i < n_fields {
-            // next.ty
-            // let first_ty = next.first_ty
             quote! {
                 let hint = #fname.next_layer();
             }
@@ -202,8 +200,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     .map_err(|e| ::ingot::types::PacketParseError::new(::ingot::types::ParseError::from(e), &#err_location))?;
             }
         };
-
-        // panic!("{first_ty}, {conv_frag}");
 
         let slice_frag = if i == n_fields - 1 {
             quote! {}
@@ -289,7 +285,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             (#fname, hint, remainder)
         };
 
-        // TODO: implement and figure in conditions (when/skip_if)
         let (parse_chunk, parse_choice) = if optional.is_some() {
             (
                 quote! {

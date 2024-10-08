@@ -376,3 +376,13 @@ macro_rules! __cfg_alloc {
 macro_rules! __cfg_alloc {
     ( $( $tok:tt )* ) => {};
 }
+
+/// Needed to compute MINIMUM_LENGTH for choices.
+#[doc(hidden)]
+pub const fn min(a: usize, b: usize) -> usize {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}

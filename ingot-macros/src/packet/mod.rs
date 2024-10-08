@@ -119,9 +119,12 @@ impl ValidField {
         ctx: &StructParseDeriveCtx,
     ) -> Option<(TokenStream, &Expr)> {
         // basic idea:
-        //  if no length fn, we're fine.
-        //  otherwise find all idents which exist *in a prior chunk*.
-        //  generate a preamble which defines local variables with those names.
+        //  * If no lenghth fn is specified, exit.
+        //  * Identify all variables used in `length_fn` matching field idents
+        //     which exist in a prior chunk.
+        //  * generate a preamble which defines local variables with those
+        //    names within the body of the `parse` method, taking their values
+        //    from the packet parts parsed so far.
         let length_fn = self.length_fn()?;
 
         #[derive(Default)]
@@ -169,7 +172,7 @@ impl ValidField {
 
 #[derive(Clone, Debug)]
 enum FieldState {
-    /// Simple fields. May be
+    /// Simple fields. May be unaligned from byte boundaries.
     FixedWidth {
         /// The base representation of a type in terms of primitives.
         underlying_ty: Type,
@@ -296,6 +299,8 @@ impl ChunkState {
         }
     }
 
+    /// Defines methods to get/set all fixed-width fields on the zerocopy struct.
+    /// Use of these is forwarded to the top-level header traits.
     pub fn chunk_methods_definition(
         &self,
         ctx: &StructParseDeriveCtx,
@@ -362,6 +367,7 @@ impl ChunkState {
     }
 }
 
+/// Main context for all analysed fields, chunks, and data from an input packet.
 #[derive(Debug)]
 struct StructParseDeriveCtx {
     ident: Ident,
@@ -369,12 +375,18 @@ struct StructParseDeriveCtx {
     #[allow(unused)]
     data: Fields<FieldArgs>,
 
+    /// Map of analysed header fields accessible by name.
     validated: HashMap<Ident, Shared<ValidField>>,
+    /// Analysed header fields in order of definition/parsing.
     validated_order: Vec<Shared<ValidField>>,
+    /// Groupings of header fields into chunks parsable in a single
+    /// operation.
     chunk_layout: Vec<ChunkState>,
 
+    /// Field to be returned as a hint for full packet parsing.
     nominated_next_header: Option<Ident>,
 
+    /// Whether `Default` should be impld by this macro.
     impl_default: bool,
 }
 
@@ -517,7 +529,7 @@ impl StructParseDeriveCtx {
                 _ => {
                     return Err(syn::Error::new(
                         field.ty.span(),
-                        "only fixed-width field can be used as next header",
+                        "only a fixed-width field can be used as a next header hint",
                     ))
                 }
             };
@@ -643,13 +655,14 @@ impl StructParseDeriveCtx {
         Ident::new(&format!("_{ident}_ingot_impl"), ident.span())
     }
 
+    /// Generate implementations of `NextLayer` for `xxx` and `Validxxx`.
     pub fn gen_next_header_lookup(&self) -> TokenStream {
         let ident = &self.ident;
         let validated_ident = self.validated_ident();
 
         // Ordinarily, we can use our own nominated next header.
         // If we have a subparse which consumes this, then we need to
-        // instead query THAT.
+        // instead query from the subparsed field (e.g., IPv6EHs).
         let subparse_on_nl = self
             .validated_order
             .iter()
@@ -745,11 +758,13 @@ impl StructParseDeriveCtx {
         }
     }
 
+    /// Generate a code fragment to resolve the next-layer hint during parsing.
     pub fn gen_private_hint_lookup(&self, curr_idx: usize) -> TokenStream {
-        // need to resolve the field's chunk ID, then pull from that/convert.
         let Some(field_ident) = &self.nominated_next_header else {
             return quote! {let hint = None;};
         };
+
+        // need to resolve the field's chunk ID, then pull from that/convert.
 
         let field_lk = self.validated.get(field_ident).unwrap();
         let field_lk = field_lk.borrow();
@@ -782,7 +797,9 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            hint = ::core::option::Option::Some(::ingot::types::NetworkRepr::from_network(#val_ident.#access));
+            hint = ::core::option::Option::Some(
+                ::ingot::types::NetworkRepr::from_network(#val_ident.#access)
+            );
         }
     }
 
@@ -910,6 +927,8 @@ impl StructParseDeriveCtx {
         }
     }
 
+    /// Generates field getters/setters on all child zerocopy/fixed-width
+    /// chunks.
     pub fn gen_zerocopy_methods(&self) -> TokenStream {
         let mut blocks = vec![];
 
@@ -1349,7 +1368,6 @@ impl StructParseDeriveCtx {
 
         let (direct_ref_head, direct_mut_head, ref_part, mut_part) =
             if trait_needs_generic {
-                // (quote!{impl<#a> #ref_def for #ident<#a>}, quote!{impl<#a> #mut_def for #ident<#a>})
                 (
                     quote! {impl<O, B, V: ::ingot::types::ByteSlice> #ref_def<V>},
                     quote! {impl<O, B, V: ::ingot::types::ByteSlice> #mut_def<V>},
@@ -1404,6 +1422,8 @@ impl StructParseDeriveCtx {
         }
     }
 
+    /// Generate `parse` and `parse_choice` on `Validxxx`.
+    /// `parse_choice` is guaranteed to succeed with any hint.
     pub fn gen_parse_impl(&self) -> TokenStream {
         let validated_ident = self.validated_ident();
 
@@ -1418,14 +1438,19 @@ impl StructParseDeriveCtx {
                     // This is like 15% slower without LTO.
                     // With LTO, it's 20--40% faster than splitting first
                     // before handing the bytes over.
+
+                    // Accessor allows us to store this chunk as a single pointer.
                     segment_fragments.push(quote! {
-                        let (#val_ident, from): (::ingot::types::Accessor<_, #ch_ty>, _) = ::ingot::types::Accessor::read_from_prefix(from)
-                            .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+                        let (#val_ident, from): (::ingot::types::Accessor<_, #ch_ty>, _) =
+                            ::ingot::types::Accessor::read_from_prefix(from)
+                                .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
                     });
                 }
                 ChunkState::VarWidth(id) => {
                     let field = self.validated[id].borrow();
 
+                    // Fetch all needed variables from existing chunks,
+                    // and compute the length of the byteslice.
                     let (preamble, len_expr) =
                         field.resolved_length_fn(self).unwrap();
 
@@ -1443,6 +1468,12 @@ impl StructParseDeriveCtx {
                     let field = self.validated[id].borrow();
                     let user_ty = &field.user_ty;
                     let mut genless_user_ty = user_ty.clone();
+
+                    // Fetch this chunk via parse/parse choice.
+                    // Cut the buffer down to size first if an explicit
+                    // length fn was provided.
+                    // If `on_next_header` is set, we use parse_choice.
+                    // Otherwise, go via unconditional `parse`.
 
                     let FieldState::Parsable { on_next_layer, .. } =
                         &field.state
@@ -1529,7 +1560,10 @@ impl StructParseDeriveCtx {
             };
 
         quote! {
-            impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
+            impl<
+                'a,
+                V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a
+            > ::ingot::types::HeaderParse<V> for #validated_ident<V> {
                 #[inline]
                 fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                     use ::ingot::types::Header;
@@ -1552,9 +1586,16 @@ impl StructParseDeriveCtx {
                 }
             }
 
-            impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a, AnyDenom: Copy + Eq> ::ingot::types::ParseChoice<V, AnyDenom> for #validated_ident<V> {
+            impl<
+                'a,
+                V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a,
+                AnyDenom: Copy + Eq
+            > ::ingot::types::ParseChoice<V, AnyDenom> for #validated_ident<V>
+            {
                 #[inline]
-                fn parse_choice(from: V, hint: Option<AnyDenom>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+                fn parse_choice(from: V, hint: Option<AnyDenom>) ->
+                    ::ingot::types::ParseResult<::ingot::types::Success<Self, V>>
+                {
                     use ::ingot::types::HeaderParse;
                     Self::parse(from)
                 }
@@ -1903,14 +1944,18 @@ impl ToTokens for StructParseDeriveCtx {
                 type ReprType = #self_ty;
             }
 
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for ::ingot::types::DirectPacket<#self_ty, #validated_ident<V>> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>>
+                for ::ingot::types::DirectPacket<#self_ty, #validated_ident<V>>
+            {
                 #[inline]
                 fn from(value: #validated_ident<V>) -> Self {
                     Self::Raw(value)
                 }
             }
 
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for ::ingot::types::DirectPacket<#self_ty, #validated_ident<V>> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty>
+                for ::ingot::types::DirectPacket<#self_ty, #validated_ident<V>>
+            {
                 #[inline]
                 fn from(value: #self_ty) -> Self {
                     // into used to paper over boxing / in-place.
@@ -1919,7 +1964,9 @@ impl ToTokens for StructParseDeriveCtx {
             }
 
             ::ingot::types::__cfg_alloc!{
-                impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
+                impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#validated_ident<V>>
+                    for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>>
+                {
                     #[inline]
                     fn from(value: #validated_ident<V>) -> Self {
                         Self::Raw(value)
@@ -1928,7 +1975,9 @@ impl ToTokens for StructParseDeriveCtx {
             }
 
             ::ingot::types::__cfg_alloc!{
-                impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty> for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>> {
+                impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#self_ty>
+                    for ::ingot::types::IndirectPacket<#self_ty, #validated_ident<V>>
+                {
                     #[inline]
                     fn from(value: #self_ty) -> Self {
                         // into used to paper over boxing / in-place.

@@ -136,12 +136,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     actual_chain_v4.push_front(pkt_body_v4[14..34].to_vec());
     actual_chain_v4.push_front(pkt_body_v4[0..14].to_vec());
 
-    println!(
-        "size IN  is {}",
-        core::mem::size_of::<GeneveOverV6Tunnel<&[u8]>>()
-    );
-    println!("size OUT is {}", core::mem::size_of::<GenericUlp<&[u8]>>());
-
     c.bench_function("parse-udp", |b| {
         b.iter(|| black_box(parse_udp(black_box(&pkt_body_v4[34..42]))))
     });
@@ -182,25 +176,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("parse-valid-opte-out", |b| {
         b.iter(|| ValidGenericUlp::parse(black_box(&opte_out_pkt[..])).unwrap())
     });
-    // c.bench_function("parsy2-stack-opte-in", |b| {
-    //     b.iter(|| OpteIn::parsy2(black_box(&opte_in_pkt[..])).unwrap())
-    // });
-    // c.bench_function("parsy-stack-opte-in", |b| {
-    //     b.iter(|| {
-    //         let mut slot = None;
-    //         let _rem =
-    //             OpteIn::parsy(black_box(&opte_in_pkt[..]), &mut slot).unwrap();
-    //         black_box(slot)
-    //     })
-    // });
-
-    // let mut opte_in_pkt2 = opte_in_pkt;
-    // let (mut opte_in, _unparsed) =
-    //     OpteIn::parse(&mut opte_in_pkt2[..]).unwrap();
-    // opte_in.inner_eth.set_ethertype(0x0806);
-    // c.bench_function("parse-stack-opte-in-arp", |b| {
-    //     b.iter(|| OpteIn::parse(black_box(&opte_in_pkt2[..])).unwrap())
-    // });
 }
 
 criterion_group!(benches, criterion_benchmark);

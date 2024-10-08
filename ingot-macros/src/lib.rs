@@ -105,11 +105,14 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///   when deriving `Default`.
 /// * `#[ingot(next_layer)]` – indicates that this field is to be used as a hint
 ///   for choosing the next header during full packet parsing.
-/// * `#[ingot(subparse)]` – extract this field by explicitly parsing the
+/// * `#[ingot(subparse())]` – extract this field by explicitly parsing the
 ///   indicated struct. This is intended for extension headers. Incompatible
 ///   with the `is` attribute.
+///   - `#[ingot(subparse(on_next_layer))]` – parses this field using the `next_layer`
+///     field to make a choice. This field will be used as the source of the next header.
 /// * `#[ingot(var_len = "<expr>")]` – Determines the length of a `Vec<u8>` field,
-///   or provides an exact length for a variable-length subparse.
+///   or provides an exact length for a variable-length subparse. This expression
+///   can access any prior fixed-width field.
 #[proc_macro_derive(Ingot, attributes(ingot))]
 pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let d_input = parse_macro_input!(input);

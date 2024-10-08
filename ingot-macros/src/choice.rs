@@ -49,6 +49,10 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
     let mut unpacks: Vec<TokenStream> = vec![];
 
+    let mut repr_wheres: Vec<TokenStream> = vec![];
+    let mut valid_wheres: Vec<TokenStream> = vec![];
+    let mut hybrid_wheres: Vec<TokenStream> = vec![];
+
     for var in &item.variants {
         let _state = VariantArgs::from_variant(var).unwrap();
 
@@ -78,6 +82,20 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         repr_vars.push(quote! {
             #id(#field_ident)
         });
+
+        // where clauses for EmitDoesNotRelyOnBufContents
+        let repr = quote! {
+            #id
+        };
+        hybrid_wheres.push(repr.clone());
+        repr_wheres.push(repr);
+
+        let valid = quote! {
+            #valid_field_ident<V>
+        };
+        hybrid_wheres.push(valid.clone());
+        valid_wheres.push(valid);
+        // where clauses done.
 
         match_arms.push(quote! {
             v if v == #disc => {
@@ -181,6 +199,16 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     };
 
     let idents: Vec<_> = item.variants.iter().map(|item| &item.ident).collect();
+    let first_ident = idents.first();
+
+    let mut minimum_len = quote! {
+        #first_ident::MINIMUM_LENGTH
+    };
+    for el in idents.iter().skip(1) {
+        minimum_len = quote! {
+            ::ingot::types::min(#minimum_len, #el::MINIMUM_LENGTH)
+        }
+    }
 
     quote! {
         pub enum #ident<V: ::ingot::types::ByteSlice> {
@@ -258,7 +286,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         }
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #ident<V> {
-            const MINIMUM_LENGTH: usize = 0; // TODO
+            const MINIMUM_LENGTH: usize = #minimum_len;
 
             #[inline]
             fn packet_length(&self) -> usize {
@@ -269,7 +297,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         }
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #validated_ident<V> {
-            const MINIMUM_LENGTH: usize = 0; // TODO
+            const MINIMUM_LENGTH: usize = #minimum_len;
 
             #[inline]
             fn packet_length(&self) -> usize {
@@ -280,7 +308,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         }
 
         impl ::ingot::types::Header for #repr_head {
-            const MINIMUM_LENGTH: usize = 0; // TODO
+            const MINIMUM_LENGTH: usize = #minimum_len;
 
             #[inline]
             fn packet_length(&self) -> usize {
@@ -338,10 +366,16 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        // TODO: where-clause like all hell.
-        unsafe impl ::ingot::types::EmitDoesNotRelyOnBufContents for #repr_head {}
-        unsafe impl<V: ::ingot::types::ByteSlice> ::ingot::types::EmitDoesNotRelyOnBufContents for #validated_ident<V> {}
-        unsafe impl<V: ::ingot::types::ByteSlice> ::ingot::types::EmitDoesNotRelyOnBufContents for #ident<V> {}
+        unsafe impl ::ingot::types::EmitDoesNotRelyOnBufContents for #repr_head
+            where #( #repr_wheres: ::ingot::types::EmitDoesNotRelyOnBufContents ),*
+        {}
+        unsafe impl<V: ::ingot::types::ByteSlice> ::ingot::types::EmitDoesNotRelyOnBufContents for #validated_ident<V>
+            where #( #valid_wheres: ::ingot::types::EmitDoesNotRelyOnBufContents ),*
+        {}
+        unsafe impl<V: ::ingot::types::ByteSlice> ::ingot::types::EmitDoesNotRelyOnBufContents for #ident<V>
+            where
+                #( #hybrid_wheres: ::ingot::types::EmitDoesNotRelyOnBufContents ),*
+        {}
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::HasView<V> for #ident<V> {
             type ViewType = #validated_ident<V>;

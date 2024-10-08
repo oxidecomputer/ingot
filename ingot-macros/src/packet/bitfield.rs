@@ -225,9 +225,6 @@ impl PrimitiveInBitfield {
                 let n_repr_bytes =
                     (self.n_bits / 8) + ((self.n_bits % 8) != 0) as usize;
                 let last_el = last_byte_ex - first_byte - 1;
-                // byte_stores.push(quote! {
-                //     let last_el = slice.len() - 1;
-                // });
 
                 if last_el == 0 {
                     byte_stores.push(quote! {
@@ -287,11 +284,6 @@ impl PrimitiveInBitfield {
                 }
             }
             (true, false, _) => {
-                // TODO
-                // byte_reads.push(quote! {
-                //     todo!()
-                // });
-
                 byte_stores.push(quote! {
                     todo!()
                 });

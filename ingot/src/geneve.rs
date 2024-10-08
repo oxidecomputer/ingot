@@ -1,7 +1,6 @@
-use core::str::FromStr;
-
 use crate::ethernet::Ethertype;
 use bitflags::bitflags;
+use core::str::FromStr;
 use ingot::types::Vec;
 use ingot_macros::Ingot;
 use ingot_types::{primitives::*, util::Repeated, NetworkRepr};
