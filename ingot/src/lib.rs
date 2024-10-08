@@ -11,7 +11,7 @@
 //! protocol-specific traits and the `Packet` type when we need to hold mixed
 //! owned/borrowed data.
 //!
-//! ![Visual relationship between owned and borrowed types in Ingot.](https://raw.githubusercontent.com/oxidecomputer/ingot/refs/heads/prototype/model.svg?token=GHSAT0AAAAAACJJQVH7NSUC23YG654MM5KWZYEDKPA "Visual relationship between owned and borrowed types in Ingot.")
+//! ![Visual relationship between owned and borrowed types in Ingot.](https://github.com/oxidecomputer/ingot/raw/refs/heads/prototype/model.svg "Visual relationship between owned and borrowed types in Ingot.")
 //!
 //! Headers define *owned* and *borrowed* versions of their contents, with shared
 //! traits to use and modify each individually or through the `Packet` abstraction.
