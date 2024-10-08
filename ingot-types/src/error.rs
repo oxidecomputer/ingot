@@ -107,8 +107,8 @@ impl PacketParseError {
 
     #[inline]
     /// Return the underlying error.
-    pub fn error(&self) -> ParseError {
-        self.inner
+    pub fn error(&self) -> &ParseError {
+        &self.inner
     }
 
     #[inline]

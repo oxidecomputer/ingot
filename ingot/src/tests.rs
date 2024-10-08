@@ -851,13 +851,13 @@ fn parse_reports_error_location() {
     let Err(e) = GenericUlp::parse_slice(&would_be_valid[..4]) else {
         panic!("failed to reject truncated packet");
     };
-    assert_eq!(e.error(), ParseError::TooSmall);
+    assert_eq!(*e.error(), ParseError::TooSmall);
     assert_eq!(e.header().as_str(), "inner_eth");
 
     let Err(e) = GenericUlp::parse_slice(&would_be_valid[..14]) else {
         panic!("failed to reject truncated packet");
     };
-    assert_eq!(e.error(), ParseError::TooSmall);
+    assert_eq!(*e.error(), ParseError::TooSmall);
     assert_eq!(e.header().as_str(), "inner_l3");
 
     let Err(e) =
@@ -865,7 +865,7 @@ fn parse_reports_error_location() {
     else {
         panic!("failed to reject truncated packet");
     };
-    assert_eq!(e.error(), ParseError::TooSmall);
+    assert_eq!(*e.error(), ParseError::TooSmall);
     assert_eq!(e.header().as_str(), "inner_ulp");
 
     #[rustfmt::skip]
@@ -894,7 +894,7 @@ fn parse_reports_error_location() {
     let Err(e) = GenericUlp::parse_slice(&would_be_unwanted[..]) else {
         panic!("failed to reject truncated packet");
     };
-    assert_eq!(e.error(), ParseError::Unwanted);
+    assert_eq!(*e.error(), ParseError::Unwanted);
     assert_eq!(e.header().as_str(), "inner_ulp");
 }
 
