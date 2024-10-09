@@ -164,6 +164,18 @@ impl Emit for Vec<u8> {
     }
 }
 
+impl<E: Emit> Emit for &E {
+    #[inline]
+    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
+        E::emit_raw(self, buf)
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        E::needs_emit(self)
+    }
+}
+
 /// A promise from the programmer to the compiler that an implementation
 /// of [`Emit`] does not perform any reads from uninitialised memory.
 ///
@@ -175,6 +187,10 @@ impl Emit for Vec<u8> {
 pub unsafe trait EmitDoesNotRelyOnBufContents {}
 
 // Safety: We know this holds true for all our derived emits, by design.
+unsafe impl<E: Emit + EmitDoesNotRelyOnBufContents> EmitDoesNotRelyOnBufContents
+    for &E
+{
+}
 unsafe impl EmitDoesNotRelyOnBufContents for &[u8] {}
 unsafe impl EmitDoesNotRelyOnBufContents for Vec<u8> {}
 unsafe impl<T: EmitDoesNotRelyOnBufContents> EmitDoesNotRelyOnBufContents

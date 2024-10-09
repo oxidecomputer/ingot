@@ -72,6 +72,15 @@ pub trait Header {
     fn packet_length(&self) -> usize;
 }
 
+impl<H: Header> Header for &H {
+    const MINIMUM_LENGTH: usize = H::MINIMUM_LENGTH;
+
+    #[inline]
+    fn packet_length(&self) -> usize {
+        H::packet_length(self)
+    }
+}
+
 impl<T: Header> Header for Vec<T> {
     const MINIMUM_LENGTH: usize = 0;
 

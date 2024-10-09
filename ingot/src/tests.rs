@@ -818,6 +818,14 @@ fn easy_tuple_emit() {
     assert_eq!(geneve.protocol_type(), Ethertype::ETHERNET);
     assert_eq!(geneve.vni(), 7777.try_into().unwrap());
     assert_eq!(geneve.reserved(), 0);
+
+    let ref_stack = (&makeshift_stack.0, &makeshift_stack.1);
+
+    // Ensure that forwarding of Header, Emit, and EmitUninit work
+    // via &T.
+    let out = ref_stack.emit_vec();
+    ValidUdp::parse(&out[..8]).unwrap();
+    ValidGeneve::parse(&out[8..]).unwrap();
 }
 
 #[test]
