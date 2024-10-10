@@ -27,7 +27,7 @@ mod accessor;
 mod emit;
 mod error;
 pub mod field;
-pub mod packet;
+pub mod header;
 pub mod primitives;
 pub mod util;
 
@@ -39,7 +39,7 @@ pub use accessor::Accessor;
 pub use emit::*;
 pub use error::*;
 pub use field::*;
-pub use packet::*;
+pub use header::*;
 
 /// Converts a borrowed view of a header into an owned version, possibly
 /// reparsing to do so.
@@ -58,7 +58,7 @@ pub trait ToOwnedPacket: NextLayer {
 }
 
 /// Base trait for header/packet types.
-pub trait Header {
+pub trait HeaderLen {
     /// The minimum number of bytes a packet of this kind occupies
     /// when serialised.
     const MINIMUM_LENGTH: usize;
@@ -70,7 +70,7 @@ pub trait Header {
     fn packet_length(&self) -> usize;
 }
 
-impl<H: Header> Header for &H {
+impl<H: HeaderLen> HeaderLen for &H {
     const MINIMUM_LENGTH: usize = H::MINIMUM_LENGTH;
 
     #[inline]
@@ -79,7 +79,7 @@ impl<H: Header> Header for &H {
     }
 }
 
-impl<T: Header> Header for Vec<T> {
+impl<T: HeaderLen> HeaderLen for Vec<T> {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
@@ -88,7 +88,7 @@ impl<T: Header> Header for Vec<T> {
     }
 }
 
-impl<T: Header> Header for Option<T> {
+impl<T: HeaderLen> HeaderLen for Option<T> {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
@@ -97,7 +97,7 @@ impl<T: Header> Header for Option<T> {
     }
 }
 
-impl Header for Vec<u8> {
+impl HeaderLen for Vec<u8> {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
@@ -177,7 +177,7 @@ impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
     }
 }
 
-impl Header for &[u8] {
+impl HeaderLen for &[u8] {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
@@ -369,7 +369,7 @@ unsafe impl<'a> IntoBufPointer<'a> for &'a mut [u8] {
     }
 }
 
-// Used to gate impls on IndirectPacket in downstream derives.
+// Used to gate impls on BoxedHeader in downstream derives.
 #[cfg(feature = "alloc")]
 #[doc(hidden)]
 #[macro_export]

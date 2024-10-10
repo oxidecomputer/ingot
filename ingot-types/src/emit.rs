@@ -1,7 +1,7 @@
 use super::*;
 
 /// Serialise a network packet/header into a byte buffer.
-pub trait Emit: Header {
+pub trait Emit: HeaderLen {
     /// Writes this packet's contents into a target buffer without
     /// performing length checks.
     ///

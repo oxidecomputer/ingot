@@ -69,7 +69,7 @@ impl<T> DerefMut for Repeated<T> {
     }
 }
 
-impl<T: Header> Header for Repeated<T> {
+impl<T: HeaderLen> HeaderLen for Repeated<T> {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
@@ -114,7 +114,7 @@ pub struct RepeatedView<B, T: HasView<B> + NextLayer> {
     marker: PhantomData<T>,
 }
 
-impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Header
+impl<B: ByteSlice, T: HeaderLen + NextLayer + HasView<B>> HeaderLen
     for RepeatedView<B, T>
 {
     const MINIMUM_LENGTH: usize = 0;
@@ -125,7 +125,7 @@ impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Header
     }
 }
 
-impl<B: ByteSlice, T: Header + NextLayer + HasView<B>> Emit
+impl<B: ByteSlice, T: HeaderLen + NextLayer + HasView<B>> Emit
     for RepeatedView<B, T>
 {
     #[inline]

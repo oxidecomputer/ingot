@@ -72,7 +72,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         let valid_field_ident = Ident::new(&format!("Valid{id}"), ident.span());
 
         top_vars.push(quote! {
-            #id(::ingot::types::Packet<#field_ident, #valid_field_ident<V>>)
+            #id(::ingot::types::Header<#field_ident, #valid_field_ident<V>>)
         });
 
         validated_vars.push(quote! {
@@ -108,11 +108,11 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         });
 
         parse_match_arms.push(quote! {
-            #validated_ident::#id(v) => #ident::#id(::ingot::types::Packet::Raw(v))
+            #validated_ident::#id(v) => #ident::#id(::ingot::types::Header::Raw(v))
         });
 
         repr_match_arms.push(quote! {
-            #repr_ident::#id(v) => #ident::#id(::ingot::types::Packet::Repr(v.into()))
+            #repr_ident::#id(v) => #ident::#id(::ingot::types::Header::Repr(v.into()))
         });
 
         next_layer_wheres.push(quote! {
@@ -142,11 +142,11 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             impl<V: ::ingot::types::ByteSlice> ::core::convert::From<#id> for #ident<V> {
                 #[inline]
                 fn from(value: #id) -> Self {
-                    Self::#id(::ingot::types::Packet::Repr(value.into()))
+                    Self::#id(::ingot::types::Header::Repr(value.into()))
                 }
             }
 
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#ident<V>> for ::ingot::types::Header<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
 
                 #[inline]
@@ -158,7 +158,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
                 }
             }
 
-            impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot::types::Packet<#field_ident, #valid_field_ident<V>> {
+            impl<V: ::ingot::types::ByteSlice> ::core::convert::TryFrom<#validated_ident<V>> for ::ingot::types::Header<#field_ident, #valid_field_ident<V>> {
                 type Error = ::ingot::types::ParseError;
 
                 #[inline]
@@ -285,7 +285,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #ident<V> {
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HeaderLen for #ident<V> {
             const MINIMUM_LENGTH: usize = #minimum_len;
 
             #[inline]
@@ -296,7 +296,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V: ::ingot::types::ByteSlice> ::ingot::types::Header for #validated_ident<V> {
+        impl<V: ::ingot::types::ByteSlice> ::ingot::types::HeaderLen for #validated_ident<V> {
             const MINIMUM_LENGTH: usize = #minimum_len;
 
             #[inline]
@@ -307,7 +307,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl ::ingot::types::Header for #repr_head {
+        impl ::ingot::types::HeaderLen for #repr_head {
             const MINIMUM_LENGTH: usize = #minimum_len;
 
             #[inline]

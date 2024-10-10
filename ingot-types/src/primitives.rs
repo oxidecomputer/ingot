@@ -36,10 +36,10 @@ impl NetworkRepr<u1> for bool {
 
 #[cfg(feature = "alloc")]
 /// Buffer type which can be owned or a view.
-pub type VarBytes<V> = Packet<Vec<u8>, V>;
+pub type VarBytes<V> = Header<Vec<u8>, V>;
 #[cfg(not(feature = "alloc"))]
 /// Buffer type which can be owned or a view.
-pub type VarBytes<V> = Packet<Vec<u8, 256>, V>;
+pub type VarBytes<V> = Header<Vec<u8, 256>, V>;
 
 impl<B: ByteSlice> HasView<B> for Vec<u8> {
     type ViewType = RawBytes<B>;
@@ -48,8 +48,8 @@ impl<B: ByteSlice> HasView<B> for Vec<u8> {
 impl<V: ByteSlice> From<&VarBytes<V>> for Vec<u8> {
     fn from(value: &VarBytes<V>) -> Self {
         match value {
-            Packet::Repr(v) => *v.clone(),
-            Packet::Raw(v) => v.to_vec(),
+            Header::Repr(v) => *v.clone(),
+            Header::Raw(v) => v.to_vec(),
         }
     }
 }
@@ -100,7 +100,7 @@ impl<B: ByteSlice> From<RawBytes<B>> for Vec<u8> {
     }
 }
 
-impl<B: ByteSlice> Header for RawBytes<B> {
+impl<B: ByteSlice> HeaderLen for RawBytes<B> {
     const MINIMUM_LENGTH: usize = 0;
 
     #[inline]
@@ -113,8 +113,8 @@ impl<V: ByteSlice> AsRef<[u8]> for VarBytes<V> {
     #[inline]
     fn as_ref(&self) -> &[u8] {
         match self {
-            Packet::Repr(o) => o.as_ref(),
-            Packet::Raw(b) => b.as_ref(),
+            Header::Repr(o) => o.as_ref(),
+            Header::Raw(b) => b.as_ref(),
         }
     }
 }
@@ -123,8 +123,8 @@ impl<V: ByteSliceMut> AsMut<[u8]> for VarBytes<V> {
     #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
         match self {
-            Packet::Repr(o) => o.as_mut(),
-            Packet::Raw(b) => b.as_mut(),
+            Header::Repr(o) => o.as_mut(),
+            Header::Raw(b) => b.as_mut(),
         }
     }
 }

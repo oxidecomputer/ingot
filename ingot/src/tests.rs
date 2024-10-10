@@ -16,7 +16,7 @@ use ethernet::Ethertype;
 use example_chain::{GenericUlp, GeneveOverV6Tunnel, UdpParser, L3};
 use geneve::{Geneve, GeneveFlags, GeneveOpt, GeneveOptionType};
 use ingot_types::{
-    primitives::*, util::RepeatedView, Accessor, Emit, Header, HeaderParse,
+    primitives::*, util::RepeatedView, Accessor, Emit, HeaderLen, HeaderParse,
     NetworkRepr, NextLayer, NextLayerChoice, ParseChoice, ParseError, Parsed,
     ToOwnedPacket,
 };
@@ -628,8 +628,8 @@ fn v6_repeat_extension_headers() {
 
     // TODO: ergonomics
     match v6.1 {
-        ingot_types::Packet::Repr(_) => panic!(),
-        ingot_types::Packet::Raw(ref v) => {
+        ingot_types::Header::Repr(_) => panic!(),
+        ingot_types::Header::Raw(ref v) => {
             let mut t = v.iter(Some(IpProtocol::IPV6_HOP_BY_HOP));
             let hbh = t.next().unwrap().unwrap();
             let ValidLowRentV6Eh::IpV6Ext6564(hbh) = hbh else { panic!() };

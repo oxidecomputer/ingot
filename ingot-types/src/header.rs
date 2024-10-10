@@ -5,28 +5,28 @@ use super::*;
 #[cfg(feature = "alloc")]
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
-pub use alloc::vec::Vec;
+use alloc::vec::Vec;
 use primitives::RawBytes;
 
 #[cfg(not(feature = "alloc"))]
-/// Convenience type choosing [`DirectPacket`] when `IndirectPacket` is
+/// Convenience type choosing [`InlineHeader`] when `BoxedHeader` is
 /// unavailable.
-pub type Packet<O, B> = DirectPacket<O, B>;
+pub type Header<O, B> = InlineHeader<O, B>;
 
 #[cfg(feature = "alloc")]
-/// Convenience type preferring [`IndirectPacket`] when available.
-pub type Packet<O, B> = IndirectPacket<O, B>;
+/// Convenience type preferring [`BoxedHeader`] when available.
+pub type Header<O, B> = BoxedHeader<O, B>;
 
-/// The `Packet` type corresponding to an owned representation
+/// The [`Header`] type corresponding to an owned representation
 /// type `T` on buffer `B`.
-pub type PacketOf<T, B> = Packet<T, <T as HasView<B>>::ViewType>;
+pub type HeaderOf<T, B> = Header<T, <T as HasView<B>>::ViewType>;
 
 /// A header which is either owned or read from a buffer.
 ///
 /// Generated traits which allow reading/modifying/emitting either type
 /// are re-implemented on the `Packet` types.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum DirectPacket<O, B> {
+pub enum InlineHeader<O, B> {
     /// Owned representation of a header.
     Repr(O),
     /// Packed representation of a header, read from an existing buffer.
@@ -38,10 +38,10 @@ pub enum DirectPacket<O, B> {
 ///
 /// Generally, use of boxed `Repr` values reduces output struct sizes
 /// when parsing full packets and is preferred when compiling with the
-/// `alloc` feature. See [`DirectPacket`] if stack allocation is needed.
+/// `alloc` feature. See [`InlineHeader`] if stack allocation is needed.
 #[cfg(feature = "alloc")]
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum IndirectPacket<O, B> {
+pub enum BoxedHeader<O, B> {
     /// Owned, in-memory representation of a header.
     #[cfg(feature = "alloc")]
     Repr(Box<O>),
@@ -50,21 +50,21 @@ pub enum IndirectPacket<O, B> {
 }
 
 #[cfg(feature = "alloc")]
-impl<O, B> From<DirectPacket<O, B>> for IndirectPacket<O, B> {
-    fn from(value: DirectPacket<O, B>) -> Self {
+impl<O, B> From<InlineHeader<O, B>> for BoxedHeader<O, B> {
+    fn from(value: InlineHeader<O, B>) -> Self {
         match value {
-            DirectPacket::Repr(o) => Self::Repr(o.into()),
-            DirectPacket::Raw(b) => Self::Raw(b),
+            InlineHeader::Repr(o) => Self::Repr(o.into()),
+            InlineHeader::Raw(b) => Self::Raw(b),
         }
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<O, B> From<IndirectPacket<O, B>> for DirectPacket<O, B> {
-    fn from(value: IndirectPacket<O, B>) -> Self {
+impl<O, B> From<BoxedHeader<O, B>> for InlineHeader<O, B> {
+    fn from(value: BoxedHeader<O, B>) -> Self {
         match value {
-            IndirectPacket::Repr(o) => Self::Repr(*o),
-            IndirectPacket::Raw(b) => Self::Raw(b),
+            BoxedHeader::Repr(o) => Self::Repr(*o),
+            BoxedHeader::Raw(b) => Self::Raw(b),
         }
     }
 }
@@ -73,7 +73,7 @@ impl<O, B> From<IndirectPacket<O, B>> for DirectPacket<O, B> {
 // Indirect impls.
 //
 #[cfg(feature = "alloc")]
-impl<O, B> IndirectPacket<O, B> {
+impl<O, B> BoxedHeader<O, B> {
     /// Return a reference to this packet's contents if
     /// they are owned.
     pub fn repr(&self) -> Option<&O> {
@@ -116,43 +116,43 @@ impl<
         D: Copy + Eq,
         O: NextLayer<Denom = D> + Clone,
         B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
-    > ToOwnedPacket for IndirectPacket<O, B>
+    > ToOwnedPacket for BoxedHeader<O, B>
 {
     type Target = O;
 
     fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target> {
         match self {
-            Packet::Repr(o) => Ok(*o.clone()),
-            Packet::Raw(v) => v.to_owned(hint),
+            Header::Repr(o) => Ok(*o.clone()),
+            Header::Raw(v) => v.to_owned(hint),
         }
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<B: ByteSlice> From<&IndirectPacket<Vec<u8>, RawBytes<B>>> for Vec<u8> {
-    fn from(value: &Packet<Vec<u8>, RawBytes<B>>) -> Self {
+impl<B: ByteSlice> From<&BoxedHeader<Vec<u8>, RawBytes<B>>> for Vec<u8> {
+    fn from(value: &Header<Vec<u8>, RawBytes<B>>) -> Self {
         match value {
-            Packet::Repr(v) => v.to_vec(),
-            Packet::Raw(v) => v.to_vec(),
+            Header::Repr(v) => v.to_vec(),
+            Header::Raw(v) => v.to_vec(),
         }
     }
 }
 
 #[cfg(feature = "alloc")]
-impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for IndirectPacket<O, B> {
+impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for BoxedHeader<O, B> {
     type ViewType = B;
 }
 
 #[cfg(feature = "alloc")]
-impl<O, B> HasRepr for IndirectPacket<O, B> {
+impl<O, B> HasRepr for BoxedHeader<O, B> {
     type ReprType = O;
 }
 
 #[cfg(feature = "alloc")]
-impl<O, B> Header for IndirectPacket<O, B>
+impl<O, B> HeaderLen for BoxedHeader<O, B>
 where
-    O: Header,
-    B: Header,
+    O: HeaderLen,
+    B: HeaderLen,
 {
     const MINIMUM_LENGTH: usize = O::MINIMUM_LENGTH;
 
@@ -172,7 +172,7 @@ where
 impl<
         V: SplitByteSlice,
         B: HeaderParse<V> + HasRepr + NextLayer + Into<Self>,
-    > HeaderParse<V> for IndirectPacket<B::ReprType, B>
+    > HeaderParse<V> for BoxedHeader<B::ReprType, B>
 where
     B: NextLayer,
     B::ReprType: NextLayer<Denom = B::Denom>,
@@ -185,7 +185,7 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<O: NextLayer, B> NextLayer for IndirectPacket<O, B>
+impl<O: NextLayer, B> NextLayer for BoxedHeader<O, B>
 where
     B: NextLayer<Denom = O::Denom>,
 {
@@ -202,7 +202,7 @@ where
 
 #[cfg(feature = "alloc")]
 impl<D: Copy + Eq, D2, O: NextLayerChoice<D> + NextLayer<Denom = D2>, B>
-    NextLayerChoice<D> for IndirectPacket<O, B>
+    NextLayerChoice<D> for BoxedHeader<O, B>
 where
     B: NextLayerChoice<D> + NextLayer<Denom = D2>,
 {
@@ -217,12 +217,12 @@ where
 
 #[cfg(feature = "alloc")]
 unsafe impl<O: EmitDoesNotRelyOnBufContents, B: EmitDoesNotRelyOnBufContents>
-    EmitDoesNotRelyOnBufContents for IndirectPacket<O, B>
+    EmitDoesNotRelyOnBufContents for BoxedHeader<O, B>
 {
 }
 
 #[cfg(feature = "alloc")]
-impl<O: Emit, B: Emit> Emit for IndirectPacket<O, B> {
+impl<O: Emit, B: Emit> Emit for BoxedHeader<O, B> {
     #[inline]
     fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
         match self {
@@ -243,7 +243,7 @@ impl<O: Emit, B: Emit> Emit for IndirectPacket<O, B> {
 //
 // Direct impls.
 //
-impl<O, B> DirectPacket<O, B> {
+impl<O, B> InlineHeader<O, B> {
     /// Return a reference to this packet's contents if
     /// they are owned.
     pub fn repr(&self) -> Option<&O> {
@@ -285,7 +285,7 @@ impl<
         D: Copy + Eq,
         O: NextLayer<Denom = D> + Clone,
         B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
-    > ToOwnedPacket for DirectPacket<O, B>
+    > ToOwnedPacket for InlineHeader<O, B>
 {
     type Target = O;
 
@@ -297,18 +297,18 @@ impl<
     }
 }
 
-impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for DirectPacket<O, B> {
+impl<O: HasView<V, ViewType = B>, B, V> HasView<V> for InlineHeader<O, B> {
     type ViewType = B;
 }
 
-impl<O, B> HasRepr for DirectPacket<O, B> {
+impl<O, B> HasRepr for InlineHeader<O, B> {
     type ReprType = O;
 }
 
-impl<O, B> Header for DirectPacket<O, B>
+impl<O, B> HeaderLen for InlineHeader<O, B>
 where
-    O: Header,
-    B: Header,
+    O: HeaderLen,
+    B: HeaderLen,
 {
     const MINIMUM_LENGTH: usize = O::MINIMUM_LENGTH;
 
@@ -327,7 +327,7 @@ where
 impl<
         V: SplitByteSlice,
         B: HeaderParse<V> + HasRepr + NextLayer + Into<Self>,
-    > HeaderParse<V> for DirectPacket<B::ReprType, B>
+    > HeaderParse<V> for InlineHeader<B::ReprType, B>
 where
     B: NextLayer,
     B::ReprType: NextLayer<Denom = B::Denom>,
@@ -339,7 +339,7 @@ where
     }
 }
 
-impl<O: NextLayer, B> NextLayer for DirectPacket<O, B>
+impl<O: NextLayer, B> NextLayer for InlineHeader<O, B>
 where
     B: NextLayer<Denom = O::Denom>,
 {
@@ -355,11 +355,11 @@ where
 }
 
 unsafe impl<O: EmitDoesNotRelyOnBufContents, B: EmitDoesNotRelyOnBufContents>
-    EmitDoesNotRelyOnBufContents for DirectPacket<O, B>
+    EmitDoesNotRelyOnBufContents for InlineHeader<O, B>
 {
 }
 
-impl<O: Emit, B: Emit> Emit for DirectPacket<O, B> {
+impl<O: Emit, B: Emit> Emit for InlineHeader<O, B> {
     #[inline]
     fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
         match self {

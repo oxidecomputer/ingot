@@ -229,9 +229,9 @@ pub fn define_tuple_trait_impls(
         let curr_ty = quote! {(#( #tys_so_far, )*)};
 
         impl_set.push(quote! {
-            impl<#( #tys_so_far ),*> crate::Header for #curr_ty
+            impl<#( #tys_so_far ),*> crate::HeaderLen for #curr_ty
             where
-                #( #tys_so_far: crate::Header ),*
+                #( #tys_so_far: crate::HeaderLen ),*
             {
                 const MINIMUM_LENGTH: usize = #( #tys_so_far::MINIMUM_LENGTH + )* 0;
 

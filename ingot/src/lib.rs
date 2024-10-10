@@ -8,20 +8,20 @@
 //! defined here double as examples of their use.
 //!
 //! Headers can be used directly (as with any other rust struct), or using
-//! protocol-specific traits and the `Packet` type when we need to hold mixed
+//! protocol-specific traits and the `Header` type when we need to hold mixed
 //! owned/borrowed data.
 //!
 //! ![Visual relationship between owned and borrowed types in Ingot.](https://github.com/oxidecomputer/ingot/raw/refs/heads/prototype/model.svg "Visual relationship between owned and borrowed types in Ingot.")
 //!
 //! Headers define *owned* and *borrowed* versions of their contents, with shared
-//! traits to use and modify each individually or through the `Packet` abstraction.
+//! traits to use and modify each individually or through the `Header` abstraction.
 //! Base traits, primitive types, and assorted helpers are defined in [`ingot_types`].
 //!
 //! ## Working with packets.
 //! Packets/headers can be read and modified whether they are owned or borrowed:
 //! ```rust
 //! use ingot::ethernet::{Ethernet, Ethertype, EthernetRef, EthernetMut, ValidEthernet};
-//! use ingot::types::{Emit, HeaderParse, Packet};
+//! use ingot::types::{Emit, HeaderParse, Header};
 //! use macaddr::MacAddr6;
 //!
 //! let owned_ethernet = Ethernet {
@@ -56,16 +56,16 @@
 //! assert_eq!(rereparsed_ethernet.destination(), MacAddr6::nil());
 //!
 //! // ----------------
-//! // ...and via Packet
+//! // ...and via Header
 //! // ----------------
-//! let eth_pkt = Packet::from(rereparsed_ethernet);
+//! let eth_pkt = Header::from(rereparsed_ethernet);
 //! assert_eq!(eth_pkt.source(), MacAddr6::broadcast());
 //! ```
 //!
 //! Packets can also be written into any buffer easily for any tuple of headers:
 //! ```rust
 //! # use ingot::ethernet::{Ethernet, Ethertype, EthernetRef, EthernetMut, ValidEthernet};
-//! # use ingot::types::{Emit, HeaderParse, Packet};
+//! # use ingot::types::{Emit, HeaderParse, Header};
 //! # use macaddr::MacAddr6;
 //! use ingot::geneve::*;
 //! use ingot::udp::*;
