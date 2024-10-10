@@ -1,5 +1,3 @@
-#![allow(clippy::unusual_byte_groupings)]
-
 use crate::{
     ethernet::{Ethernet, EthernetMut, EthernetRef, ValidEthernet},
     geneve::{GeneveRef, ValidGeneve},
@@ -248,6 +246,7 @@ fn parse_header_chain_multichunk() {
 fn unaligned_bitfield_read_write() {
     // type has len: 24B
     #[rustfmt::skip]
+    #[allow(clippy::unusual_byte_groupings)]
     let mut base_bytes = [
         // 1, 10_560_325
         0x01, 0xa1, 0x23, 0x45,

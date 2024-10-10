@@ -20,7 +20,6 @@ ingot-types = { path = "ingot-types", default-features = false }
 # External
 bitflags = "2"
 darling = "0.20"
-heapless = "0.8"
 itertools = "0.13"
 macaddr = { version = "1", default-features = false }
 proc-macro2 = { version = "1" }

@@ -12,8 +12,6 @@ use core::{
     net::{Ipv4Addr, Ipv6Addr},
     ops::{Deref, DerefMut},
 };
-#[cfg(not(feature = "alloc"))]
-pub use heapless::Vec;
 use zerocopy::{
     FromBytes, Immutable, IntoByteSliceMut, IntoBytes, KnownLayout, Ref,
 };

@@ -6,8 +6,6 @@ use super::*;
 use alloc::boxed::Box;
 #[cfg(feature = "alloc")]
 pub use alloc::vec::Vec;
-#[allow(unused)]
-use heapless::Vec as HVec;
 use primitives::RawBytes;
 
 #[cfg(not(feature = "alloc"))]

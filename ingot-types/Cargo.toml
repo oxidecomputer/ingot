@@ -11,6 +11,5 @@ default = ["alloc"]
 
 [dependencies]
 ingot-macros.workspace = true
-heapless.workspace = true
 macaddr.workspace = true
 zerocopy.workspace = true

@@ -45,10 +45,6 @@ impl<B: ByteSlice> HasView<B> for Vec<u8> {
     type ViewType = RawBytes<B>;
 }
 
-impl<B: ByteSlice, const N: usize> HasView<B> for heapless::Vec<u8, N> {
-    type ViewType = RawBytes<B>;
-}
-
 impl<V: ByteSlice> From<&VarBytes<V>> for Vec<u8> {
     fn from(value: &VarBytes<V>) -> Self {
         match value {
