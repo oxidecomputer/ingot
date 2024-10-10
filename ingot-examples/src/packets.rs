@@ -1,40 +1,14 @@
-//! Example uses of the [`Parse`] and [`choice`] macros.
+//! Example uses of the [`Parse`] macro.
 
-use crate::{
+use super::choices::*;
+use ingot::{
     ethernet::{EthernetPacket, EthernetRef, Ethertype, ValidEthernet},
     geneve::GenevePacket,
-    icmp::{IcmpV4, IcmpV6, ValidIcmpV4, ValidIcmpV6},
-    ip::{IpProtocol, Ipv4, Ipv6, Ipv6Packet, ValidIpv4, ValidIpv6},
-    tcp::{Tcp, ValidTcp},
-    udp::{Udp, UdpPacket, ValidUdp},
+    ip::Ipv6Packet,
+    types::{ByteSlice, ParseControl},
+    udp::UdpPacket,
+    Parse,
 };
-use ingot_macros::{choice, Parse};
-use ingot_types::ParseControl;
-use zerocopy::ByteSlice;
-
-/// An IPv4 or IPv6 header, determined by an input [`Ethertype`].
-#[choice(on = Ethertype)]
-pub enum L3 {
-    Ipv4 = Ethertype::IPV4,
-    Ipv6 = Ethertype::IPV6,
-}
-
-/// A TCP or UDP header, determined by an [`IpProtocol`] from an IPv4/v6
-/// packet.
-#[choice(on = IpProtocol)]
-pub enum L4 {
-    Tcp = IpProtocol::TCP,
-    Udp = IpProtocol::UDP,
-}
-
-/// An upper-layer protocol header: [`L4`], including ICMP(v6).
-#[choice(on = IpProtocol)]
-pub enum Ulp {
-    Tcp = IpProtocol::TCP,
-    Udp = IpProtocol::UDP,
-    IcmpV4 = IpProtocol::ICMP,
-    IcmpV6 = IpProtocol::ICMP_V6,
-}
 
 /// A parser which decodes all IPv4/v6 UDP packets, carried over Ethernet.
 #[derive(Parse)]

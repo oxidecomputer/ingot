@@ -5,7 +5,8 @@
 //! [`Parse`] (chains of individual layers).
 //!
 //! The documentation for each macro (as well as the packet and header types)
-//! defined here double as examples of their use.
+//! defined here double as examples of their use. See also the `ingot-examples`
+//! crate.
 //!
 //! Headers can be used directly (as with any other rust struct), or using
 //! protocol-specific traits and the `Header` type when we need to hold mixed
@@ -127,8 +128,6 @@ pub mod icmp;
 pub mod ip;
 pub mod tcp;
 pub mod udp;
-
-pub mod example_chain;
 
 #[cfg(test)]
 mod tests;

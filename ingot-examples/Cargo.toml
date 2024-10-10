@@ -1,0 +1,21 @@
+[package]
+name = "ingot-examples"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ingot.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+macaddr.workspace = true
+
+[[bench]]
+name = "choice"
+harness = false
+
+[[bench]]
+name = "packet"
+harness = false

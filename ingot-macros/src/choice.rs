@@ -259,7 +259,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
-        impl<V: ::zerocopy::ByteSlice, T: Copy + Eq> ::ingot::types::NextLayer for #validated_ident<V>
+        impl<V: ::ingot::types::ByteSlice, T: Copy + Eq> ::ingot::types::NextLayer for #validated_ident<V>
         where #( #next_layer_wheres ),*
         {
             type Denom = T;
