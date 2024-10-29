@@ -114,6 +114,22 @@ pub struct RepeatedView<B, T: HasView<B> + NextLayer> {
     marker: PhantomData<T>,
 }
 
+impl<B: ByteSlice, T: HasView<B> + NextLayer> AsRef<[u8]>
+    for RepeatedView<B, T>
+{
+    fn as_ref(&self) -> &[u8] {
+        &self.inner
+    }
+}
+
+impl<B: ByteSliceMut, T: HasView<B> + NextLayer> AsMut<[u8]>
+    for RepeatedView<B, T>
+{
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.inner
+    }
+}
+
 impl<B: ByteSlice, T: HeaderLen + NextLayer + HasView<B>> HeaderLen
     for RepeatedView<B, T>
 {
