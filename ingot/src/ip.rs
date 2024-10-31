@@ -14,7 +14,6 @@ pub struct IpProtocol(pub u8);
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ExtHdrClass {
-    NotAnEh,
     FragmentHeader,
     Rfc6564,
 }
@@ -40,9 +39,9 @@ impl IpProtocol {
     pub const IPV6_EXPERIMENT1: Self = Self(254);
 
     #[inline]
-    pub fn class(self) -> ExtHdrClass {
+    pub fn class(self) -> Option<ExtHdrClass> {
         match self {
-            Self::IPV6_FRAGMENT => ExtHdrClass::FragmentHeader,
+            Self::IPV6_FRAGMENT => Some(ExtHdrClass::FragmentHeader),
             Self::IPV6_HOP_BY_HOP
             | Self::IPV6_ROUTE
             | Self::IPV6_DEST_OPTS
@@ -50,8 +49,8 @@ impl IpProtocol {
             | Self::IPV6_HIP
             | Self::IPV6_SHIM6
             | Self::IPV6_EXPERIMENT0
-            | Self::IPV6_EXPERIMENT1 => ExtHdrClass::Rfc6564,
-            _ => ExtHdrClass::NotAnEh,
+            | Self::IPV6_EXPERIMENT1 => Some(ExtHdrClass::Rfc6564),
+            _ => None,
         }
     }
 }
@@ -197,8 +196,8 @@ pub struct Ipv6 {
 
 #[choice(on = "IpProtocol", map_on = IpProtocol::class)]
 pub enum LowRentV6Eh {
-    IpV6ExtFragment = ExtHdrClass::FragmentHeader,
-    IpV6Ext6564 = ExtHdrClass::Rfc6564,
+    IpV6ExtFragment = Some(ExtHdrClass::FragmentHeader),
+    IpV6Ext6564 = Some(ExtHdrClass::Rfc6564),
 }
 
 // 0x2c
