@@ -7,7 +7,7 @@ Ingot takes heavy inspiration from [`libpnet`](https://github.com/libpnet/libpne
 * First-class support for chaining headers and selecting over next-header values to parse packets.
 * Packet views and representations generate common read and write traits (`UdpRef`, `UdpMut`). Setting and getting fields from present or pushed headers is consistent and easy.
 * Support for nested parsing of headers -- e.g., IPv6 extensions within a parent `IPv6` struct.
-* Ingot allows packet parsing over split buffers, e.g., illumos `mblk_t`s. Accordingly, individual headers do not have `payload` fields.
+* Ingot allows packet parsing over split buffers (so long as each header is contiguous), e.g., in illumos `mblk_t`s. Accordingly, individual headers do not have `payload` fields.
 * Variable-width packet segments (options, extensions) can be replaced with their owned representation, even when their parent is a zero-copy view. This makes it easier to alter options in place, if needed.
 
 ## Performance
