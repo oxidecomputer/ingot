@@ -6,8 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-alloc = ["serde?/alloc"]
-default = ["alloc", "ingot-types/alloc", "serde"]
+alloc = ["serde?/alloc", "ingot-types/alloc"]
+default = ["alloc", "serde"]
 serde = ["dep:serde"]
 
 [dependencies]

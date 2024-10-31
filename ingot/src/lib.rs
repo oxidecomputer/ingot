@@ -12,7 +12,34 @@
 //! protocol-specific traits and the `Header` type when we need to hold mixed
 //! owned/borrowed data.
 //!
-//! ![Visual relationship between owned and borrowed types in Ingot.](https://github.com/oxidecomputer/ingot/raw/refs/heads/prototype/model.svg "Visual relationship between owned and borrowed types in Ingot.")
+//! ```text
+//! ╔═╗
+//! ║P║   pub struct Packet<Owned, View> {      pub struct DirectPacket<Owned, View> {
+//! ║r║       Repr(Box<Owned>),                     Repr(Owned),
+//! ║o║       Raw(View),                            Raw(View),
+//! ║v║   }                                     }
+//! ║i║                   │                                         │
+//! ║d║                   │                                         │
+//! ║e║                   └───────────────┬────────IMPL─────────────┴──────┐
+//! ║d║                                   │                                │
+//! ╚═╝─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┼ ─ ─ ─ ─ ─ ─ ─
+//!                                       ▼                                ▼
+//! ╔═╗                     │ #[derive(Ingot)]           #[derive(Ingot)]
+//! ║U║  #[derive(Ingot)]     pub trait UdpRef {         pub trait UdpMut {
+//! ║s║  pub struct Udp {   │     fn src(&self) -> u16;      fn set_src(&mut self, val: u16);
+//! ║e║      // ...        ──┐    fn dst(&self) -> u16;      fn set_dst(&mut self, val: u16);
+//! ║r║  } ▲          │     ││    // ...                     // ...
+//! ╚═╝    │          │      │}                          }
+//!        │      HasView   ││            ▲                                ▲
+//! ─ ─ ─ ─│─ ─ ─ ─ ─ ┼ ─ ─ ─│            │                                │
+//!     HasRepr       │      ├────────────┴───────────IMPL─────────────────┘
+//!        │          │      │
+//!        │          │      │                                  ╔═══════════╗
+//!        │          ▼                                         ║ Generated ║
+//!    pub struct ValidUdp<B: ByteSlice> (                      ╚═══════════╝
+//!        Ref<B, UdpPart0>, // Zerocopy, repr(C)
+//!    );
+//! ```
 //!
 //! Headers define *owned* and *borrowed* versions of their contents, with shared
 //! traits to use and modify each individually or through the `Header` abstraction.
