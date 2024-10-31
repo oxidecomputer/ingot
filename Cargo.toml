@@ -9,8 +9,9 @@ members = [
 
 [workspace.package]
 edition = "2021"
-license = "MIT/Apache-2.0"
+license = "MPL-2.0"
 repository = "https://github.com/oxidecomputer/ingot"
+rust-version = "1.82"
 
 [workspace.dependencies]
 # Internal
