@@ -9,6 +9,8 @@ use core::{
     fmt::{Debug, Display},
 };
 
+use crate::Read;
+
 /// Convenience type for fallible operations done while parsing headers.
 pub type ParseResult<T> = Result<T, ParseError>;
 
@@ -26,6 +28,8 @@ pub enum ParseError {
     /// There are insufficient bytes in the buffer to read the intended
     /// header.
     TooSmall,
+    /// A header could not be parsed as it was split across several buffers.
+    StraddledHeader,
     /// There are no remaining chunks in the [`Read`].
     ///
     /// [`Read`]: crate::Read
@@ -47,10 +51,23 @@ impl ParseError {
             ParseError::Unwanted => c"Unwanted",
             ParseError::NeedsHint => c"NeedsHint",
             ParseError::TooSmall => c"TooSmall",
+            ParseError::StraddledHeader => c"StraddledHeader",
             ParseError::NoRemainingChunks => c"NoRemainingChunks",
             ParseError::CannotAccept => c"CannotAccept",
             ParseError::Reject => c"Reject",
             ParseError::IllegalValue => c"IllegalValue",
+        }
+    }
+
+    /// Converts `TooSmall` to `StraddledHeader` for generated `parse_read`
+    /// impls.
+    #[doc(hidden)]
+    pub fn convert_read_parse(self, reader: &mut impl Read) -> Self {
+        match self {
+            Self::TooSmall if reader.next_chunk().is_ok() => {
+                Self::StraddledHeader
+            }
+            a => a,
         }
     }
 }
@@ -76,6 +93,9 @@ impl Display for ParseError {
             ),
             ParseError::TooSmall => {
                 write!(f, "insufficient bytes in buffer to read current header")
+            }
+            ParseError::StraddledHeader => {
+                write!(f, "header is split across more than one buffer")
             }
             ParseError::NoRemainingChunks => write!(
                 f,

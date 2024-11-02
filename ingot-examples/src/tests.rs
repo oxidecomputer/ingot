@@ -376,3 +376,48 @@ fn parse_reports_error_location() {
     assert_eq!(*e.error(), ParseError::Unwanted);
     assert_eq!(e.header().as_str(), "inner_ulp");
 }
+
+#[test]
+fn straddle_failure() {
+    #[rustfmt::skip]
+    let pkt = [
+        // ---INNER ETH---
+        // dst (guest)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x10,
+        // src (gateway)
+        0xAA, 0x00, 0x04, 0x00, 0xFF, 0x01,
+        // ethertype (v4)
+        0x08, 0x00,
+
+        // ---INNER v4---
+        0x45, 0x00, 0x00, 28 + 8,
+        0x00, 0x00, 0x00, 0x00,
+        0xf0, 0x11, 0x00, 0x00,
+        8, 8, 8, 8,
+        192, 168, 0, 5,
+
+        // ---INNER UDP---
+        0x00, 0x80, 0x00, 53,
+        0x00, 0x08, 0x00, 0x00,
+    ];
+
+    // Failure to read a header during a multi-buffer read
+    // should return a deliberate error iff. there exists more
+    // buffers in the packet.
+    let mut pkt_as_readable = LinkedList::new();
+    pkt_as_readable.push_back(pkt[..16].to_vec());
+    pkt_as_readable.push_back(pkt[16..].to_vec());
+
+    let e = GenericUlp::parse_read(pkt_as_readable.iter()).err().unwrap();
+    assert_eq!(*e.error(), ParseError::StraddledHeader);
+    assert_eq!(e.header().as_str(), "inner_l3");
+
+    // Failure to read with no further buffers should return
+    // TooSmall, as in the single buffer case.
+
+    let mut pkt_as_readable = LinkedList::new();
+    pkt_as_readable.push_back(pkt[..16].to_vec());
+    let e = GenericUlp::parse_read(pkt_as_readable.iter()).err().unwrap();
+    assert_eq!(*e.error(), ParseError::TooSmall);
+    assert_eq!(e.header().as_str(), "inner_l3");
+}

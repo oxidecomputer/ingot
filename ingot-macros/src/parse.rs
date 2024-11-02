@@ -289,41 +289,70 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
             (#fname, hint, remainder)
         };
 
-        let (parse_chunk, parse_choice) = if optional.is_some() {
-            (
-                quote! {
-                    let (#fname, remainder, hint) = if accepted {
-                        (::core::option::Option::None, slice, None)
-                    } else {
+        let (parse_chunk, parse_chunk_slice, parse_choice, parse_choice_slice) =
+            if optional.is_some() {
+                (
+                    quote! {
+                        let (#fname, remainder, hint) = if accepted {
+                            (::core::option::Option::None, slice, None)
+                        } else {
+                            let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)
+                                .map_err(|e| ::ingot::types::PacketParseError::new(e.convert_read_parse(&mut data), &#err_location))?;
+                            #hint_frag
+                            (::core::option::Option::Some(#fname), remainder)
+                        };
+                    },
+                    quote! {
+                        let (#fname, remainder, hint) = if accepted {
+                            (::core::option::Option::None, slice, None)
+                        } else {
+                            let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)
+                                .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
+                            #hint_frag
+                            (::core::option::Option::Some(#fname), remainder)
+                        };
+                    },
+                    quote! {
+                        let (#fname, remainder, hint) = if accepted {
+                            // should this be last??
+                            (::core::option::Option::None, slice, None)
+                        } else {
+                            let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)
+                                .map_err(|e| ::ingot::types::PacketParseError::new(e.convert_read_parse(&mut data), &#err_location))?;
+                            (::core::option::Option::Some(#fname), remainder, hint)
+                        };
+                    },
+                    quote! {
+                        let (#fname, remainder, hint) = if accepted {
+                            // should this be last??
+                            (::core::option::Option::None, slice, None)
+                        } else {
+                            let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)
+                                .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
+                            (::core::option::Option::Some(#fname), remainder, hint)
+                        };
+                    },
+                )
+            } else {
+                (
+                    quote! {
+                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)
+                            .map_err(|e| ::ingot::types::PacketParseError::new(e.convert_read_parse(&mut data), &#err_location))?;
+                    },
+                    quote! {
                         let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)
                             .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
-                        #hint_frag
-                        (::core::option::Option::Some(#fname), remainder)
-                    };
-                },
-                quote! {
-                    let (#fname, remainder, hint) = if accepted {
-                        // should this be last??
-                        (::core::option::Option::None, slice, None)
-                    } else {
+                    },
+                    quote! {
+                        let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)
+                            .map_err(|e| ::ingot::types::PacketParseError::new(e.convert_read_parse(&mut data), &#err_location))?;
+                    },
+                    quote! {
                         let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)
                             .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
-                        (::core::option::Option::Some(#fname), remainder, hint)
-                    };
-                },
-            )
-        } else {
-            (
-                quote! {
-                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse(slice)
-                        .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
-                },
-                quote! {
-                    let #destructure = <#local_ty as HasView<_>>::ViewType::parse_choice(slice, hint)
-                        .map_err(|e| ::ingot::types::PacketParseError::new(e, &#err_location))?;
-                },
-            )
-        };
+                    },
+                )
+            };
 
         let (contents, ns_contents) = if i == 0 {
             // Hacky generic handling.
@@ -342,7 +371,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     #conv_frag
                 },
                 quote! {
-                    #parse_chunk
+                    #parse_chunk_slice
                     #ctl_fn_chunk
                     let slice = remainder;
                     #conv_frag
@@ -378,7 +407,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                     #conv_frag
                 },
                 quote! {
-                    #parse_choice
+                    #parse_choice_slice
                     #ctl_fn_chunk
                     let slice = remainder;
                     #conv_frag
