@@ -13,6 +13,7 @@ use ingot::{
     },
     types::{
         HeaderLen, HeaderParse, NetworkRepr, NextLayer, ParseError, Parsed,
+        Read,
     },
     udp::{Udp, UdpMut, UdpRef, ValidUdp},
 };
@@ -153,7 +154,7 @@ fn parse_header_chain_multichunk() {
 
     let mut mystack = UdpParser::parse_read(my_multi.iter_mut()).unwrap();
 
-    let hdr = mystack.headers_mut();
+    let hdr = &mut mystack.headers;
 
     assert_eq!(hdr.eth.source(), MacAddr6::new(0xa, 0xb, 0xc, 0xd, 0xe, 0xf));
     assert_eq!(hdr.eth.destination(), MacAddr6::broadcast());
@@ -176,12 +177,13 @@ fn parse_header_chain_multichunk() {
     assert_eq!(hdr.l4.length(), 128);
     assert_eq!(hdr.l4.checksum(), 0xffff);
 
-    let b = mystack.body().unwrap();
+    assert!(mystack.last_chunk.is_none());
+
+    let b = Read::next_chunk(&mut mystack.data).unwrap();
 
     assert_eq!(b.len(), 128);
     assert!(b.iter().all(|v| *v == 0xaa));
 
-    let b = mystack.body_mut().unwrap();
     b.iter_mut().step_by(2).for_each(|v| *v = 0xbb);
 }
 

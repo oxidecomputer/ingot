@@ -518,13 +518,17 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 #( #parse_points )*
 
                 let last_chunk = match remainder.len() {
-                    // Attempt to pull another slice out.
-                    0 => data.next_chunk().ok(),
+                    // Do not attempt to pull another slice out.
+                    // Some clients need to be able to make strong
+                    // assumptions about which segments are allowed
+                    // to be read in one shot (e.g., needing a pullup of
+                    // any segments after the headers block).
+                    0 => None,
                     _ => Some(remainder),
                 };
 
                 ::core::result::Result::Ok(::ingot::types::Parsed {
-                    stack: #ctor,
+                    headers: #ctor,
                     data,
                     last_chunk,
                 })
@@ -559,13 +563,17 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                 #( #parse_points )*
 
                 let last_chunk = match remainder.len() {
-                    // Attempt to pull another slice out.
-                    0 => data.next_chunk().ok(),
+                    // Do not attempt to pull another slice out.
+                    // Some clients need to be able to make strong
+                    // assumptions about which segments are allowed
+                    // to be read in one shot (e.g., needing a pullup of
+                    // any segments after the headers block).
+                    0 => None,
                     _ => Some(remainder),
                 };
 
                 ::core::result::Result::Ok(::ingot::types::Parsed {
-                    stack: #ctor,
+                    headers: #ctor,
                     data,
                     last_chunk,
                 })

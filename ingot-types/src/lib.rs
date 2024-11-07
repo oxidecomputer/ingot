@@ -159,6 +159,14 @@ pub trait Read {
 
     /// Attempts to fetch the next available byte slice from `self`.
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk>;
+
+    /// Returns the number of segments remaining.
+    fn chunks_len(&self) -> usize;
+
+    /// Returns whether there are any segments remaining.
+    fn is_empty(&self) -> bool {
+        self.chunks_len() == 0
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -169,6 +177,11 @@ impl<'a> Read for alloc::collections::linked_list::Iter<'a, Vec<u8>> {
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
         self.next().ok_or(ParseError::TooSmall).map(|v| v.as_ref())
     }
+
+    #[inline]
+    fn chunks_len(&self) -> usize {
+        ExactSizeIterator::len(self)
+    }
 }
 
 #[cfg(feature = "alloc")]
@@ -178,6 +191,11 @@ impl<'a> Read for alloc::collections::linked_list::IterMut<'a, Vec<u8>> {
     #[inline]
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
         self.next().ok_or(ParseError::TooSmall).map(|v| v.as_mut())
+    }
+
+    #[inline]
+    fn chunks_len(&self) -> usize {
+        ExactSizeIterator::len(self)
     }
 }
 
@@ -301,40 +319,13 @@ impl NetworkRepr<[u8; 6]> for macaddr::MacAddr6 {
 /// over a base packet buffer which is [`Read`].
 pub struct Parsed<Stack, RawPkt: Read> {
     /// A fully-parsed header stack.
-    pub stack: Stack,
+    pub headers: Stack,
     /// The remainder of the last chunk accessed during parsing.
     pub last_chunk: Option<RawPkt::Chunk>,
     /// The leftover packet cursor.
     ///
     /// Remaining bytes can be accessed using [`Read`].
     pub data: RawPkt,
-}
-
-impl<Stack, RawPkt: Read> Parsed<Stack, RawPkt> {
-    /// Return a reference to the set of parsed headers.
-    pub fn headers(&self) -> &Stack {
-        &self.stack
-    }
-
-    /// Return a reference to the remainder of the last used chunk.
-    pub fn body(&self) -> Option<&RawPkt::Chunk> {
-        self.last_chunk.as_ref()
-    }
-}
-
-impl<Stack, RawPkt: Read> Parsed<Stack, RawPkt>
-where
-    RawPkt::Chunk: ByteSliceMut,
-{
-    /// Return a mutable reference to the set of parsed headers.
-    pub fn headers_mut(&mut self) -> &mut Stack {
-        &mut self.stack
-    }
-
-    /// Return a mutable reference to the remainder of the last used chunk.
-    pub fn body_mut(&mut self) -> Option<&mut RawPkt::Chunk> {
-        self.last_chunk.as_mut()
-    }
 }
 
 /// Convert a byte slice into a pointer to its base.

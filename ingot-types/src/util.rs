@@ -17,6 +17,10 @@ impl<T: SplitByteSlice> Read for OneChunk<T> {
     fn next_chunk(&mut self) -> ParseResult<Self::Chunk> {
         self.0.take().ok_or(ParseError::NoRemainingChunks)
     }
+
+    fn chunks_len(&self) -> usize {
+        self.0.is_some() as usize
+    }
 }
 
 impl<T: SplitByteSlice> From<T> for OneChunk<T> {
