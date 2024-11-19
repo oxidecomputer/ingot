@@ -11,7 +11,7 @@ members = [
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/oxidecomputer/ingot"
-rust-version = "1.82"
+rust-version = "1.81"
 
 [workspace.dependencies]
 # Internal
