@@ -116,7 +116,7 @@ unsafe impl<T: Emit> EmitDoesNotRelyOnBufContents for Repeated<T> where
 }
 
 /// A borrowed block of headers whose elements are parsed identically (i.e., using the same
-/// `choice` or `Ingot type), and may be chained using `hint` values.
+/// `choice` or `Ingot` type), and may be chained using `hint` values.
 pub struct RepeatedView<B, T: HasView<B> + NextLayer> {
     inner: B,
     marker: PhantomData<T>,
