@@ -219,10 +219,10 @@ enum FieldState {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct ChunkSize {
     bytes: usize,
-    zc_fields: Vec<Type>,
+    zc_fields: HashMap<Type, usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -440,7 +440,7 @@ impl StructParseDeriveCtx {
         #[derive(Default)]
         struct ChunkSizeBits {
             bits: usize,
-            zc_fields: Vec<Type>,
+            zc_fields: HashMap<Type, usize>,
         }
 
         let mut fws_written = 0;
@@ -537,7 +537,7 @@ impl StructParseDeriveCtx {
                         ));
                     }
                     curr_chunk_fields.push(field_ident.clone());
-                    curr_chunk_size.zc_fields.push(user_ty.clone());
+                    *curr_chunk_size.zc_fields.entry(user_ty.clone()).or_default() += 1;
                     FieldState::Zerocopy
                 }
                 (true, ..) => {
@@ -933,7 +933,7 @@ impl StructParseDeriveCtx {
         let validated_ident = self.validated_ident();
         enum Size {
             Bytes(usize),
-            Type(Type),
+            Type(Type, usize),
         }
         let base_size: ChunkSize = self
             .chunk_layout
@@ -946,23 +946,25 @@ impl StructParseDeriveCtx {
                 ChunkState::Parsable(_) => None,
             })
             .flat_map(|size| {
-                std::iter::once(Size::Bytes(size.bytes))
-                    .chain(size.zc_fields.iter().map(|z| Size::Type(z.clone())))
+                std::iter::once(Size::Bytes(size.bytes)).chain(
+                    size.zc_fields
+                        .iter()
+                        .map(|(ty, n)| Size::Type(ty.clone(), *n)),
+                )
             })
-            .fold(
-                ChunkSize { bytes: 0, zc_fields: vec![] },
-                |mut acc: ChunkSize, c| {
-                    match c {
-                        Size::Bytes(b) => acc.bytes += b,
-                        Size::Type(t) => acc.zc_fields.push(t),
+            .fold(ChunkSize::default(), |mut acc: ChunkSize, c| {
+                match c {
+                    Size::Bytes(b) => acc.bytes += b,
+                    Size::Type(ty, n) => {
+                        *acc.zc_fields.entry(ty).or_default() += n
                     }
-                    acc
-                },
-            );
+                }
+                acc
+            });
 
-        let zc_field_sizes = base_size.zc_fields.iter().map(|ty| {
+        let zc_field_sizes = base_size.zc_fields.iter().map(|(ty, n)| {
             quote! {
-                core::mem::size_of::<#ty>()
+                core::mem::size_of::<#ty>() * #n
             }
         });
         let bytes = base_size.bytes;

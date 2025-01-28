@@ -185,9 +185,9 @@ pub struct Ipv6 {
     #[ingot(default = 128)]
     pub hop_limit: u8,
 
-    #[ingot(is = "[u8; 16]", default = Ipv6Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv6Addr::UNSPECIFIED)]
     pub source: Ipv6Addr,
-    #[ingot(is = "[u8; 16]", default = Ipv6Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv6Addr::UNSPECIFIED)]
     pub destination: Ipv6Addr,
 
     #[ingot(subparse(on_next_layer))]

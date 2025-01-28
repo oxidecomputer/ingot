@@ -5,8 +5,7 @@
 //! Minimal types for IPv4 and IPv6 addresses
 //!
 //! These addresses can be translated into [`core::net`] addresses at no cost,
-//! but implement [`FromBytes`](zerocopy::FromBytes) and
-//! [`IntoBytes`](zerocopy::IntoBytes).
+//! but they also implement traits from [`zerocopy`] for zero-copy parsing.
 
 use crate::NetworkRepr;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
