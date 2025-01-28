@@ -96,9 +96,9 @@ pub struct Ipv4 {
     pub protocol: IpProtocol,
     pub checksum: u16be,
 
-    #[ingot(is = "[u8; 4]", default = Ipv4Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv4Addr::UNSPECIFIED)]
     pub source: Ipv4Addr,
-    #[ingot(is = "[u8; 4]", default = Ipv4Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv4Addr::UNSPECIFIED)]
     pub destination: Ipv4Addr,
 
     #[ingot(var_len = "(ihl * 4).saturating_sub(20)")]
