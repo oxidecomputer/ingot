@@ -14,13 +14,13 @@ use crate::{
     },
     types::{
         primitives::*, util::RepeatedView, Accessor, Emit, HeaderLen,
-        HeaderParse, NetworkRepr, NextLayer, NextLayerChoice, ParseChoice,
-        ParseError, ToOwnedPacket,
+        HeaderParse, Ipv6Addr, NetworkRepr, NextLayer, NextLayerChoice,
+        ParseChoice, ParseError, ToOwnedPacket,
     },
     udp::{Udp, UdpRef, ValidUdp, _Udp_ingot_impl::UdpPart0},
     Ingot,
 };
-use core::{mem, net::Ipv6Addr};
+use core::mem;
 use macaddr::MacAddr6;
 use zerocopy::IntoBytes;
 

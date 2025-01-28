@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use bitflags::bitflags;
-use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, util::Repeated, NetworkRepr, ParseError, Vec,
+    primitives::*, util::Repeated, Ipv4Addr, Ipv6Addr, NetworkRepr, ParseError,
+    Vec,
 };
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]

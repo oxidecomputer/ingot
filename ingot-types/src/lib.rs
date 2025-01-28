@@ -13,7 +13,6 @@ pub use alloc::vec::Vec;
 use core::{
     marker::PhantomData,
     mem::MaybeUninit,
-    net::{Ipv4Addr, Ipv6Addr},
     ops::{Deref, DerefMut},
 };
 use zerocopy::{
@@ -32,6 +31,7 @@ mod emit;
 mod error;
 pub mod field;
 pub mod header;
+pub mod ip;
 pub mod primitives;
 pub mod util;
 
@@ -44,6 +44,7 @@ pub use emit::*;
 pub use error::*;
 pub use field::*;
 pub use header::*;
+pub use ip::*;
 
 /// Converts a borrowed view of a header into an owned version, possibly
 /// reparsing to do so.
@@ -277,30 +278,6 @@ pub trait NetworkRepr<U: Copy> {
     fn to_network(self) -> U;
     /// Converts a raw value into a local type.
     fn from_network(val: U) -> Self;
-}
-
-impl NetworkRepr<[u8; 4]> for Ipv4Addr {
-    #[inline]
-    fn to_network(self) -> [u8; 4] {
-        self.octets()
-    }
-
-    #[inline]
-    fn from_network(val: [u8; 4]) -> Self {
-        Ipv4Addr::from(val)
-    }
-}
-
-impl NetworkRepr<[u8; 16]> for Ipv6Addr {
-    #[inline]
-    fn to_network(self) -> [u8; 16] {
-        self.octets()
-    }
-
-    #[inline]
-    fn from_network(val: [u8; 16]) -> Self {
-        Ipv6Addr::from(val)
-    }
 }
 
 impl NetworkRepr<[u8; 6]> for macaddr::MacAddr6 {

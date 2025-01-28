@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{choices::*, packets::*};
-use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot::{
     ethernet::{Ethernet, EthernetMut, EthernetRef, Ethertype, ValidEthernet},
     geneve::GeneveRef,
@@ -12,8 +11,8 @@ use ingot::{
         ValidIpv6,
     },
     types::{
-        HeaderLen, HeaderParse, NetworkRepr, NextLayer, ParseError, Parsed,
-        Read,
+        HeaderLen, HeaderParse, Ipv4Addr, Ipv6Addr, NetworkRepr, NextLayer,
+        ParseError, Parsed, Read,
     },
     udp::{Udp, UdpMut, UdpRef, ValidUdp},
 };
