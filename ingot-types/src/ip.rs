@@ -7,7 +7,6 @@
 //! These addresses can be translated into [`core::net`] addresses at no cost,
 //! but they also implement traits from [`zerocopy`] for zero-copy parsing.
 
-use crate::NetworkRepr;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// An IPv4 address.
@@ -65,18 +64,6 @@ impl From<Ipv4Addr> for core::net::Ipv4Addr {
     #[inline]
     fn from(ip4: Ipv4Addr) -> Self {
         Self::from(ip4.inner)
-    }
-}
-
-impl NetworkRepr<[u8; 4]> for Ipv4Addr {
-    #[inline]
-    fn to_network(self) -> [u8; 4] {
-        self.octets()
-    }
-
-    #[inline]
-    fn from_network(val: [u8; 4]) -> Self {
-        Ipv4Addr::from_octets(val)
     }
 }
 
@@ -158,17 +145,5 @@ impl From<Ipv6Addr> for core::net::Ipv6Addr {
 impl From<[u8; 16]> for Ipv6Addr {
     fn from(bytes: [u8; 16]) -> Self {
         Self { inner: bytes }
-    }
-}
-
-impl NetworkRepr<[u8; 16]> for Ipv6Addr {
-    #[inline]
-    fn to_network(self) -> [u8; 16] {
-        self.octets()
-    }
-
-    #[inline]
-    fn from_network(val: [u8; 16]) -> Self {
-        Ipv6Addr::from_octets(val)
     }
 }
