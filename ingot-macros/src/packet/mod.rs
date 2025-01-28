@@ -924,48 +924,26 @@ impl StructParseDeriveCtx {
     pub fn gen_header_impls(&self) -> TokenStream {
         let ident = &self.ident;
         let validated_ident = self.validated_ident();
-        enum Size {
-            Bytes(usize),
-            Type(Type, usize),
-        }
-        let base_size: ChunkSize = self
-            .chunk_layout
-            .iter()
-            .filter_map(|v| match v {
-                ChunkState::FixedWidth { size, .. } => Some(size),
-                ChunkState::VarWidth(_) => None,
-                // NOTE: we should/can also include <ty>::MINIMUM_LENGTH here,
-                //       since that will stll be a constexpr.
-                ChunkState::Parsable(_) => None,
-            })
-            .flat_map(|size| {
-                std::iter::once(Size::Bytes(size.bytes)).chain(
-                    size.zc_fields
-                        .iter()
-                        .map(|(ty, n)| Size::Type(ty.clone(), *n)),
-                )
-            })
-            .fold(ChunkSize::default(), |mut acc: ChunkSize, c| {
-                match c {
-                    Size::Bytes(b) => acc.bytes += b,
-                    Size::Type(ty, n) => {
-                        *acc.zc_fields.entry(ty).or_default() += n
+        let base_size: ChunkSize = self.chunk_layout.iter().fold(
+            ChunkSize::default(),
+            |mut acc: ChunkSize, v: &ChunkState| {
+                if let ChunkState::FixedWidth { size, .. } = &v {
+                    acc.bytes += size.bytes;
+                    for (k, v) in size.zc_fields.iter() {
+                        *acc.zc_fields.entry(k.clone()).or_default() += *v;
                     }
                 }
                 acc
-            });
+            },
+        );
 
-        let zc_field_sizes = base_size.zc_fields.iter().map(|(ty, n)| {
-            quote! {
-                core::mem::size_of::<#ty>() * #n
-            }
-        });
-        let bytes = base_size.bytes;
-        let base_bytes = if base_size.zc_fields.is_empty() {
-            quote! { #bytes }
-        } else {
-            quote! { #bytes + #(#zc_field_sizes)+* }
-        };
+        let base_size_bytes = base_size.bytes;
+        let zc_field_sizes = base_size
+            .zc_fields
+            .iter()
+            .map(|(ty, n)| quote! { core::mem::size_of::<#ty>() * #n })
+            .chain(std::iter::once(quote! { #base_size_bytes }));
+        let base_bytes = quote! { #(#zc_field_sizes)+* };
 
         let mut zc_len_checks = vec![quote! {Self::MINIMUM_LENGTH}];
         let mut owned_len_checks = zc_len_checks.clone();
