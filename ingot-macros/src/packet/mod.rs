@@ -112,25 +112,18 @@ impl ValidField {
         )
     }
 
-    fn length_fn(&self) -> Option<Expr> {
+    fn length_fn(&self) -> Option<&Expr> {
         match &self.state {
-            FieldState::FixedWidth { .. } => None,
-            FieldState::Zerocopy => {
-                let ty = &self.user_ty;
-                let tokens = quote! { core::mem::size_of::<#ty>() };
-                let expr: Expr = syn::parse2(tokens)
-                    .expect("Failed to parse tokens into Expr");
-                Some(expr)
-            }
-            FieldState::VarWidth { length_fn } => Some(length_fn.clone()),
-            FieldState::Parsable { length_fn, .. } => length_fn.clone(),
+            FieldState::FixedWidth { .. } | FieldState::Zerocopy => None,
+            FieldState::VarWidth { length_fn } => Some(length_fn),
+            FieldState::Parsable { length_fn, .. } => length_fn.as_ref(),
         }
     }
 
     fn resolved_length_fn(
         &self,
         ctx: &StructParseDeriveCtx,
-    ) -> Option<(TokenStream, Expr)> {
+    ) -> Option<(TokenStream, &Expr)> {
         // basic idea:
         //  * If no length fn is specified, exit.
         //  * Identify all variables used in `length_fn` matching field idents
@@ -150,7 +143,7 @@ impl ValidField {
         }
 
         let mut vis = IdentVisitor::default();
-        vis.visit_expr(&length_fn);
+        vis.visit_expr(length_fn);
 
         let defns = vis
             .0
