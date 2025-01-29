@@ -520,12 +520,16 @@ impl StructParseDeriveCtx {
                 &field.var_len,
                 field.next_layer,
             ) {
-                (true, None, None, false) => {
+                (true, None, None, next_layer) => {
                     let mut ccs_ref = curr_chunk_size.borrow_mut();
                     let (curr_chunk_size, curr_chunk_fields) =
                         ccs_ref.get_or_insert((ChunkSizeBits::default(), vec![]));
-
-                    if curr_chunk_size.bits % 8 != 0 {
+                    if field.is.is_some() {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "zerocopy types may not be combined with `is`",
+                        ));
+                    } else if curr_chunk_size.bits % 8 != 0 {
                         return Err(Error::new(
                             user_ty.span(),
                             "zerocopy types must be byte-aligned at their start and end",
@@ -533,6 +537,18 @@ impl StructParseDeriveCtx {
                     }
                     curr_chunk_fields.push(field_ident.clone());
                     *curr_chunk_size.zc_fields.entry(user_ty.clone()).or_default() += 1;
+
+                    if next_layer {
+                        if nominated_next_header.is_some() {
+                            return Err(Error::new(
+                                field_ident.span(),
+                                "only one field can be nominated as a next-header hint",
+                            ));
+                        }
+
+                        nominated_next_header = Some(field_ident.clone());
+                    }
+
                     FieldState::Zerocopy
                 }
                 (true, ..) => {

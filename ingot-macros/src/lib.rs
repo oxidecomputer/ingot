@@ -105,6 +105,13 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// * `#[ingot(is = "<type>")]` – allows the use of higher-level types and conversions
 ///   of fields using the `NetworkRepr` trait. The field will be parsed as the primitive
 ///   `<type>` before converting to the desired type.
+/// * `#[ingot(zerocopy)]` indicates that the field may be cast directly from a
+///   slice of bytes.
+///   - The field's type must implement `FromBytes`, `IntoBytes`,
+///     `KnownLayout`, and `Immutable` from the `zerocopy` crate.
+///   - The field's type must have alignment of 1 byte.
+///   - The beginning of the field must be byte-aligned within the packet
+///   - This attribute is incompatible with `is`, `var_len`, and `subparse`.
 /// * `#[ingot(default = <expr>)]` – specifies a default value for this field
 ///   when deriving `Default`.
 /// * `#[ingot(next_layer)]` – indicates that this field is to be used as a hint
