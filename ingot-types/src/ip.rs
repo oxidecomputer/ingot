@@ -7,6 +7,7 @@
 //! These addresses can be translated into [`core::net`] addresses at no cost,
 //! but they also implement traits from [`zerocopy`] for zero-copy parsing.
 
+use crate::zerocopy_type;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// An IPv4 address.
@@ -66,6 +67,8 @@ impl From<Ipv4Addr> for core::net::Ipv4Addr {
         Self::from(ip4.inner)
     }
 }
+
+zerocopy_type!(Ipv4Addr);
 
 /// An IPv6 address.
 #[derive(
@@ -147,3 +150,5 @@ impl From<[u8; 16]> for Ipv6Addr {
         Self { inner: bytes }
     }
 }
+
+zerocopy_type!(Ipv6Addr);
