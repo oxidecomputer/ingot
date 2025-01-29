@@ -126,6 +126,12 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// * `#[ingot(var_len = "<expr>")]` – Determines the length of a `Vec<u8>` field,
 ///   or provides an exact length for a variable-length subparse. This expression
 ///   can access any prior fixed-width field.
+/// * `#[ingot(var_len = "<expr>", zerocopy)]` – Determines the length of a
+///   `Vec<T>` field, where `T` obeys the `zerocopy` guidelines above and
+///   implements `HeaderLen`, `Emit`, and `HasView` from `ingot::types`.  (To
+///   automatically implement those traits, see the
+///   `ingot::types::zerocopy_type!` macro.) The `var_len` expression can access
+///   any prior fixed-width field, and is a length in _items_ (not bytes).
 #[proc_macro_derive(Ingot, attributes(ingot))]
 pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let d_input = parse_macro_input!(input);
