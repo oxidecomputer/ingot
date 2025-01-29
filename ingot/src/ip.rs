@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use bitflags::bitflags;
-use core::net::{Ipv4Addr, Ipv6Addr};
 use ingot_macros::{choice, Ingot};
 use ingot_types::{
-    primitives::*, util::Repeated, NetworkRepr, ParseError, Vec,
+    primitives::*, util::Repeated, Ipv4Addr, Ipv6Addr, NetworkRepr, ParseError,
+    Vec,
 };
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -96,9 +96,9 @@ pub struct Ipv4 {
     pub protocol: IpProtocol,
     pub checksum: u16be,
 
-    #[ingot(is = "[u8; 4]", default = Ipv4Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv4Addr::UNSPECIFIED)]
     pub source: Ipv4Addr,
-    #[ingot(is = "[u8; 4]", default = Ipv4Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv4Addr::UNSPECIFIED)]
     pub destination: Ipv4Addr,
 
     #[ingot(var_len = "(ihl * 4).saturating_sub(20)")]
@@ -185,9 +185,9 @@ pub struct Ipv6 {
     #[ingot(default = 128)]
     pub hop_limit: u8,
 
-    #[ingot(is = "[u8; 16]", default = Ipv6Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv6Addr::UNSPECIFIED)]
     pub source: Ipv6Addr,
-    #[ingot(is = "[u8; 16]", default = Ipv6Addr::UNSPECIFIED)]
+    #[ingot(zerocopy, default = Ipv6Addr::UNSPECIFIED)]
     pub destination: Ipv6Addr,
 
     #[ingot(subparse(on_next_layer))]

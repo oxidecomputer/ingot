@@ -56,6 +56,8 @@ pub struct SubparseSpec {
 pub struct FieldArgs {
     is: Option<Type>,
     #[darling(default)]
+    zerocopy: bool,
+    #[darling(default)]
     next_layer: bool,
     var_len: Option<Expr>,
     #[darling(default)]
@@ -112,7 +114,7 @@ impl ValidField {
 
     fn length_fn(&self) -> Option<&Expr> {
         match &self.state {
-            FieldState::FixedWidth { .. } => None,
+            FieldState::FixedWidth { .. } | FieldState::Zerocopy => None,
             FieldState::VarWidth { length_fn } => Some(length_fn),
             FieldState::Parsable { length_fn, .. } => length_fn.as_ref(),
         }
@@ -123,7 +125,7 @@ impl ValidField {
         ctx: &StructParseDeriveCtx,
     ) -> Option<(TokenStream, &Expr)> {
         // basic idea:
-        //  * If no lenghth fn is specified, exit.
+        //  * If no length fn is specified, exit.
         //  * Identify all variables used in `length_fn` matching field idents
         //     which exist in a prior chunk.
         //  * generate a preamble which defines local variables with those
@@ -192,6 +194,8 @@ enum FieldState {
         /// stuck it in a bitfield
         bitfield_info: Option<PrimitiveInBitfield>,
     },
+    /// Type which may be read directly from bytes using `zerocopy` traits
+    Zerocopy,
     /// Byte-aligned (sz + offset) variable-width fields.
     /// (Really, just byte arrays.)
     VarWidth { length_fn: Expr },
@@ -208,12 +212,19 @@ enum FieldState {
     },
 }
 
+#[derive(Clone, Debug, Default)]
+struct ChunkSize {
+    bytes: usize,
+    zc_fields: HashMap<Type, usize>,
+    parsable_fields: HashMap<Type, usize>,
+}
+
 #[derive(Clone, Debug)]
 enum ChunkState {
     FixedWidth {
         /// Names of all fields contained in this block.
         fields: Vec<Ident>,
-        size_bytes: usize,
+        size: ChunkSize,
         fw_idx: usize,
     },
     /// Byte-aligned (sz + offset) variable-width fields.
@@ -251,34 +262,46 @@ impl ChunkState {
                     fields.iter().map(|id| ctx.validated.get(id).unwrap())
                 {
                     let field = field.borrow();
-                    let FieldState::FixedWidth {
-                        analysis, bitfield_info, ..
-                    } = &field.state
-                    else {
-                        panic!("non fixed-width field in fixed-width chunk")
-                    };
+                    match &field.state {
+                        FieldState::FixedWidth {
+                            analysis,
+                            bitfield_info,
+                            ..
+                        } => {
+                            if let Some(bf) = bitfield_info {
+                                let parent_bf = bf.parent_field.borrow();
+                                let f_ident = parent_bf.ident.clone();
+                                let n_bytes = parent_bf.n_bits / 8;
 
-                    if let Some(bf) = bitfield_info {
-                        let parent_bf = bf.parent_field.borrow();
-                        let f_ident = parent_bf.ident.clone();
-                        let n_bytes = parent_bf.n_bits / 8;
+                                if last_seen_bf.as_ref() != Some(&f_ident) {
+                                    zc_fields.push(quote! {
+                                        pub #f_ident: [u8; #n_bytes]
+                                    });
+                                    last_seen_bf = Some(f_ident);
+                                }
+                            } else {
+                                let ident = &field.ident;
+                                let ty = analysis.to_zerocopy_type().expect(
+                                    "guaranteed defined for U8/U16/U32/U64/...",
+                                );
+                                let zc_repr = ty.repr;
 
-                        if last_seen_bf.as_ref() != Some(&f_ident) {
-                            zc_fields.push(quote! {
-                                pub #f_ident: [u8; #n_bytes]
-                            });
-                            last_seen_bf = Some(f_ident);
+                                zc_fields.push(quote! {
+                                    pub #ident: #zc_repr
+                                });
+                            }
                         }
-                    } else {
-                        let ident = &field.ident;
-                        let ty = analysis.to_zerocopy_type().expect(
-                            "guaranteed defined for U8/U16/U32/U64/...",
-                        );
-                        let zc_repr = ty.repr;
+                        FieldState::Zerocopy => {
+                            let ident = &field.ident;
+                            let ty = &field.user_ty;
+                            zc_fields.push(quote! {
+                                pub #ident: #ty
+                            });
+                        }
 
-                        zc_fields.push(quote! {
-                            pub #ident: #zc_repr
-                        });
+                        _ => {
+                            panic!("non fixed-width field in fixed-width chunk")
+                        }
                     }
                 }
 
@@ -408,17 +431,24 @@ impl StructParseDeriveCtx {
         let mut nominated_next_header = None;
         let mut chunk_layout = vec![];
 
+        #[derive(Default)]
+        struct ChunkSizeBits {
+            bits: usize,
+            zc_fields: HashMap<Type, usize>,
+        }
+
         let mut fws_written = 0;
         let sub_field_idx = RefCell::new(0);
-        let curr_chunk_bits: RefCell<Option<(usize, Vec<Ident>)>> = None.into();
+        let curr_chunk_size: RefCell<Option<(ChunkSizeBits, Vec<Ident>)>> =
+            None.into();
 
         let mut finalize_chunk = || {
             let mut q = sub_field_idx.borrow_mut();
             *q += 1;
-            let bits = curr_chunk_bits.take();
+            let size = curr_chunk_size.take();
 
-            match bits {
-                Some((len, _)) if len % 8 != 0 => Err(Error::new(
+            match size {
+                Some((size, _)) if size.bits % 8 != 0 => Err(Error::new(
                     validated_order
                         .borrow()
                         .last()
@@ -428,15 +458,25 @@ impl StructParseDeriveCtx {
                         .span(),
                     format!(
                         "fields are not byte-aligned -- \
-                        total {len}b at fixed-len boundary"
+                        total {}b {}at fixed-len boundary",
+                        size.bits,
+                        if size.zc_fields.is_empty() {
+                            ""
+                        } else {
+                            "(plus zerocopy fields) "
+                        }
                     ),
                 )),
-                Some((len, fields)) => {
+                Some((size, fields)) => {
                     let fw_idx = fws_written;
                     fws_written += 1;
                     chunk_layout.push(ChunkState::FixedWidth {
                         fields,
-                        size_bytes: len / 8,
+                        size: ChunkSize {
+                            bytes: size.bits / 8,
+                            zc_fields: size.zc_fields,
+                            parsable_fields: HashMap::new(),
+                        },
                         fw_idx,
                     });
                     Ok(())
@@ -452,7 +492,8 @@ impl StructParseDeriveCtx {
                         FieldState::Parsable { .. } => {
                             ChunkState::Parsable(ident)
                         }
-                        FieldState::FixedWidth { .. } => unreachable!(),
+                        FieldState::FixedWidth { .. }
+                        | FieldState::Zerocopy => unreachable!(),
                     };
                     chunk_layout.push(chunk);
                     Ok(())
@@ -474,37 +515,75 @@ impl StructParseDeriveCtx {
             let user_ty = field.ty.clone();
 
             let state = match (
+                &field.zerocopy,
                 &field.subparse,
                 &field.var_len,
                 field.next_layer,
             ) {
-                (Some(SubparseSpec { on_next_layer }), length_fn, false) => {
+                (true, None, None, next_layer) => {
+                    let mut ccs_ref = curr_chunk_size.borrow_mut();
+                    let (curr_chunk_size, curr_chunk_fields) =
+                        ccs_ref.get_or_insert((ChunkSizeBits::default(), vec![]));
+                    if field.is.is_some() {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "zerocopy types may not be combined with `is`",
+                        ));
+                    } else if curr_chunk_size.bits % 8 != 0 {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "zerocopy types must be byte-aligned at their start and end",
+                        ));
+                    }
+                    curr_chunk_fields.push(field_ident.clone());
+                    *curr_chunk_size.zc_fields.entry(user_ty.clone()).or_default() += 1;
+
+                    if next_layer {
+                        if nominated_next_header.is_some() {
+                            return Err(Error::new(
+                                field_ident.span(),
+                                "only one field can be nominated as a next-header hint",
+                            ));
+                        }
+
+                        nominated_next_header = Some(field_ident.clone());
+                    }
+
+                    FieldState::Zerocopy
+                }
+                (true, ..) => {
+                    return Err(syn::Error::new(
+                        field.ty.span(),
+                        "cannot combine zerocopy field with other decorators"
+                    ))
+                }
+                (_, Some(SubparseSpec { on_next_layer }), length_fn, false) => {
                     finalize_chunk()?;
                     FieldState::Parsable {
                         length_fn: length_fn.clone(),
                         on_next_layer: *on_next_layer,
                     }
                 }
-                (_, Some(length_fn), false) => {
+                (_, _, Some(length_fn), false) => {
                     finalize_chunk()?;
                     FieldState::VarWidth { length_fn: length_fn.clone() }
                 }
-                (None, None, next_layer) => {
+                (_, None, None, next_layer) => {
                     let underlying_ty =
                         if let Some(ty) = &field.is { ty } else { &field.ty }
                             .clone();
                     let analysis = FixedWidthAnalysis::from_ty(&underlying_ty)?;
                     let n_bits = analysis.cached_bits;
 
-                    let mut ccb_ref = curr_chunk_bits.borrow_mut();
-                    let (curr_chunk_bits, curr_chunk_fields) =
-                        ccb_ref.get_or_insert((0, vec![]));
-                    let first_bit_in_chunk = *curr_chunk_bits;
-                    *curr_chunk_bits += analysis.cached_bits;
+                    let mut ccs_ref = curr_chunk_size.borrow_mut();
+                    let (curr_chunk_size, curr_chunk_fields) =
+                        ccs_ref.get_or_insert((ChunkSizeBits::default(), vec![]));
+                    let first_bit_in_chunk = curr_chunk_size.bits;
+                    curr_chunk_size.bits += analysis.cached_bits;
                     curr_chunk_fields.push(field_ident.clone());
 
                     if analysis.ty.is_aggregate()
-                        && (*curr_chunk_bits % 8 != 0 || n_bits % 8 != 0)
+                        && (curr_chunk_size.bits % 8 != 0 || n_bits % 8 != 0)
                     {
                         return Err(Error::new(
                             underlying_ty.span(),
@@ -789,7 +868,8 @@ impl StructParseDeriveCtx {
             FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
                 quote! {#field_ident()}
             }
-            FieldState::FixedWidth { bitfield_info: None, .. } => {
+            FieldState::FixedWidth { bitfield_info: None, .. }
+            | FieldState::Zerocopy => {
                 quote! {#field_ident}
             }
             FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
@@ -862,17 +942,38 @@ impl StructParseDeriveCtx {
     pub fn gen_header_impls(&self) -> TokenStream {
         let ident = &self.ident;
         let validated_ident = self.validated_ident();
-        let base_bytes: usize = self
-            .chunk_layout
+        let base_size: ChunkSize = self.chunk_layout.iter().fold(
+            ChunkSize::default(),
+            |mut acc: ChunkSize, v: &ChunkState| {
+                match v {
+                    ChunkState::FixedWidth { size, .. } => {
+                        acc.bytes += size.bytes;
+                        for (k, v) in size.zc_fields.iter() {
+                            *acc.zc_fields.entry(k.clone()).or_default() += *v;
+                        }
+                    }
+                    ChunkState::Parsable(i) => {
+                        let ty = self.validated[i].borrow().user_ty.clone();
+                        *acc.parsable_fields.entry(ty).or_default() += 1;
+                    }
+                    _ => (),
+                }
+                acc
+            },
+        );
+
+        let base_size_bytes = base_size.bytes;
+        let zc_field_sizes = base_size
+            .zc_fields
             .iter()
-            .map(|v| match v {
-                ChunkState::FixedWidth { size_bytes, .. } => *size_bytes,
-                ChunkState::VarWidth(_) => 0,
-                // NOTE: we should/can also include <ty>::MINIMUM_LENGTH here,
-                //       since that will stll be a constexpr.
-                ChunkState::Parsable(_) => 0,
-            })
-            .sum();
+            .map(|(ty, n)| quote! { ::core::mem::size_of::<#ty>() * #n })
+            .chain(base_size.parsable_fields.iter().map(|(ty, n)| {
+                quote! {
+                    <#ty as ::ingot::types::HeaderLen>::MINIMUM_LENGTH * #n
+                }
+            }))
+            .chain(std::iter::once(quote! { #base_size_bytes }));
+        let base_bytes = quote! { #(#zc_field_sizes)+* };
 
         let mut zc_len_checks = vec![quote! {Self::MINIMUM_LENGTH}];
         let mut owned_len_checks = zc_len_checks.clone();
@@ -1081,6 +1182,58 @@ impl StructParseDeriveCtx {
                         });
                     }
                 }
+                FieldState::Zerocopy => {
+                    direct_trait_impls.push(quote! {
+                        #[inline]
+                        fn #get_name(&self) -> #user_ty {
+                            self.#ident
+                        }
+                    });
+                    direct_trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #mut_name(&mut self, val: #user_ty) {
+                            self.#ident = val;
+                        }
+                    });
+
+                    trait_impls.push(quote! {
+                        #[inline]
+                        fn #get_name(&self) -> #user_ty {
+                            self.#sub_field_idx.#ident
+                        }
+                    });
+                    trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #mut_name(&mut self, val: #user_ty) {
+                            self.#sub_field_idx.#ident = val;
+                        }
+                    });
+
+                    direct_trait_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> &#user_ty {
+                            &self.#ident
+                        }
+                    });
+                    trait_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> &#user_ty {
+                            &self.#sub_field_idx.#ident
+                        }
+                    });
+                    trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> &mut #user_ty {
+                            &mut self.#sub_field_idx.#ident
+                        }
+                    });
+                    direct_trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> &mut #user_ty {
+                            &mut self.#ident
+                        }
+                    });
+                }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
@@ -1218,6 +1371,21 @@ impl StructParseDeriveCtx {
                         });
                     }
                 }
+                FieldState::Zerocopy => {
+                    trait_defs.push(quote! {
+                        fn #get_name(&self) -> #user_ty;
+                    });
+                    mut_trait_defs.push(quote! {
+                        fn #mut_name(&mut self, val: #user_ty);
+                    });
+
+                    trait_defs.push(quote! {
+                        fn #field_ref(&self) -> &#user_ty;
+                    });
+                    mut_trait_defs.push(quote! {
+                        fn #field_mut(&mut self) -> &mut #user_ty;
+                    });
+                }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
@@ -1340,6 +1508,45 @@ impl StructParseDeriveCtx {
                             }
                         });
                     }
+                }
+                FieldState::Zerocopy => {
+                    packet_impls.push(quote! {
+                        #[inline]
+                        fn #ident(&self) -> #user_ty {
+                            match self {
+                                Self::Repr(o) => o.#ident(),
+                                Self::Raw(b) => b.#ident(),
+                            }
+                        }
+                    });
+                    packet_mut_impls.push(quote! {
+                        #[inline]
+                        fn #mut_name(&mut self, val: #user_ty) {
+                            match self {
+                                Self::Repr(o) => o.#mut_name(val),
+                                Self::Raw(b) => b.#mut_name(val),
+                            };
+                        }
+                    });
+
+                    packet_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> &#user_ty {
+                            match self {
+                                Self::Repr(o) => o.#field_ref(),
+                                Self::Raw(b) => b.#field_ref(),
+                            }
+                        }
+                    });
+                    packet_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> &mut #user_ty {
+                            match self {
+                                Self::Repr(o) => o.#field_mut(),
+                                Self::Raw(b) => b.#field_mut(),
+                            }
+                        }
+                    });
                 }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
@@ -1624,7 +1831,7 @@ impl StructParseDeriveCtx {
             let field = field.borrow();
             let f_ident = field.ident.clone();
             match &field.state {
-                FieldState::FixedWidth { .. } => {
+                FieldState::FixedWidth { .. } | FieldState::Zerocopy => {
                     field_create.push(quote! {
                         let #f_ident = val.#f_ident();
                     });
@@ -1750,6 +1957,11 @@ impl StructParseDeriveCtx {
                                         }
                                     }
                                 },
+                                FieldState::Zerocopy => {
+                                    quote! {
+                                        g.#id = self.#id;
+                                    }
+                                }
                                 _ => unreachable!(),
                             }
                         }).collect::<Vec<_>>();

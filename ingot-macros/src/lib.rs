@@ -66,7 +66,7 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// `MyHdr`), and defines a packed wire-format equivalent (`ValidMyHdr`).
 ///
 /// ```rust,ignore
-/// use ingot::types::primitives::*;
+/// use ingot::types::{Ipv4Addr, primitives::*};
 ///
 /// #[derive(Ingot)]
 /// #[ingot(impl_default)]
@@ -78,11 +78,13 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///     pub field4: u20be,
 ///     #[ingot(var_len = "field3 * 4")]
 ///     pub field5: Vec<u8>,
+///     #[ingot(zerocopy)]
+///     pub field6: Ipv4Addr,
 /// }
 /// ```
 ///
-/// Fields are defined in terms of *primitive integer types*, variable-length
-/// byteslices (`Vec<u8>`), and parsed sub-headers.
+/// Fields are defined in terms of *primitive integer types*, `zerocopy` types,
+/// variable-length byteslices (`Vec<u8>`), and parsed sub-headers.
 /// Primitive types are:
 /// * Signed/unsigned integers <= 1 byte (`u1`, `i8`).
 /// * Longer integers with a defined endianness (`u27be`).
@@ -105,6 +107,13 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// * `#[ingot(is = "<type>")]` – allows the use of higher-level types and conversions
 ///   of fields using the `NetworkRepr` trait. The field will be parsed as the primitive
 ///   `<type>` before converting to the desired type.
+/// * `#[ingot(zerocopy)]` indicates that the field may be cast directly from a
+///   slice of bytes.
+///   - The field's type must implement `FromBytes`, `IntoBytes`,
+///     `KnownLayout`, and `Immutable` from the `zerocopy` crate.
+///   - The field's type must have alignment of 1 byte.
+///   - The beginning of the field must be byte-aligned within the packet
+///   - This attribute is incompatible with `is`, `var_len`, and `subparse`.
 /// * `#[ingot(default = <expr>)]` – specifies a default value for this field
 ///   when deriving `Default`.
 /// * `#[ingot(next_layer)]` – indicates that this field is to be used as a hint
