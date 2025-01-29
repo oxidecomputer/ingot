@@ -216,6 +216,7 @@ enum FieldState {
 struct ChunkSize {
     bytes: usize,
     zc_fields: HashMap<Type, usize>,
+    parsable_fields: HashMap<Type, usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -474,6 +475,7 @@ impl StructParseDeriveCtx {
                         size: ChunkSize {
                             bytes: size.bits / 8,
                             zc_fields: size.zc_fields,
+                            parsable_fields: HashMap::new(),
                         },
                         fw_idx,
                     });
@@ -927,11 +929,18 @@ impl StructParseDeriveCtx {
         let base_size: ChunkSize = self.chunk_layout.iter().fold(
             ChunkSize::default(),
             |mut acc: ChunkSize, v: &ChunkState| {
-                if let ChunkState::FixedWidth { size, .. } = &v {
-                    acc.bytes += size.bytes;
-                    for (k, v) in size.zc_fields.iter() {
-                        *acc.zc_fields.entry(k.clone()).or_default() += *v;
+                match v {
+                    ChunkState::FixedWidth { size, .. } => {
+                        acc.bytes += size.bytes;
+                        for (k, v) in size.zc_fields.iter() {
+                            *acc.zc_fields.entry(k.clone()).or_default() += *v;
+                        }
                     }
+                    ChunkState::Parsable(i) => {
+                        let ty = self.validated[i].borrow().user_ty.clone();
+                        *acc.parsable_fields.entry(ty).or_default() += 1;
+                    }
+                    _ => (),
                 }
                 acc
             },
@@ -942,6 +951,11 @@ impl StructParseDeriveCtx {
             .zc_fields
             .iter()
             .map(|(ty, n)| quote! { ::core::mem::size_of::<#ty>() * #n })
+            .chain(base_size.parsable_fields.iter().map(|(ty, n)| {
+                quote! {
+                    <#ty as ::ingot::types::HeaderLen>::MINIMUM_LENGTH * #n
+                }
+            }))
             .chain(std::iter::once(quote! { #base_size_bytes }));
         let base_bytes = quote! { #(#zc_field_sizes)+* };
 
