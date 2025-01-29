@@ -66,7 +66,7 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// `MyHdr`), and defines a packed wire-format equivalent (`ValidMyHdr`).
 ///
 /// ```rust,ignore
-/// use ingot::types::primitives::*;
+/// use ingot::types::{Ipv4Addr, primitives::*};
 ///
 /// #[derive(Ingot)]
 /// #[ingot(impl_default)]
@@ -78,11 +78,13 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///     pub field4: u20be,
 ///     #[ingot(var_len = "field3 * 4")]
 ///     pub field5: Vec<u8>,
+///     #[ingot(zerocopy)]
+///     pub field6: Ipv4Addr,
 /// }
 /// ```
 ///
-/// Fields are defined in terms of *primitive integer types*, variable-length
-/// byteslices (`Vec<u8>`), and parsed sub-headers.
+/// Fields are defined in terms of *primitive integer types*, `zerocopy` types,
+/// variable-length byteslices (`Vec<u8>`), and parsed sub-headers.
 /// Primitive types are:
 /// * Signed/unsigned integers <= 1 byte (`u1`, `i8`).
 /// * Longer integers with a defined endianness (`u27be`).
