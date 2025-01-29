@@ -941,7 +941,7 @@ impl StructParseDeriveCtx {
         let zc_field_sizes = base_size
             .zc_fields
             .iter()
-            .map(|(ty, n)| quote! { core::mem::size_of::<#ty>() * #n })
+            .map(|(ty, n)| quote! { ::core::mem::size_of::<#ty>() * #n })
             .chain(std::iter::once(quote! { #base_size_bytes }));
         let base_bytes = quote! { #(#zc_field_sizes)+* };
 
