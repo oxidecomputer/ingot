@@ -1783,7 +1783,7 @@ impl StructParseDeriveCtx {
                     use ::ingot::types::ParseChoice;
                     use ::ingot::types::HeaderParse;
 
-                    let mut hint = None;
+                    let mut hint: Option<<Self as NextLayer>::Denom> = None;
 
                     #( #segment_fragments )*
 
