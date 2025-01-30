@@ -3,14 +3,39 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use ingot_macros::Ingot;
-use ingot_types::{primitives::*, util::Repeated, Ipv4Addr, NetworkRepr, Vec};
+use ingot_types::{primitives::*, util::Repeated, Ipv4Addr, Vec};
+
+/// See RFC3376, §4
+#[derive(
+    Clone,
+    Copy,
+    Hash,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    zerocopy::FromBytes,
+    zerocopy::IntoBytes,
+    zerocopy::Immutable,
+)]
+#[repr(C)]
+pub struct IgmpMessageType(pub u8);
+
+impl IgmpMessageType {
+    pub const MEMBERSHIP_QUERY: Self = Self(0x11);
+    pub const V3_MEMBERSHIP_REPORT: Self = Self(0x22);
+    pub const V1_MEMBERSHIP_REPORT: Self = Self(0x12);
+    pub const V2_MEMBERSHIP_REPORT: Self = Self(0x16);
+    pub const V2_LEAVE_GROUP: Self = Self(0x17);
+}
 
 /// See RFC3376, §4.1
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct IgmpMembershipQuery {
-    #[ingot(default = 0x11)]
-    pub ty: u8,
+    #[ingot(zerocopy, default = IgmpMessageType::MEMBERSHIP_QUERY)]
+    pub ty: IgmpMessageType,
     pub max_resp: u8,
     pub checksum: u16be,
     #[ingot(zerocopy, default = Ipv4Addr::UNSPECIFIED)]
@@ -32,18 +57,33 @@ pub struct IgmpMembershipQuery {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct IgmpV3MembershipReport {
-    #[ingot(default = 0x22)]
-    pub ty: u8,
+    #[ingot(zerocopy, default = IgmpMessageType::V3_MEMBERSHIP_REPORT)]
+    pub ty: IgmpMessageType,
     resv1: u8,
     pub checksum: u16be,
     resv2: u16be,
-    pub num_group_records: u16be,
+    pub num_group_records: u16be, // not used, we just read the remaining data
     #[ingot(subparse())]
     pub group_records: Repeated<IgmpV3GroupRecord>,
+    // XXX the RFC specifies that additional data may be present and should be
+    // used in the checksum, but we're assuming that group records are the rest
+    // of the packet (because their size isn't fully specified)
 }
 
 /// See RFC3376, §4.2.12
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(
+    Clone,
+    Copy,
+    Hash,
+    Debug,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    zerocopy::FromBytes,
+    zerocopy::IntoBytes,
+    zerocopy::Immutable,
+)]
 pub struct IgmpV3RecordType(pub u8);
 
 impl IgmpV3RecordType {
@@ -53,22 +93,10 @@ impl IgmpV3RecordType {
     pub const CHANGE_TO_EXCLUDE_MODE: Self = Self(4);
 }
 
-impl NetworkRepr<u8> for IgmpV3RecordType {
-    #[inline]
-    fn to_network(self) -> u8 {
-        self.0
-    }
-
-    #[inline]
-    fn from_network(val: u8) -> Self {
-        Self(val)
-    }
-}
-
 /// See RFC3376, §4.2
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 pub struct IgmpV3GroupRecord {
-    #[ingot(is = "u8")]
+    #[ingot(zerocopy)]
     pub record_type: IgmpV3RecordType,
     pub aux_data_len: u8,
     pub num_sources: u16be,
@@ -85,8 +113,8 @@ pub struct IgmpV3GroupRecord {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct IgmpV2MembershipReport {
-    #[ingot(default = 0x16)]
-    pub ty: u8,
+    #[ingot(zerocopy, default = IgmpMessageType::V2_MEMBERSHIP_REPORT)]
+    pub ty: IgmpMessageType,
     pub max_resp: u8,
     pub checksum: u16be,
     #[ingot(zerocopy, default = Ipv4Addr::UNSPECIFIED)]
@@ -97,11 +125,11 @@ pub struct IgmpV2MembershipReport {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct IgmpV2LeaveGroup {
-    #[ingot(default = 0x17)]
-    pub ty: u8,
+    #[ingot(zerocopy, default = IgmpMessageType::V2_LEAVE_GROUP)]
+    pub ty: IgmpMessageType,
     pub max_resp: u8,
     pub checksum: u16be,
     #[ingot(zerocopy, default = Ipv4Addr::UNSPECIFIED)]
     pub group_address: Ipv4Addr,
 }
-// XXX should these be the same type with a strong type for `ty`?
+// XXX should these be the same type, since they only differ in `ty`?
