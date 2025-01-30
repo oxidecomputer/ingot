@@ -982,11 +982,12 @@ impl StructParseDeriveCtx {
             let idx = syn::Index::from(i);
             match field {
                 ChunkState::VarWidth(id) | ChunkState::Parsable(id) => {
+                    let ty = &self.validated[id].borrow().user_ty;
                     zc_len_checks.push(quote! {
-                        self.#idx.packet_length()
+                        self.#idx.packet_length() - <#ty as ::ingot::types::HeaderLen>::MINIMUM_LENGTH
                     });
                     owned_len_checks.push(quote! {
-                        self.#id.packet_length()
+                        self.#id.packet_length() - <#ty as ::ingot::types::HeaderLen>::MINIMUM_LENGTH
                     });
                 }
                 ChunkState::FixedWidth { .. } => {}

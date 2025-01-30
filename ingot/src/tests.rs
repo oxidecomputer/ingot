@@ -563,3 +563,33 @@ fn accessor_functions_safely() {
     a.destination = 8989.into();
     assert_eq!(u16::from(a.destination), 8989);
 }
+
+#[derive(Ingot)]
+pub struct OuterPacket {
+    pub bla: u8,
+
+    #[ingot(subparse())]
+    pub next_packet: InnerPacket,
+}
+
+#[derive(Clone, Ingot)]
+pub struct InnerPacket {
+    pub boo: u8,
+    #[ingot(var_len = "boo")]
+    pub varying: alloc::vec::Vec<u8>,
+}
+
+#[test]
+fn nested_packet_size() {
+    let p = OuterPacket {
+        bla: 1,
+        next_packet: InnerPacket { boo: 2, varying: vec![1, 2] },
+    };
+    assert_eq!(p.packet_length(), 4);
+
+    let p = OuterPacket {
+        bla: 1,
+        next_packet: InnerPacket { boo: 0, varying: vec![] },
+    };
+    assert_eq!(p.packet_length(), 2);
+}
