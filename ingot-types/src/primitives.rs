@@ -155,3 +155,74 @@ impl<B: ByteSlice> Emit for RawBytes<B> {
 
 // Safety: We know this holds true for all our derived emits, by design.
 unsafe impl<B: ByteSlice> EmitDoesNotRelyOnBufContents for RawBytes<B> {}
+
+/// Newtype-wrapped zerocopy object buffers for use in Header view-types.
+///
+/// The byteslice must be an even multiple of object size (checked at
+/// construction time).
+pub struct ObjectSlice<B: ByteSlice, V>(B, core::marker::PhantomData<V>);
+
+impl<B: ByteSlice, V> HeaderLen for ObjectSlice<B, V> {
+    const MINIMUM_LENGTH: usize = 0;
+    #[inline]
+    fn packet_length(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl<B: ByteSlice, V> Emit for ObjectSlice<B, V> {
+    #[inline]
+    fn emit_raw<O: ByteSliceMut>(&self, mut buf: O) -> usize {
+        buf.copy_from_slice(self.0.deref());
+
+        self.0.len()
+    }
+
+    #[inline]
+    fn needs_emit(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<B: ByteSlice, T> From<&BoxedHeader<Vec<T>, ObjectSlice<B, T>>> for Vec<T>
+where
+    T: FromBytes + IntoBytes + KnownLayout + Immutable + Clone,
+{
+    fn from(value: &Header<Vec<T>, ObjectSlice<B, T>>) -> Self {
+        match value {
+            Header::Repr(v) => v.deref().clone(),
+            Header::Raw(v) => {
+                <[T]>::ref_from_bytes(v.0.as_ref()).unwrap().to_vec()
+            }
+        }
+    }
+}
+
+impl<B: ByteSlice, V: FromBytes> From<B> for ObjectSlice<B, V> {
+    fn from(b: B) -> Self {
+        assert_eq!(
+            b.len() % core::mem::size_of::<V>(),
+            0,
+            "invalid slice size"
+        );
+        Self(b, core::marker::PhantomData)
+    }
+}
+
+impl<B: ByteSlice, V: FromBytes + Immutable> Deref for ObjectSlice<B, V> {
+    type Target = [V];
+    fn deref(&self) -> &[V] {
+        // Size is checked at construction, so this should be infallible
+        <[V]>::ref_from_bytes(self.0.as_ref()).unwrap()
+    }
+}
+
+impl<B: ByteSliceMut, V: FromBytes + Immutable + IntoBytes> DerefMut
+    for ObjectSlice<B, V>
+{
+    fn deref_mut(&mut self) -> &mut [V] {
+        // Size is checked at construction, so this should be infallible
+        <[V]>::mut_from_bytes(self.0.as_mut()).unwrap()
+    }
+}

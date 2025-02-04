@@ -987,12 +987,20 @@ impl StructParseDeriveCtx {
                     pub ::ingot::types::Accessor<#type_param_ident, #private_mod_ident::#name>
                 }
             },
-            ChunkState::VarWidth(i, ..) | ChunkState::Parsable(i) => {
+            ChunkState::VarWidth(i, inner_ty) => {
                 let ref_field = self.validated.get(i).expect("reference to a non-existent field").borrow();
                 let ty = &ref_field.user_ty;
-
-                quote! {pub ::ingot::types::HeaderOf<#ty, #type_param>}
+                if let Some(inner_ty) = inner_ty {
+                    quote! {pub ::ingot::types::HeaderOf<#ty, ::ingot::types::primitives::ObjectSlice<#type_param, #inner_ty>>}
+                } else {
+                    quote! {pub ::ingot::types::HeaderOf<#ty, #type_param>}
+                }
             },
+            ChunkState::Parsable(i) => {
+                let ref_field = self.validated.get(i).expect("reference to a non-existent field").borrow();
+                let ty = &ref_field.user_ty;
+                quote! {pub ::ingot::types::HeaderOf<#ty, #type_param>}
+            }
         });
 
         quote! {
@@ -1312,6 +1320,33 @@ impl StructParseDeriveCtx {
                 }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { inner_ty: Some(ty), .. } => {
+                    trait_needs_generic = true;
+                    direct_trait_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldRef::Repr(&self.#ident)
+                        }
+                    });
+                    trait_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldRef::Raw(&self.#sub_field_idx)
+                        }
+                    });
+                    direct_trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldMut::Repr(&mut self.#ident)
+                        }
+                    });
+                    trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldMut::Raw(&mut self.#sub_field_idx)
+                        }
+                    });
+                }
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                     trait_needs_generic = true;
                     direct_trait_impls.push(quote! {
@@ -1464,6 +1499,15 @@ impl StructParseDeriveCtx {
                 }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { inner_ty: Some(ty), .. } => {
+                    trait_needs_generic = true;
+                    trait_defs.push(quote! {
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>>;
+                    });
+                    mut_trait_defs.push(quote! {
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>>;
+                    });
+                }
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                     trait_needs_generic = true;
                     trait_defs.push(quote! {
@@ -1626,6 +1670,30 @@ impl StructParseDeriveCtx {
                 }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { inner_ty: Some(ty), .. } => {
+                    // We need to translate the `V` (or whatever) in these types
+                    // into the buffer type of the current packet.
+                    trait_needs_generic = true;
+
+                    packet_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>> {
+                            match self {
+                                Self::Repr(o) => o.#field_ref(),
+                                Self::Raw(b) => b.#field_ref(),
+                            }
+                        }
+                    });
+                    packet_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>> {
+                            match self {
+                                Self::Repr(o) => o.#field_mut(),
+                                Self::Raw(b) => b.#field_mut(),
+                            }
+                        }
+                    });
+                }
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                     // We need to translate the `V` (or whatever) in these types
                     // into the buffer type of the current packet.

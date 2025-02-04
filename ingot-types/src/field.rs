@@ -16,11 +16,11 @@ pub enum FieldRef<'a, T: HasView<V>, V> {
     Raw(&'a HeaderOf<T, V>),
 }
 
-impl<T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>> AsRef<[u8]>
+impl<Z, T: HasView<V, ViewType = Q> + AsRef<[Z]>, V, Q: AsRef<[Z]>> AsRef<[Z]>
     for FieldRef<'_, T, V>
 {
     #[inline]
-    fn as_ref(&self) -> &[u8] {
+    fn as_ref(&self) -> &[Z] {
         match self {
             FieldRef::Repr(t) => t.as_ref(),
             FieldRef::Raw(Header::Repr(a)) => a.deref().as_ref(),
