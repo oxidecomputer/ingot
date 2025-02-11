@@ -339,3 +339,39 @@ where
         self.iter(hint).last().and_then(|v| v.ok()).and_then(|v| v.next_layer())
     }
 }
+
+/// Macro which defines `HeaderLen`, `Emit`, and `HasView` for a type
+///
+/// These are necessary for the type to be used in a variable-length field.
+#[macro_export]
+macro_rules! zerocopy_type {
+    ($t:ty) => {
+        impl $crate::HeaderLen for $t {
+            const MINIMUM_LENGTH: usize = core::mem::size_of::<Self>();
+            #[inline]
+            fn packet_length(&self) -> usize {
+                Self::MINIMUM_LENGTH
+            }
+        }
+
+        impl $crate::Emit for $t {
+            #[inline]
+            fn emit_raw<V: zerocopy::ByteSliceMut>(&self, mut buf: V) -> usize {
+                use zerocopy::IntoBytes;
+                let len = core::mem::size_of::<Self>();
+                buf[..len].copy_from_slice(self.as_bytes());
+                len
+            }
+            #[inline]
+            fn needs_emit(&self) -> bool {
+                false
+            }
+        }
+        impl<B: zerocopy::ByteSlice>
+            $crate::HasView<$crate::primitives::ObjectSlice<B, $t>>
+            for ::alloc::vec::Vec<$t>
+        {
+            type ViewType = $crate::primitives::ObjectSlice<B, $t>;
+        }
+    };
+}

@@ -115,7 +115,7 @@ impl ValidField {
     fn length_fn(&self) -> Option<&Expr> {
         match &self.state {
             FieldState::FixedWidth { .. } | FieldState::Zerocopy => None,
-            FieldState::VarWidth { length_fn } => Some(length_fn),
+            FieldState::VarWidth { length_fn, .. } => Some(length_fn),
             FieldState::Parsable { length_fn, .. } => length_fn.as_ref(),
         }
     }
@@ -197,8 +197,8 @@ enum FieldState {
     /// Type which may be read directly from bytes using `zerocopy` traits
     Zerocopy,
     /// Byte-aligned (sz + offset) variable-width fields.
-    /// (Really, just byte arrays.)
-    VarWidth { length_fn: Expr },
+    /// (Under the hood, either a byte array or an array of `zerocopy` types)
+    VarWidth { length_fn: Expr, inner_ty: Option<Type> },
     /// Byte-aligned (sz + offset) var-width fields which may have a
     /// capped length assigned.
     Parsable {
@@ -228,8 +228,8 @@ enum ChunkState {
         fw_idx: usize,
     },
     /// Byte-aligned (sz + offset) variable-width fields.
-    /// (Really, just byte arrays.)
-    VarWidth(Ident),
+    /// (Typically byte or zerocopy arrays)
+    VarWidth(Ident, Option<Type>),
     /// Byte-aligned (sz + offset) var-width fields which may have a
     /// capped length assigned.
     Parsable(Ident),
@@ -486,8 +486,8 @@ impl StructParseDeriveCtx {
                     let last_el = els.last().unwrap().borrow();
                     let ident = last_el.ident.clone();
                     let chunk = match &last_el.state {
-                        FieldState::VarWidth { .. } => {
-                            ChunkState::VarWidth(ident)
+                        FieldState::VarWidth { inner_ty, .. } => {
+                            ChunkState::VarWidth(ident, inner_ty.clone())
                         }
                         FieldState::Parsable { .. } => {
                             ChunkState::Parsable(ident)
@@ -522,8 +522,8 @@ impl StructParseDeriveCtx {
             ) {
                 (true, None, None, next_layer) => {
                     let mut ccs_ref = curr_chunk_size.borrow_mut();
-                    let (curr_chunk_size, curr_chunk_fields) =
-                        ccs_ref.get_or_insert((ChunkSizeBits::default(), vec![]));
+                    let (curr_chunk_size, curr_chunk_fields) = ccs_ref
+                        .get_or_insert((ChunkSizeBits::default(), vec![]));
                     if field.is.is_some() {
                         return Err(Error::new(
                             user_ty.span(),
@@ -536,7 +536,10 @@ impl StructParseDeriveCtx {
                         ));
                     }
                     curr_chunk_fields.push(field_ident.clone());
-                    *curr_chunk_size.zc_fields.entry(user_ty.clone()).or_default() += 1;
+                    *curr_chunk_size
+                        .zc_fields
+                        .entry(user_ty.clone())
+                        .or_default() += 1;
 
                     if next_layer {
                         if nominated_next_header.is_some() {
@@ -551,10 +554,10 @@ impl StructParseDeriveCtx {
 
                     FieldState::Zerocopy
                 }
-                (true, ..) => {
+                (true, _, None, _) => {
                     return Err(syn::Error::new(
                         field.ty.span(),
-                        "cannot combine zerocopy field with other decorators"
+                        "cannot combine zerocopy field with subparse or next_layer"
                     ))
                 }
                 (_, Some(SubparseSpec { on_next_layer }), length_fn, false) => {
@@ -564,9 +567,81 @@ impl StructParseDeriveCtx {
                         on_next_layer: *on_next_layer,
                     }
                 }
-                (_, _, Some(length_fn), false) => {
+                (zc, _, Some(length_fn), false) => {
                     finalize_chunk()?;
-                    FieldState::VarWidth { length_fn: length_fn.clone() }
+
+                    // Unpack a Vec<T> from the user type, laboriously
+                    let Type::Path(type_path) = &user_ty else {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "invalid type for var_len field",
+                        ));
+                    };
+                    let Some(last_segment) = type_path.path.segments.last()
+                    else {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "could not get segment from var_len type",
+                        ));
+                    };
+                    if last_segment.ident != "Vec" {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "var_len field must be a Vec",
+                        ));
+                    };
+                    let PathArguments::AngleBracketed(angle_bracketed) =
+                        &last_segment.arguments
+                    else {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "Vec is missing its generic",
+                        ));
+                    };
+                    let Some(GenericArgument::Type(inner_type)) =
+                        angle_bracketed.args.first()
+                    else {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "Vec argument is not a type",
+                        ));
+                    };
+                    let Type::Path(a) = &inner_type else {
+                        return Err(Error::new(
+                            user_ty.span(),
+                            "invalid type for var_len field",
+                        ));
+                    };
+
+                    // Hooray, we made it.  This must either be a `u8`, or some
+                    // other type (if the `zerocopy` decoration is applied)
+                    let b = a.path.require_ident()?;
+                    let inner_ty = match bits_in_primitive(b) {
+                        Ok(b) => {
+                            if *zc {
+                                return Err(Error::new(user_ty.span(),
+                                    "zerocopy should not be combined with integer fields"));
+                            } else if b.cached_bits != 8 {
+                                return Err(Error::new(user_ty.span(),
+                                    "invalid integer type for var_len field, must be u8"));
+                            } else {
+                                None
+                            }
+                        }
+                        Err(_) => {
+                            if *zc {
+                                Some(inner_type.clone())
+                            } else {
+                                return Err(Error::new(user_ty.span(),
+                                    "invalid type for var_len field, must be u8 (or add `zerocopy`)"));
+                            }
+                        }
+                    };
+
+                    FieldState::VarWidth {
+                        length_fn: length_fn.clone(),
+                        inner_ty,
+                    }
                 }
                 (_, None, None, next_layer) => {
                     let underlying_ty =
@@ -576,8 +651,8 @@ impl StructParseDeriveCtx {
                     let n_bits = analysis.cached_bits;
 
                     let mut ccs_ref = curr_chunk_size.borrow_mut();
-                    let (curr_chunk_size, curr_chunk_fields) =
-                        ccs_ref.get_or_insert((ChunkSizeBits::default(), vec![]));
+                    let (curr_chunk_size, curr_chunk_fields) = ccs_ref
+                        .get_or_insert((ChunkSizeBits::default(), vec![]));
                     let first_bit_in_chunk = curr_chunk_size.bits;
                     curr_chunk_size.bits += analysis.cached_bits;
                     curr_chunk_fields.push(field_ident.clone());
@@ -912,12 +987,20 @@ impl StructParseDeriveCtx {
                     pub ::ingot::types::Accessor<#type_param_ident, #private_mod_ident::#name>
                 }
             },
-            ChunkState::VarWidth(i) | ChunkState::Parsable(i) => {
+            ChunkState::VarWidth(i, inner_ty) => {
                 let ref_field = self.validated.get(i).expect("reference to a non-existent field").borrow();
                 let ty = &ref_field.user_ty;
-
-                quote! {pub ::ingot::types::HeaderOf<#ty, #type_param>}
+                if let Some(inner_ty) = inner_ty {
+                    quote! {pub ::ingot::types::HeaderOf<#ty, ::ingot::types::primitives::ObjectSlice<#type_param, #inner_ty>>}
+                } else {
+                    quote! {pub ::ingot::types::HeaderOf<#ty, #type_param>}
+                }
             },
+            ChunkState::Parsable(i) => {
+                let ref_field = self.validated.get(i).expect("reference to a non-existent field").borrow();
+                let ty = &ref_field.user_ty;
+                quote! {pub ::ingot::types::HeaderOf<#ty, #type_param>}
+            }
         });
 
         quote! {
@@ -981,7 +1064,7 @@ impl StructParseDeriveCtx {
         for (i, field) in self.chunk_layout.iter().enumerate() {
             let idx = syn::Index::from(i);
             match field {
-                ChunkState::VarWidth(id) | ChunkState::Parsable(id) => {
+                ChunkState::VarWidth(id, _) | ChunkState::Parsable(id) => {
                     let ty = &self.validated[id].borrow().user_ty;
                     zc_len_checks.push(quote! {
                         self.#idx.packet_length() - <#ty as ::ingot::types::HeaderLen>::MINIMUM_LENGTH
@@ -1237,6 +1320,33 @@ impl StructParseDeriveCtx {
                 }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { inner_ty: Some(ty), .. } => {
+                    trait_needs_generic = true;
+                    direct_trait_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldRef::Repr(&self.#ident)
+                        }
+                    });
+                    trait_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldRef::Raw(&self.#sub_field_idx)
+                        }
+                    });
+                    direct_trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldMut::Repr(&mut self.#ident)
+                        }
+                    });
+                    trait_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
+                            ::ingot::types::FieldMut::Raw(&mut self.#sub_field_idx)
+                        }
+                    });
+                }
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                     trait_needs_generic = true;
                     direct_trait_impls.push(quote! {
@@ -1389,6 +1499,15 @@ impl StructParseDeriveCtx {
                 }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { inner_ty: Some(ty), .. } => {
+                    trait_needs_generic = true;
+                    trait_defs.push(quote! {
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>>;
+                    });
+                    mut_trait_defs.push(quote! {
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>>;
+                    });
+                }
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                     trait_needs_generic = true;
                     trait_defs.push(quote! {
@@ -1551,6 +1670,30 @@ impl StructParseDeriveCtx {
                 }
                 // Note: this case is predicated on the fact that we cannot
                 // move copy these types: they may be owned, or borrowed.
+                FieldState::VarWidth { inner_ty: Some(ty), .. } => {
+                    // We need to translate the `V` (or whatever) in these types
+                    // into the buffer type of the current packet.
+                    trait_needs_generic = true;
+
+                    packet_impls.push(quote! {
+                        #[inline]
+                        fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>> {
+                            match self {
+                                Self::Repr(o) => o.#field_ref(),
+                                Self::Raw(b) => b.#field_ref(),
+                            }
+                        }
+                    });
+                    packet_mut_impls.push(quote! {
+                        #[inline]
+                        fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice<V, #ty>> {
+                            match self {
+                                Self::Repr(o) => o.#field_mut(),
+                                Self::Raw(b) => b.#field_mut(),
+                            }
+                        }
+                    });
+                }
                 FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                     // We need to translate the `V` (or whatever) in these types
                     // into the buffer type of the current packet.
@@ -1658,7 +1801,7 @@ impl StructParseDeriveCtx {
                                 .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
                     });
                 }
-                ChunkState::VarWidth(id) => {
+                ChunkState::VarWidth(id, ty) => {
                     let field = self.validated[id].borrow();
 
                     // Fetch all needed variables from existing chunks,
@@ -1666,10 +1809,16 @@ impl StructParseDeriveCtx {
                     let (preamble, len_expr) =
                         field.resolved_length_fn(self).unwrap();
 
+                    let len_expr = match ty {
+                        Some(ty) => quote! {
+                            ((#len_expr) as usize) * ::core::mem::size_of::<#ty>()
+                        },
+                        None => quote! { (#len_expr) as usize },
+                    };
                     segment_fragments.push(quote! {
                         #preamble
 
-                        let chunk_len = (#len_expr) as usize;
+                        let chunk_len = #len_expr;
 
                         let (varlen, from) = from.split_at(chunk_len)
                             .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
@@ -1990,7 +2139,7 @@ impl StructParseDeriveCtx {
                         fill.copy_from_slice(s);
                     });
                 }
-                ChunkState::VarWidth(id) => {
+                ChunkState::VarWidth(id, _) => {
                     // delegate to emit.
                     owned_emit_blocks.push(quote! {
                         let (fill, rest) = rest.split_at_mut(self.#id.packet_length());

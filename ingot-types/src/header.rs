@@ -133,11 +133,16 @@ impl<
 }
 
 #[cfg(feature = "alloc")]
-impl<B: ByteSlice> From<&BoxedHeader<Vec<u8>, RawBytes<B>>> for Vec<u8> {
-    fn from(value: &Header<Vec<u8>, RawBytes<B>>) -> Self {
+impl<B: ByteSlice, T> From<&BoxedHeader<Vec<T>, RawBytes<B>>> for Vec<T>
+where
+    T: FromBytes + IntoBytes + KnownLayout + Immutable + Clone,
+{
+    fn from(value: &Header<Vec<T>, RawBytes<B>>) -> Self {
         match value {
-            Header::Repr(v) => v.to_vec(),
-            Header::Raw(v) => v.to_vec(),
+            Header::Repr(v) => v.deref().clone(),
+            Header::Raw(v) => {
+                <[T]>::ref_from_bytes(v.as_ref()).unwrap().to_vec()
+            }
         }
     }
 }

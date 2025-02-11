@@ -156,6 +156,7 @@ pub use ingot_types as types;
 pub mod ethernet;
 pub mod geneve;
 pub mod icmp;
+pub mod igmp;
 pub mod ip;
 pub mod tcp;
 pub mod udp;
