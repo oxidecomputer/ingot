@@ -367,11 +367,5 @@ macro_rules! zerocopy_type {
                 false
             }
         }
-        impl<B: zerocopy::ByteSlice>
-            $crate::HasView<$crate::primitives::ObjectSlice<B, $t>>
-            for ::alloc::vec::Vec<$t>
-        {
-            type ViewType = $crate::primitives::ObjectSlice<B, $t>;
-        }
     };
 }

@@ -45,14 +45,12 @@ pub type VarBytes<V> = Header<Vec<u8>, V>;
 /// Buffer type which can be owned or a view.
 pub type VarBytes<V> = Header<Vec<u8, 256>, V>;
 
-impl<B: ByteSlice, T> HasView<B> for Vec<T>
-where
-    T: zerocopy::FromBytes
-        + zerocopy::IntoBytes
-        + zerocopy::KnownLayout
-        + zerocopy::Immutable,
-{
+impl<B: ByteSlice> HasView<B> for Vec<u8> {
     type ViewType = RawBytes<B>;
+}
+
+impl<B: zerocopy::ByteSlice, T> HasView<ObjectSlice<B, T>> for Vec<T> {
+    type ViewType = ObjectSlice<B, T>;
 }
 
 impl<V: ByteSlice> From<&VarBytes<V>> for Vec<u8> {
