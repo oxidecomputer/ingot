@@ -8,28 +8,13 @@
 //! but they also implement traits from [`zerocopy`] for zero-copy parsing.
 
 use crate::zerocopy_type;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-/// An IPv4 address.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    FromBytes,
-    IntoBytes,
-    KnownLayout,
-    Immutable,
-)]
-#[repr(C)]
-pub struct Ipv4Addr {
-    inner: [u8; 4],
-}
+zerocopy_type!(
+    /// An IPv4 address
+    pub struct Ipv4Addr {
+        inner: [u8; 4],
+    }
+);
 
 impl Ipv4Addr {
     /// An IPv4 address representing an unspecified address: `0.0.0.0`
@@ -48,12 +33,6 @@ impl Ipv4Addr {
     }
 }
 
-impl From<[u8; 4]> for Ipv4Addr {
-    fn from(bytes: [u8; 4]) -> Self {
-        Self { inner: bytes }
-    }
-}
-
 impl From<core::net::Ipv4Addr> for Ipv4Addr {
     #[inline]
     fn from(ip4: core::net::Ipv4Addr) -> Self {
@@ -68,28 +47,12 @@ impl From<Ipv4Addr> for core::net::Ipv4Addr {
     }
 }
 
-zerocopy_type!(Ipv4Addr);
-
-/// An IPv6 address.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    FromBytes,
-    IntoBytes,
-    KnownLayout,
-    Immutable,
-)]
-#[repr(C)]
-pub struct Ipv6Addr {
-    inner: [u8; 16],
-}
+zerocopy_type!(
+    /// An IPv6 address.
+    pub struct Ipv6Addr {
+        inner: [u8; 16],
+    }
+);
 
 impl Ipv6Addr {
     /// The unspecified IPv6 address, i.e., `::` or all zeros.
@@ -144,11 +107,3 @@ impl From<Ipv6Addr> for core::net::Ipv6Addr {
         Self::from(ip6.inner)
     }
 }
-
-impl From<[u8; 16]> for Ipv6Addr {
-    fn from(bytes: [u8; 16]) -> Self {
-        Self { inner: bytes }
-    }
-}
-
-zerocopy_type!(Ipv6Addr);

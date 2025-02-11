@@ -340,11 +340,53 @@ where
     }
 }
 
-/// Macro which defines `HeaderLen`, `Emit`, and `HasView` for a type
+/// Macro which declares a zerocopy-flavored type, which can be used in a field
+///
+/// The type implements all of the required `derive` traits, as well as
+/// `HeaderLen` and `Emit`.
+#[macro_export]
+macro_rules! zerocopy_type {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident($inner_vis:vis $t:ty) $(;)?
+    ) => {
+        $crate::zerocopy_struct!(
+            $(#[$meta])*
+            $vis struct $name($inner_vis $t);
+        );
+
+        impl From<$t> for $name {
+            fn from(t: $t) -> Self {
+                Self(t)
+            }
+        }
+        $crate::zerocopy_impls!($name);
+    };
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident {
+            $inner_vis:vis $inner_name:ident: $t:ty $(,)?
+        }
+    ) => {
+        $crate::zerocopy_struct!(
+            $(#[$meta])*
+            $vis struct $name { $inner_vis $inner_name: $t }
+        );
+
+        impl From<$t> for $name {
+            fn from(t: $t) -> Self {
+                Self { $inner_name: t }
+            }
+        }
+        $crate::zerocopy_impls!($name);
+    };
+}
+
+/// Macro which defines `HeaderLen` and `Emit` for a zerocopy-type
 ///
 /// These are necessary for the type to be used in a variable-length field.
 #[macro_export]
-macro_rules! zerocopy_type {
+macro_rules! zerocopy_impls {
     ($t:ty) => {
         impl $crate::HeaderLen for $t {
             const MINIMUM_LENGTH: usize = core::mem::size_of::<Self>();
@@ -368,4 +410,34 @@ macro_rules! zerocopy_type {
             }
         }
     };
+}
+
+/// Helper to build a struct with all zerocopy derives
+///
+/// This is overly general to capture both tuple and named-field structs, so
+/// it's hidden in the docs.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! zerocopy_struct {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident $($body:tt)*
+    ) => {
+        $(#[$meta])*
+        #[derive(
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+            ::zerocopy::FromBytes,
+            ::zerocopy::IntoBytes,
+            ::zerocopy::KnownLayout,
+            ::zerocopy::Immutable,
+        )]
+        $vis struct $name $($body)*
+    }
 }
