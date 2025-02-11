@@ -14,8 +14,8 @@ use crate::{
     },
     types::{
         primitives::*, util::RepeatedView, Accessor, Emit, HeaderLen,
-        HeaderParse, Ipv6Addr, NetworkRepr, NextLayer, NextLayerChoice,
-        ParseChoice, ParseError, ToOwnedPacket,
+        HeaderParse, Ipv6Addr, NextLayer, NextLayerChoice, ParseChoice,
+        ParseError, ToOwnedPacket,
     },
     udp::{Udp, UdpRef, ValidUdp, _Udp_ingot_impl::UdpPart0},
     Ingot,
@@ -60,7 +60,7 @@ fn base_parse_and_type_conversion() {
     let (mut eth, .., rest) = ValidEthernet::parse(&mut buf2[..]).unwrap();
 
     // 0 is a valid v6 EH -- need to change to e.g. TCP before parse.
-    rest[6] = IpProtocol::TCP.to_network();
+    rest[6] = IpProtocol::TCP.0;
     let (.., rest) = ValidIpv6::parse(&mut rest[..]).unwrap();
     assert_eq!(rest.len(), 0);
     assert_eq!(eth.source(), MacAddr6::nil());

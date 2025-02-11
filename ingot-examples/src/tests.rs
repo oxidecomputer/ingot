@@ -11,8 +11,8 @@ use ingot::{
         ValidIpv6,
     },
     types::{
-        HeaderLen, HeaderParse, Ipv4Addr, Ipv6Addr, NetworkRepr, NextLayer,
-        ParseError, Parsed, Read,
+        HeaderLen, HeaderParse, Ipv4Addr, Ipv6Addr, NextLayer, ParseError,
+        Parsed, Read,
     },
     udp::{Udp, UdpMut, UdpRef, ValidUdp},
 };
@@ -122,7 +122,7 @@ fn parse_header_chain_multichunk() {
     let mut eth_bytes = vec![0u8; Ethernet::MINIMUM_LENGTH];
     let mut v6_bytes = vec![0u8; Ipv6::MINIMUM_LENGTH];
     // 0 is a valid v6 EH -- need to init it before parse.
-    v6_bytes[6] = IpProtocol::UDP.to_network();
+    v6_bytes[6] = IpProtocol::UDP.0;
     let mut udp_bytes = vec![0u8; Udp::MINIMUM_LENGTH];
     let body_bytes = vec![0xaau8; 128];
     {

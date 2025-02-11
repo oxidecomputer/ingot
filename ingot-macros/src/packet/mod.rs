@@ -940,13 +940,19 @@ impl StructParseDeriveCtx {
         );
 
         let access = match field_lk.state {
-            FieldState::FixedWidth { bitfield_info: Some(_), .. } => {
-                quote! {#field_ident()}
-            }
-            FieldState::FixedWidth { bitfield_info: None, .. }
-            | FieldState::Zerocopy => {
-                quote! {#field_ident}
-            }
+            FieldState::FixedWidth { bitfield_info: Some(_), .. } => quote! {
+                ::ingot::types::NetworkRepr::from_network(
+                    #val_ident.#field_ident()
+                )
+            },
+            FieldState::FixedWidth { bitfield_info: None, .. } => quote! {
+                ::ingot::types::NetworkRepr::from_network(
+                    #val_ident.#field_ident
+                )
+            },
+            FieldState::Zerocopy => quote! {
+                #val_ident.#field_ident
+            },
             FieldState::VarWidth { .. } | FieldState::Parsable { .. } => {
                 return syn::Error::new(
                     field_lk.ident.span(),
@@ -956,9 +962,7 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            hint = ::core::option::Option::Some(
-                ::ingot::types::NetworkRepr::from_network(#val_ident.#access)
-            );
+            hint = ::core::option::Option::Some(#access);
         }
     }
 
