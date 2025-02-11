@@ -62,20 +62,12 @@ impl NetworkRepr<u8> for GeneveFlags {
     }
 }
 
-/// Indicator of the format of a Geneve option, when combined with
-/// an organisation-specific class.
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd, Default)]
-pub struct GeneveOptionType(pub u8);
-
-impl NetworkRepr<u8> for GeneveOptionType {
-    fn to_network(self) -> u8 {
-        self.0
-    }
-
-    fn from_network(val: u8) -> Self {
-        Self(val)
-    }
-}
+ingot_types::zerocopy_type!(
+    /// Indicator of the format of a Geneve option, when combined with
+    /// an organisation-specific class.
+    #[derive(Default)]
+    pub struct GeneveOptionType(pub u8)
+);
 
 impl GeneveOptionType {
     /// Denotes whether this option is 'critical': a critical packet
@@ -99,7 +91,7 @@ pub struct GeneveOpt {
     ///
     /// [`data`]: GeneveOpt::data
     /// [`class`]: GeneveOpt::class
-    #[ingot(is = "u8")]
+    #[ingot(zerocopy)]
     pub option_type: GeneveOptionType,
     /// Currently reserved bits -- these must be sent as `0`, and not
     /// validated by tunnel endpoints/forwarders.
