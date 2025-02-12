@@ -156,10 +156,8 @@ impl Emit for &[u8] {
 
 impl Emit for Vec<u8> {
     #[inline]
-    fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
-        buf.copy_from_slice(self);
-
-        self.len()
+    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
+        self.as_slice().emit_raw(buf)
     }
 
     #[inline]
