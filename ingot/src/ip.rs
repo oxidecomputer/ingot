@@ -9,8 +9,7 @@ use ingot_types::{
     Vec,
 };
 
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
-pub struct IpProtocol(pub u8);
+ingot_types::zerocopy_type!(pub struct IpProtocol(pub u8));
 
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub enum ExtHdrClass {
@@ -61,18 +60,6 @@ impl Default for IpProtocol {
     }
 }
 
-impl NetworkRepr<u8> for IpProtocol {
-    #[inline]
-    fn to_network(self) -> u8 {
-        self.0
-    }
-
-    #[inline]
-    fn from_network(val: u8) -> Self {
-        Self(val)
-    }
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct Ipv4 {
@@ -92,7 +79,7 @@ pub struct Ipv4 {
 
     #[ingot(default = 128)]
     pub hop_limit: u8,
-    #[ingot(is = "u8", next_layer)]
+    #[ingot(zerocopy, next_layer)]
     pub protocol: IpProtocol,
     pub checksum: u16be,
 
@@ -180,7 +167,7 @@ pub struct Ipv6 {
     pub flow_label: u20be,
 
     pub payload_len: u16be,
-    #[ingot(is = "u8", next_layer)]
+    #[ingot(zerocopy, next_layer)]
     pub next_header: IpProtocol,
     #[ingot(default = 128)]
     pub hop_limit: u8,
@@ -203,7 +190,7 @@ pub enum LowRentV6Eh {
 // 0x2c
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 pub struct IpV6ExtFragment {
-    #[ingot(is = "u8", next_layer)]
+    #[ingot(zerocopy, next_layer)]
     pub next_header: IpProtocol, // should be a type.
     pub reserved: u8,
     pub fragment_offset: u13be,
@@ -215,7 +202,7 @@ pub struct IpV6ExtFragment {
 // 0x00, 0x2b, 0x3c, custom(0xfe)
 #[derive(Debug, Clone, Ingot, Eq, PartialEq)]
 pub struct IpV6Ext6564 {
-    #[ingot(is = "u8", next_layer)]
+    #[ingot(zerocopy, next_layer)]
     pub next_header: IpProtocol, // should be a type.
     pub ext_len: u8,
 
