@@ -31,6 +31,63 @@ impl Ipv4Addr {
     pub const fn from_octets(bytes: [u8; 4]) -> Self {
         Self { inner: bytes }
     }
+
+    /// Returns true if the address is a multicast address.
+    #[inline]
+    pub fn is_multicast(&self) -> bool {
+        self.inner[0] >= 224 && self.inner[0] <= 239
+    }
+
+    /// Returns true if the address is a broadcast address.
+    #[inline]
+    pub fn is_broadcast(&self) -> bool {
+        self.inner == [255, 255, 255, 255]
+    }
+
+    /// Returns true if the address is a private address.
+    #[inline]
+    pub fn is_private(&self) -> bool {
+        match self.inner {
+            [10, ..] => true,
+            [172, b, ..] => (16..=31).contains(&b),
+            [192, 168, ..] => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the address is a loopback address.
+    #[inline]
+    pub fn is_loopback(&self) -> bool {
+        self.inner == [127, 0, 0, 1]
+    }
+
+    /// Returns true if the address is a link-local address.
+    #[inline]
+    pub fn is_link_local(&self) -> bool {
+        self.inner == [169, 254, 0, 0]
+    }
+
+    /// Returns true if the address is a global unicast address.
+    #[inline]
+    pub fn is_global(&self) -> bool {
+        !self.is_multicast()
+            && !self.is_private()
+            && !self.is_loopback()
+            && !self.is_link_local()
+            && !self.is_broadcast()
+    }
+
+    /// Returns true if the address is a documentation address.
+    #[inline]
+    pub fn is_documentation(&self) -> bool {
+        self.inner == [192, 0, 2, 0]
+    }
+
+    /// Returns true if the address is a reserved address.
+    #[inline]
+    pub fn is_reserved(&self) -> bool {
+        self.inner[0] == 0 || self.inner[0] == 255
+    }
 }
 
 impl From<core::net::Ipv4Addr> for Ipv4Addr {
@@ -91,6 +148,48 @@ impl Ipv6Addr {
                 w4[1], w5[0], w5[1], w6[0], w6[1], w7[0], w7[1],
             ],
         }
+    }
+
+    /// Returns true if the address is a multicast address.
+    #[inline]
+    pub fn is_multicast(&self) -> bool {
+        self.inner[0] == 0xff
+    }
+
+    /// Returns true if the address is a loopback address.
+    #[inline]
+    pub fn is_loopback(&self) -> bool {
+        *self == Self::LOCALHOST
+    }
+
+    /// Returns true if the address is a link-local address.
+    #[inline]
+    pub fn is_link_local(&self) -> bool {
+        self.inner[0] == 0xfe && (self.inner[1] & 0xc0) == 0x80
+    }
+
+    /// Returns true if the address is a unique local address.
+    #[inline]
+    pub fn is_unique_local(&self) -> bool {
+        (self.inner[0] & 0xfe) == 0xfc
+    }
+
+    /// Returns true if the address is a global unicast address.
+    #[inline]
+    pub fn is_global(&self) -> bool {
+        !self.is_multicast() && !self.is_link_local() && !self.is_unique_local()
+    }
+
+    /// Returns true if the address is a documentation address.
+    #[inline]
+    pub fn is_documentation(&self) -> bool {
+        self.inner[0] == 0x20 && self.inner[1] == 0x01 && self.inner[2] == 0x0d
+    }
+
+    /// Returns true if the address is a reserved address.
+    #[inline]
+    pub fn is_reserved(&self) -> bool {
+        (self.inner[0] & 0xe0) == 0xe0
     }
 }
 
