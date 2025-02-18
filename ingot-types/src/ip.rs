@@ -61,19 +61,25 @@ impl Ipv4Addr {
         self.inner == [127, 0, 0, 1]
     }
 
+    /// Returns true if the address is a unicast address.
+    #[inline]
+    pub fn is_unicast(&self) -> bool {
+        !self.is_multicast() && !self.is_broadcast()
+    }
+
     /// Returns true if the address is a link-local address.
     #[inline]
-    pub fn is_link_local(&self) -> bool {
+    pub fn is_unicast_link_local(&self) -> bool {
         self.inner == [169, 254, 0, 0]
     }
 
     /// Returns true if the address is a global unicast address.
     #[inline]
-    pub fn is_global(&self) -> bool {
+    pub fn is_unicast_global(&self) -> bool {
         !self.is_multicast()
             && !self.is_private()
             && !self.is_loopback()
-            && !self.is_link_local()
+            && !self.is_unicast_link_local()
             && !self.is_broadcast()
     }
 
@@ -162,9 +168,15 @@ impl Ipv6Addr {
         *self == Self::LOCALHOST
     }
 
+    /// Returns true if the address is a unicast address.
+    #[inline]
+    pub fn is_unicast(&self) -> bool {
+        !self.is_multicast()
+    }
+
     /// Returns true if the address is a link-local address.
     #[inline]
-    pub fn is_link_local(&self) -> bool {
+    pub fn is_unicast_link_local(&self) -> bool {
         self.inner[0] == 0xfe && (self.inner[1] & 0xc0) == 0x80
     }
 
@@ -176,8 +188,10 @@ impl Ipv6Addr {
 
     /// Returns true if the address is a global unicast address.
     #[inline]
-    pub fn is_global(&self) -> bool {
-        !self.is_multicast() && !self.is_link_local() && !self.is_unique_local()
+    pub fn is_unicast_global(&self) -> bool {
+        !self.is_multicast()
+            && !self.is_unicast_link_local()
+            && !self.is_unique_local()
     }
 
     /// Returns true if the address is a documentation address.
@@ -204,5 +218,80 @@ impl From<Ipv6Addr> for core::net::Ipv6Addr {
     #[inline]
     fn from(ip6: Ipv6Addr) -> Self {
         Self::from(ip6.inner)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn ipv4() {
+        let addr = Ipv4Addr::from_octets([192, 168, 1, 1]);
+        assert!(addr.is_private());
+        assert!(!addr.is_unicast_global());
+        assert!(!addr.is_multicast());
+        assert!(!addr.is_broadcast());
+        assert!(!addr.is_loopback());
+        assert!(addr.is_unicast());
+        assert!(!addr.is_unicast_link_local());
+        assert!(!addr.is_documentation());
+        assert!(!addr.is_reserved());
+    }
+
+    #[test]
+    fn ipv4_broadcast() {
+        let addr = Ipv4Addr::from_octets([255, 255, 255, 255]);
+        assert!(!addr.is_private());
+        assert!(!addr.is_unicast_global());
+        assert!(!addr.is_multicast());
+        assert!(addr.is_broadcast());
+        assert!(!addr.is_unicast());
+        assert!(!addr.is_loopback());
+        assert!(!addr.is_unicast_link_local());
+        assert!(!addr.is_documentation());
+        assert!(addr.is_reserved());
+    }
+
+    #[test]
+    fn ipv4_loopback() {
+        let addr = Ipv4Addr::from_octets([127, 0, 0, 1]);
+        assert!(!addr.is_private());
+        assert!(!addr.is_unicast_global());
+        assert!(!addr.is_multicast());
+        assert!(!addr.is_broadcast());
+        assert!(addr.is_loopback());
+        assert!(addr.is_unicast());
+        assert!(!addr.is_unicast_link_local());
+        assert!(!addr.is_documentation());
+        assert!(!addr.is_reserved());
+    }
+
+    #[test]
+    fn ipv6() {
+        let addr = Ipv6Addr::from_octets([
+            0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ]);
+        assert!(!addr.is_multicast());
+        assert!(addr.is_unicast());
+        assert!(!addr.is_unicast_link_local());
+        assert!(!addr.is_unique_local());
+        assert!(addr.is_documentation());
+        assert!(!addr.is_reserved());
+        assert!(addr.is_unicast_global());
+    }
+
+    #[test]
+    fn ipv6_link_local() {
+        let addr = Ipv6Addr::from_octets([
+            0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xde, 0xad, 0xbe, 0xef,
+        ]);
+        assert!(!addr.is_multicast());
+        assert!(addr.is_unicast());
+        assert!(addr.is_unicast_link_local());
+        assert!(!addr.is_unique_local());
+        assert!(!addr.is_documentation());
+        assert!(addr.is_reserved());
+        assert!(!addr.is_unicast_global());
     }
 }
