@@ -845,8 +845,14 @@ impl StructParseDeriveCtx {
                     &format!("{subparse_ident}_ref"),
                     subparse_ident.span(),
                 );
+                let ref_ty = &self
+                    .validated
+                    .get(&subparse_ident)
+                    .unwrap()
+                    .borrow()
+                    .user_ty;
                 (
-                    quote! {#user_ty},
+                    quote! {<#ref_ty as ::ingot::types::NextLayer>::Denom},
                     quote! {
                         use ::ingot::types::NextLayerChoice;
                         use ::ingot::types::HeaderLen;
