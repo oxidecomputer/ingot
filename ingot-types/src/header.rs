@@ -118,7 +118,7 @@ impl<O, B> BoxedHeader<O, B> {
 #[cfg(feature = "alloc")]
 impl<
         O: NextLayer + Clone,
-        B: NextLayer<Denom = O::Denom> + ToOwnedPacket<Target = O>,
+        B: NextLayer<Denom = O::Denom, Hint = O::Hint> + ToOwnedPacket<Target = O>,
     > ToOwnedPacket for BoxedHeader<O, B>
 {
     type Target = O;
@@ -183,7 +183,7 @@ impl<
     > HeaderParse<V> for BoxedHeader<B::ReprType, B>
 where
     B: NextLayer,
-    B::ReprType: NextLayer<Denom = B::Denom>,
+    B::ReprType: NextLayer<Denom = B::Denom, Hint = B::Hint>,
 {
     #[inline]
     fn parse(from: V) -> ParseResult<Success<Self, V>> {
@@ -195,24 +195,9 @@ where
 #[cfg(feature = "alloc")]
 impl<O: NextLayer, B> NextLayer for BoxedHeader<O, B>
 where
-    B: NextLayer<Denom = O::Denom>,
+    B: NextLayer<Denom = O::Denom, Hint = O::Hint>,
 {
     type Denom = O::Denom;
-
-    #[inline]
-    fn next_layer(&self) -> Option<Self::Denom> {
-        match self {
-            Self::Repr(v) => v.next_layer(),
-            Self::Raw(v) => v.next_layer(),
-        }
-    }
-}
-
-#[cfg(feature = "alloc")]
-impl<O: NextLayerChoice + NextLayer, B> NextLayerChoice for BoxedHeader<O, B>
-where
-    B: NextLayerChoice<Hint = O::Hint> + NextLayer<Denom = O::Denom>,
-{
     type Hint = O::Hint;
 
     #[inline]
@@ -295,7 +280,7 @@ impl<O, B> InlineHeader<O, B> {
 
 impl<
         O: NextLayer + Clone,
-        B: NextLayer<Denom = O::Denom> + ToOwnedPacket<Target = O>,
+        B: NextLayer<Denom = O::Denom, Hint = O::Hint> + ToOwnedPacket<Target = O>,
     > ToOwnedPacket for InlineHeader<O, B>
 {
     type Target = O;
@@ -341,7 +326,7 @@ impl<
     > HeaderParse<V> for InlineHeader<B::ReprType, B>
 where
     B: NextLayer,
-    B::ReprType: NextLayer<Denom = B::Denom>,
+    B::ReprType: NextLayer<Denom = B::Denom, Hint = B::Hint>,
 {
     #[inline]
     fn parse(from: V) -> ParseResult<Success<Self, V>> {
@@ -352,15 +337,19 @@ where
 
 impl<O: NextLayer, B> NextLayer for InlineHeader<O, B>
 where
-    B: NextLayer<Denom = O::Denom>,
+    B: NextLayer<Denom = O::Denom, Hint = O::Hint>,
 {
     type Denom = O::Denom;
+    type Hint = O::Hint;
 
     #[inline]
-    fn next_layer(&self) -> Option<Self::Denom> {
+    fn next_layer_choice(
+        &self,
+        hint: Option<Self::Hint>,
+    ) -> Option<Self::Denom> {
         match self {
-            Self::Repr(v) => v.next_layer(),
-            Self::Raw(v) => v.next_layer(),
+            Self::Repr(v) => v.next_layer_choice(hint),
+            Self::Raw(v) => v.next_layer_choice(hint),
         }
     }
 }

@@ -49,8 +49,6 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
     let mut next_layer_wheres_repr: Vec<TokenStream> = vec![];
     let mut next_layer_match_arms: Vec<TokenStream> = vec![];
 
-    let mut next_layer_choice_match_arms: Vec<TokenStream> = vec![];
-
     let mut from_ref_arms: Vec<TokenStream> = vec![];
 
     let mut unpacks: Vec<TokenStream> = vec![];
@@ -131,10 +129,6 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
 
         next_layer_match_arms.push(quote! {
             Self::#id(v) => v.next_layer()
-        });
-
-        next_layer_choice_match_arms.push(quote! {
-            Self::#id(v) => v.next_layer_choice(None)
         });
 
         from_ref_arms.push(quote! {
@@ -273,9 +267,10 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         where #( #next_layer_wheres ),*
         {
             type Denom = T;
+            type Hint = #on;
 
             #[inline]
-            fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
+            fn next_layer_choice(&self, hint: ::core::option::Option<Self::Hint>) -> ::core::option::Option<Self::Denom> {
                 match self {
                     #( #next_layer_match_arms ),*
                 }
@@ -286,35 +281,12 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
         where #( #next_layer_wheres_repr ),*
         {
             type Denom = T;
+            type Hint = #on;
 
             #[inline]
-            fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
+            fn next_layer_choice(&self, hint: ::core::option::Option<Self::Hint>) -> ::core::option::Option<Self::Denom> {
                 match self {
                     #( #next_layer_match_arms ),*
-                }
-            }
-        }
-
-        impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayerChoice for #validated_ident<V>
-        {
-            type Hint = #on;
-
-            #[inline]
-            fn next_layer_choice(&self, _hint: ::core::option::Option<Self::Hint>) -> ::core::option::Option<Self::Denom> {
-                match self {
-                    #( #next_layer_choice_match_arms ),*
-                }
-            }
-        }
-
-        impl ::ingot::types::NextLayerChoice for #repr_head
-        {
-            type Hint = #on;
-
-            #[inline]
-            fn next_layer_choice(&self, _hint: ::core::option::Option<Self::Hint>) -> ::core::option::Option<Self::Denom> {
-                match self {
-                    #( #next_layer_choice_match_arms ),*
                 }
             }
         }
