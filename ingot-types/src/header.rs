@@ -117,9 +117,8 @@ impl<O, B> BoxedHeader<O, B> {
 
 #[cfg(feature = "alloc")]
 impl<
-        D: Copy + Eq,
-        O: NextLayer<Denom = D> + Clone,
-        B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
+        O: NextLayer + Clone,
+        B: NextLayer<Denom = O::Denom> + ToOwnedPacket<Target = O>,
     > ToOwnedPacket for BoxedHeader<O, B>
 {
     type Target = O;
@@ -210,10 +209,10 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<D: Copy + Eq, D2, O: NextLayerChoice<D> + NextLayer<Denom = D2>, B>
-    NextLayerChoice<D> for BoxedHeader<O, B>
+impl<D: Copy + Eq, O: NextLayerChoice<D> + NextLayer, B> NextLayerChoice<D>
+    for BoxedHeader<O, B>
 where
-    B: NextLayerChoice<D> + NextLayer<Denom = D2>,
+    B: NextLayerChoice<D> + NextLayer<Denom = O::Denom>,
 {
     #[inline]
     fn next_layer_choice(&self, hint: Option<D>) -> Option<Self::Denom> {
@@ -291,9 +290,8 @@ impl<O, B> InlineHeader<O, B> {
 }
 
 impl<
-        D: Copy + Eq,
-        O: NextLayer<Denom = D> + Clone,
-        B: NextLayer<Denom = D> + ToOwnedPacket<Target = O>,
+        O: NextLayer + Clone,
+        B: NextLayer<Denom = O::Denom> + ToOwnedPacket<Target = O>,
     > ToOwnedPacket for InlineHeader<O, B>
 {
     type Target = O;
