@@ -35,6 +35,11 @@ impl Ipv4Addr {
     /// Private function to convert to a `core::net::Ipv4Addr`
     /// in a const context as `From` implementations are not
     /// allowed in const contexts.
+    ///
+    /// This can be simplied once [`from_octets` and `from_segements`] is
+    /// stabilized.
+    ///
+    /// [`from_octets` and `from_segements`]: https://github.com/rust-lang/rust/issues/131360
     #[inline]
     const fn into_core(self) -> core::net::Ipv4Addr {
         core::net::Ipv4Addr::new(
@@ -210,6 +215,10 @@ impl Ipv6Addr {
     /// Private function to convert to a `core::net::Ipv6Addr`
     /// in a const context as `From` implementations are not
     /// yet allowed in const contexts.
+    /// This can be simplied once [`from_octets` and `from_segements`] is
+    /// stabilized.
+    ///
+    /// [`from_octets` and `from_segements`]: https://github.com/rust-lang/rust/issues/131360
     #[inline]
     const fn into_core(self) -> core::net::Ipv6Addr {
         let segments = self.segments();
@@ -279,7 +288,8 @@ impl Ipv6Addr {
     /// [IETF RFC 3849]: https://tools.ietf.org/html/rfc3849
     #[inline]
     pub const fn is_documentation(&self) -> bool {
-        (self.segments()[0] == 0x2001) && (self.segments()[1] == 0xdb8)
+        let segments = self.segments();
+        (segments[0] == 0x2001) && (segments[1] == 0xdb8)
     }
 }
 
