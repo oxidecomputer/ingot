@@ -22,7 +22,7 @@ impl Ipv4Addr {
 
     /// Return the bytes of the address.
     #[inline]
-    pub fn octets(&self) -> [u8; 4] {
+    pub const fn octets(&self) -> [u8; 4] {
         self.inner
     }
 
@@ -32,67 +32,95 @@ impl Ipv4Addr {
         Self { inner: bytes }
     }
 
-    /// Returns true if the address is a multicast address.
+    /// Private function to convert to a `core::net::Ipv4Addr`
+    /// in a const context as `From` implementations are not
+    /// allowed in const contexts.
     #[inline]
-    pub fn is_multicast(&self) -> bool {
-        self.inner[0] >= 224 && self.inner[0] <= 239
+    const fn into_core(self) -> core::net::Ipv4Addr {
+        core::net::Ipv4Addr::new(
+            self.inner[0],
+            self.inner[1],
+            self.inner[2],
+            self.inner[3],
+        )
     }
 
-    /// Returns true if the address is a broadcast address.
+    /// Returns true if the address is a multicast address.
     #[inline]
-    pub fn is_broadcast(&self) -> bool {
-        self.inner == [255, 255, 255, 255]
+    pub const fn is_multicast(&self) -> bool {
+        self.into_core().is_multicast()
+    }
+
+    /// Returns true if the address is a local broadcast address.
+    #[inline]
+    pub const fn is_broadcast(&self) -> bool {
+        self.into_core().is_broadcast()
     }
 
     /// Returns true if the address is a private address.
     #[inline]
-    pub fn is_private(&self) -> bool {
-        match self.inner {
-            [10, ..] => true,
-            [172, b, ..] => (16..=31).contains(&b),
-            [192, 168, ..] => true,
-            _ => false,
-        }
+    pub const fn is_private(&self) -> bool {
+        self.into_core().is_private()
     }
 
     /// Returns true if the address is a loopback address.
     #[inline]
-    pub fn is_loopback(&self) -> bool {
-        self.inner == [127, 0, 0, 1]
+    pub const fn is_loopback(&self) -> bool {
+        self.into_core().is_loopback()
     }
 
     /// Returns true if the address is a unicast address.
     #[inline]
-    pub fn is_unicast(&self) -> bool {
+    pub const fn is_unicast(&self) -> bool {
         !self.is_multicast() && !self.is_broadcast()
     }
 
     /// Returns true if the address is a link-local address.
     #[inline]
-    pub fn is_unicast_link_local(&self) -> bool {
-        self.inner == [169, 254, 0, 0]
+    pub const fn is_link_local(&self) -> bool {
+        self.into_core().is_link_local()
     }
 
     /// Returns true if the address is a global unicast address.
     #[inline]
-    pub fn is_unicast_global(&self) -> bool {
+    pub const fn is_global(&self) -> bool {
         !self.is_multicast()
             && !self.is_private()
             && !self.is_loopback()
-            && !self.is_unicast_link_local()
+            && !self.is_link_local()
             && !self.is_broadcast()
     }
 
     /// Returns true if the address is a documentation address.
+    /// There are three such unicast ranges [IETF RFC 5737]:
+    /// * 192.0.2.0/24
+    /// * 198.51.100.0/24
+    /// * 203.0.113.0/24
+    ///
+    /// And one multicast ([IETF RFC 5771] / [IETF RFC 6676]) one:
+    /// * 233.252.0.0/24
+    ///
+    /// [IETF RFC 5737]: https://tools.ietf.org/html/rfc5737
+    /// [IETF RFC 5771]: https://tools.ietf.org/html/rfc5771
+    /// [IETF RFC 6676]: https://tools.ietf.org/html/rfc6676
     #[inline]
-    pub fn is_documentation(&self) -> bool {
-        self.inner == [192, 0, 2, 0]
+    pub const fn is_documentation(&self) -> bool {
+        matches!(
+            self.octets(),
+            [192, 0, 2, _]
+                | [198, 51, 100, _]
+                | [203, 0, 113, _]
+                | [233, 252, 0, _]
+        )
     }
 
     /// Returns true if the address is a reserved address.
+    ///
+    /// Note: The underlying `core::net` version is not yet stable as
+    /// of Rust 1.84.1.
     #[inline]
-    pub fn is_reserved(&self) -> bool {
-        self.inner[0] == 0 || self.inner[0] == 255
+    pub const fn is_reserved(&self) -> bool {
+        self.octets()[0] & 240 == 240 && !self.is_broadcast()
     }
 }
 
@@ -127,7 +155,7 @@ impl Ipv6Addr {
 
     /// Return the bytes of the address.
     #[inline]
-    pub fn octets(&self) -> [u8; 16] {
+    pub const fn octets(&self) -> [u8; 16] {
         self.inner
     }
 
@@ -156,54 +184,102 @@ impl Ipv6Addr {
         }
     }
 
+    /// Returns an eight element 16-bit array representation of the address.
+    ///
+    /// This is taken from the core `Ipv6Addr` implementation.
+    #[inline]
+    pub const fn segments(&self) -> [u16; 8] {
+        // All elements in `self.octets` must be big endian.
+        // SAFETY: `[u8; 16]` is always safe to transmute to `[u16; 8]`.
+        let [a, b, c, d, e, f, g, h] = unsafe {
+            core::mem::transmute::<[u8; 16], [u16; 8]>(self.octets())
+        };
+        // We want native endian u16
+        [
+            u16::from_be(a),
+            u16::from_be(b),
+            u16::from_be(c),
+            u16::from_be(d),
+            u16::from_be(e),
+            u16::from_be(f),
+            u16::from_be(g),
+            u16::from_be(h),
+        ]
+    }
+
+    /// Private function to convert to a `core::net::Ipv6Addr`
+    /// in a const context as `From` implementations are not
+    /// yet allowed in const contexts.
+    #[inline]
+    const fn into_core(self) -> core::net::Ipv6Addr {
+        let segments = self.segments();
+        core::net::Ipv6Addr::new(
+            segments[0],
+            segments[1],
+            segments[2],
+            segments[3],
+            segments[4],
+            segments[5],
+            segments[6],
+            segments[7],
+        )
+    }
+
     /// Returns true if the address is a multicast address.
     #[inline]
-    pub fn is_multicast(&self) -> bool {
-        self.inner[0] == 0xff
+    pub const fn is_multicast(&self) -> bool {
+        self.into_core().is_multicast()
     }
 
     /// Returns true if the address is a loopback address.
     #[inline]
-    pub fn is_loopback(&self) -> bool {
-        *self == Self::LOCALHOST
+    pub const fn is_loopback(&self) -> bool {
+        self.into_core().is_loopback()
     }
 
     /// Returns true if the address is a unicast address.
     #[inline]
-    pub fn is_unicast(&self) -> bool {
+    pub const fn is_unicast(&self) -> bool {
         !self.is_multicast()
     }
 
-    /// Returns true if the address is a link-local address.
+    /// Returns true if the address is a unicast link-local address.
+    ///
+    /// Note: The underlying `core::net` version is not yet stable as
+    /// of Rust 1.84.1.
     #[inline]
-    pub fn is_unicast_link_local(&self) -> bool {
-        self.inner[0] == 0xfe && (self.inner[1] & 0xc0) == 0x80
+    pub const fn is_unicast_link_local(&self) -> bool {
+        (self.segments()[0] & 0xffc0) == 0xfe80
     }
 
     /// Returns true if the address is a unique local address.
+    ///
+    /// Note: The underlying `core::net` version is not yet stable as
+    /// of Rust 1.84.1.
     #[inline]
-    pub fn is_unique_local(&self) -> bool {
-        (self.inner[0] & 0xfe) == 0xfc
+    pub const fn is_unique_local(&self) -> bool {
+        (self.segments()[0] & 0xfe00) == 0xfc00
     }
 
     /// Returns true if the address is a global unicast address.
     #[inline]
-    pub fn is_unicast_global(&self) -> bool {
+    pub const fn is_unicast_global(&self) -> bool {
         !self.is_multicast()
             && !self.is_unicast_link_local()
             && !self.is_unique_local()
     }
 
     /// Returns true if the address is a documentation address.
+    ///
+    /// Defined in [IETF RFC 3849].
+    ///
+    /// Note: The underlying `core::net` version is not yet stable as
+    /// of Rust 1.84.1.
+    ///
+    /// [IETF RFC 3849]: https://tools.ietf.org/html/rfc3849
     #[inline]
-    pub fn is_documentation(&self) -> bool {
-        self.inner[0] == 0x20 && self.inner[1] == 0x01 && self.inner[2] == 0x0d
-    }
-
-    /// Returns true if the address is a reserved address.
-    #[inline]
-    pub fn is_reserved(&self) -> bool {
-        (self.inner[0] & 0xe0) == 0xe0
+    pub const fn is_documentation(&self) -> bool {
+        (self.segments()[0] == 0x2001) && (self.segments()[1] == 0xdb8)
     }
 }
 
@@ -229,12 +305,12 @@ mod test {
     fn ipv4() {
         let addr = Ipv4Addr::from_octets([192, 168, 1, 1]);
         assert!(addr.is_private());
-        assert!(!addr.is_unicast_global());
+        assert!(!addr.is_global());
         assert!(!addr.is_multicast());
         assert!(!addr.is_broadcast());
         assert!(!addr.is_loopback());
         assert!(addr.is_unicast());
-        assert!(!addr.is_unicast_link_local());
+        assert!(!addr.is_link_local());
         assert!(!addr.is_documentation());
         assert!(!addr.is_reserved());
     }
@@ -243,26 +319,26 @@ mod test {
     fn ipv4_broadcast() {
         let addr = Ipv4Addr::from_octets([255, 255, 255, 255]);
         assert!(!addr.is_private());
-        assert!(!addr.is_unicast_global());
+        assert!(!addr.is_global());
         assert!(!addr.is_multicast());
         assert!(addr.is_broadcast());
         assert!(!addr.is_unicast());
         assert!(!addr.is_loopback());
-        assert!(!addr.is_unicast_link_local());
+        assert!(!addr.is_link_local());
         assert!(!addr.is_documentation());
-        assert!(addr.is_reserved());
+        assert!(!addr.is_reserved());
     }
 
     #[test]
     fn ipv4_loopback() {
         let addr = Ipv4Addr::from_octets([127, 0, 0, 1]);
         assert!(!addr.is_private());
-        assert!(!addr.is_unicast_global());
+        assert!(!addr.is_global());
         assert!(!addr.is_multicast());
         assert!(!addr.is_broadcast());
         assert!(addr.is_loopback());
         assert!(addr.is_unicast());
-        assert!(!addr.is_unicast_link_local());
+        assert!(!addr.is_link_local());
         assert!(!addr.is_documentation());
         assert!(!addr.is_reserved());
     }
@@ -277,7 +353,6 @@ mod test {
         assert!(!addr.is_unicast_link_local());
         assert!(!addr.is_unique_local());
         assert!(addr.is_documentation());
-        assert!(!addr.is_reserved());
         assert!(addr.is_unicast_global());
     }
 
@@ -291,7 +366,6 @@ mod test {
         assert!(addr.is_unicast_link_local());
         assert!(!addr.is_unique_local());
         assert!(!addr.is_documentation());
-        assert!(addr.is_reserved());
         assert!(!addr.is_unicast_global());
     }
 }
