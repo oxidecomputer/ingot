@@ -70,13 +70,17 @@ where
     }
 }
 
-impl<D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
-    NextLayerChoice<D2> for FieldRef<'_, T, V>
+impl<T: HasView<V, ViewType = Q> + NextLayerChoice, V, Q> NextLayerChoice
+    for FieldRef<'_, T, V>
 where
-    D2: Copy + Eq,
-    HeaderOf<T, V>: NextLayer<Denom = T::Denom> + NextLayerChoice<D2>,
+    HeaderOf<T, V>:
+        NextLayer<Denom = T::Denom> + NextLayerChoice<Hint = T::Hint>,
 {
-    fn next_layer_choice(&self, hint: Option<D2>) -> Option<Self::Denom> {
+    type Hint = T::Hint;
+    fn next_layer_choice(
+        &self,
+        hint: Option<Self::Hint>,
+    ) -> Option<Self::Denom> {
         match self {
             FieldRef::Repr(r) => r.next_layer_choice(hint),
             FieldRef::Raw(r) => r.next_layer_choice(hint),
@@ -150,13 +154,17 @@ where
     }
 }
 
-impl<D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
-    NextLayerChoice<D2> for FieldMut<'_, T, V>
+impl<T: HasView<V, ViewType = Q> + NextLayerChoice, V, Q> NextLayerChoice
+    for FieldMut<'_, T, V>
 where
-    D2: Copy + Eq,
-    HeaderOf<T, V>: NextLayer<Denom = T::Denom> + NextLayerChoice<D2>,
+    HeaderOf<T, V>:
+        NextLayer<Denom = T::Denom> + NextLayerChoice<Hint = T::Hint>,
 {
-    fn next_layer_choice(&self, hint: Option<D2>) -> Option<Self::Denom> {
+    type Hint = T::Hint;
+    fn next_layer_choice(
+        &self,
+        hint: Option<Self::Hint>,
+    ) -> Option<Self::Denom> {
         match self {
             FieldMut::Repr(r) => r.next_layer_choice(hint),
             FieldMut::Raw(r) => r.next_layer_choice(hint),

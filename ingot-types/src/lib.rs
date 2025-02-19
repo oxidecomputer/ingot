@@ -141,14 +141,12 @@ pub trait HeaderParse<B: SplitByteSlice>: NextLayer + Sized {
 
 /// A header/packet type which may require a hint to be parsed from
 /// any buffer `B`.
-pub trait ParseChoice<B: SplitByteSlice, Denom: Copy + Eq>:
-    Sized + NextLayer
-{
+pub trait ParseChoice<B: SplitByteSlice>: Sized + NextLayerChoice {
     /// Parse a view-type from a given buffer, using an optional
-    /// hint of type `Denom`.
+    /// hint of type.
     fn parse_choice(
         data: B,
-        hint: Option<Denom>,
+        hint: Option<Self::Hint>,
     ) -> ParseResult<Success<Self, B>>;
 }
 
@@ -228,12 +226,15 @@ pub trait NextLayer {
 
 /// Headers which can be queried for a hint, but require an input hint
 /// to parse this information.
-pub trait NextLayerChoice<Denom: Copy + Eq>: NextLayer {
+pub trait NextLayerChoice: NextLayer {
+    /// Associated type used for the input hint
+    type Hint: Copy + Eq;
+
     /// Retrieve this header's next-layer hint, if possible.
-    #[inline]
-    fn next_layer_choice(&self, _hint: Option<Denom>) -> Option<Self::Denom> {
-        self.next_layer()
-    }
+    fn next_layer_choice(
+        &self,
+        _hint: Option<Self::Hint>,
+    ) -> Option<Self::Denom>;
 }
 
 /// Action to be taken as part of an `#[ingot(control)]` block
