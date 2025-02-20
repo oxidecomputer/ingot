@@ -291,6 +291,14 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             }
         }
 
+        impl<V: ::ingot::types::SplitByteSlice> ::ingot::types::ToOwnedPacket for #validated_ident<V> {
+            type Target = #repr_head;
+            #[inline]
+            fn to_owned(&self, _hint: ::core::option::Option<Self::Hint>) -> ::ingot::types::ParseResult<Self::Target> {
+                self.try_into()
+            }
+        }
+
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::HeaderLen for #ident<V> {
             const MINIMUM_LENGTH: usize = #minimum_len;
 
