@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    choice,
     ethernet::{Ethernet, EthernetMut, EthernetRef, Ethertype, ValidEthernet},
     geneve::{
         Geneve, GeneveFlags, GeneveOpt, GeneveOptionType, GeneveRef,
@@ -592,4 +593,72 @@ fn nested_packet_size() {
         next_packet: InnerPacket { boo: 0, varying: vec![] },
     };
     assert_eq!(p.packet_length(), 2);
+}
+
+ingot::types::zerocopy_type!(pub struct ChoiceType(pub u8));
+
+impl ChoiceType {
+    pub const A: Self = Self(0x11);
+    pub const B: Self = Self(0x12);
+}
+
+#[derive(Debug, Eq, PartialEq, Ingot)]
+pub struct ChoicePacket {
+    #[ingot(zerocopy, next_layer)]
+    pub ty: ChoiceType,
+    #[ingot(subparse(on_next_layer))]
+    pub data: ChoiceBodyRepr,
+}
+
+#[choice(on = "ChoiceType")]
+enum ChoiceBody {
+    ChoiceBodyA = ChoiceType::A,
+    ChoiceBodyB = ChoiceType::B,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ingot)]
+pub struct ChoiceBodyA {
+    pub foobar: u8,
+    #[ingot(zerocopy, next_layer)]
+    pub ty: ChoiceType,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ingot)]
+pub struct ChoiceBodyB {
+    pub boobaz: u32le,
+    #[ingot(zerocopy, next_layer)]
+    pub ty: ChoiceType,
+}
+
+#[test]
+fn choice_packet() {
+    let p = ChoicePacket {
+        ty: ChoiceType::A,
+        data: ChoiceBodyRepr::ChoiceBodyA(ChoiceBodyA {
+            foobar: 18,
+            ty: ChoiceType::B,
+        }),
+    };
+    let data = p.emit_vec();
+    assert_eq!(data, vec![0x11, 18, 0x12]);
+
+    let (p_ref, next, _) = ValidChoicePacket::parse(data.as_slice()).unwrap();
+    assert_eq!(next, Some(ChoiceType::B));
+    let p2 = p_ref.to_owned(None).unwrap();
+    assert_eq!(p, p2);
+
+    let p = ChoicePacket {
+        ty: ChoiceType::B,
+        data: ChoiceBodyRepr::ChoiceBodyB(ChoiceBodyB {
+            boobaz: 0x12345678,
+            ty: ChoiceType::A,
+        }),
+    };
+    let data = p.emit_vec();
+    assert_eq!(data, vec![0x12, 0x78, 0x56, 0x34, 0x12, 0x11]);
+
+    let (p_ref, next, _) = ValidChoicePacket::parse(data.as_slice()).unwrap();
+    assert_eq!(next, Some(ChoiceType::A));
+    let p2 = p_ref.to_owned(None).unwrap();
+    assert_eq!(p, p2);
 }
