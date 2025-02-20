@@ -470,6 +470,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #ident<V> {
             type Denom = ();
+            type Hint = ();
         }
 
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #ident<V> {
@@ -482,6 +483,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         impl<V: ::ingot::types::ByteSlice> ::ingot::types::NextLayer for #validated_ident<V> {
             type Denom = ();
+            type Hint = ();
         }
 
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {

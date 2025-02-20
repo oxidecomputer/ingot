@@ -58,25 +58,11 @@ impl<B: ByteSlice> FieldRef<'_, Vec<u8>, B> {
 impl<T: HasView<V, ViewType = Q> + NextLayer, V, Q> NextLayer
     for FieldRef<'_, T, V>
 where
-    HeaderOf<T, V>: NextLayer<Denom = T::Denom>,
+    HeaderOf<T, V>: NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Denom = T::Denom;
-
-    fn next_layer(&self) -> Option<Self::Denom> {
-        match self {
-            FieldRef::Repr(r) => r.next_layer(),
-            FieldRef::Raw(r) => r.next_layer(),
-        }
-    }
-}
-
-impl<T: HasView<V, ViewType = Q> + NextLayerChoice, V, Q> NextLayerChoice
-    for FieldRef<'_, T, V>
-where
-    HeaderOf<T, V>:
-        NextLayer<Denom = T::Denom> + NextLayerChoice<Hint = T::Hint>,
-{
     type Hint = T::Hint;
+
     fn next_layer_choice(
         &self,
         hint: Option<Self::Hint>,
@@ -142,25 +128,11 @@ impl<T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>> AsMut<[u8]>
 impl<T: HasView<V, ViewType = Q> + NextLayer, V, Q> NextLayer
     for FieldMut<'_, T, V>
 where
-    HeaderOf<T, V>: NextLayer<Denom = T::Denom>,
+    HeaderOf<T, V>: NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Denom = T::Denom;
-
-    fn next_layer(&self) -> Option<Self::Denom> {
-        match self {
-            FieldMut::Repr(r) => r.next_layer(),
-            FieldMut::Raw(r) => r.next_layer(),
-        }
-    }
-}
-
-impl<T: HasView<V, ViewType = Q> + NextLayerChoice, V, Q> NextLayerChoice
-    for FieldMut<'_, T, V>
-where
-    HeaderOf<T, V>:
-        NextLayer<Denom = T::Denom> + NextLayerChoice<Hint = T::Hint>,
-{
     type Hint = T::Hint;
+
     fn next_layer_choice(
         &self,
         hint: Option<Self::Hint>,

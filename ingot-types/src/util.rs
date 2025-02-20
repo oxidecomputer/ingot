@@ -100,20 +100,14 @@ impl<T: Emit> Emit for Repeated<T> {
 
 impl<T: NextLayer> NextLayer for Repeated<T> {
     type Denom = T::Denom;
+    type Hint = T::Hint;
 
-    fn next_layer(&self) -> Option<Self::Denom> {
-        // Choose the hint attached to the last item contained herein.
-        self.inner.last().and_then(|v| v.next_layer())
-    }
-}
-
-impl<T: NextLayer> NextLayerChoice for Repeated<T> {
-    type Hint = T::Denom;
     fn next_layer_choice(
         &self,
         _hint: Option<Self::Hint>,
     ) -> Option<Self::Denom> {
-        self.next_layer()
+        // Choose the hint attached to the last item contained herein.
+        self.inner.last().and_then(|v| v.next_layer())
     }
 }
 
@@ -189,9 +183,7 @@ where
 // on arbitrary T with a deref).
 impl<
         B: SplitByteSlice,
-        T: HasView<B>
-            + NextLayer
-            + NextLayerChoice<Hint = <T as NextLayer>::Denom>,
+        T: HasView<B> + NextLayer<Hint = <T as NextLayer>::Denom>,
     > ParseChoice<B> for RepeatedView<B, T>
 where
     T: for<'a> HasView<&'a [u8]>,
@@ -238,16 +230,13 @@ where
 // We do not go via B in practice.
 impl<
         B: SplitByteSlice,
-        T: NextLayer
-            + NextLayerChoice<Hint = <T as NextLayer>::Denom>
-            + HasView<B>,
+        T: NextLayer<Hint = <T as NextLayer>::Denom> + HasView<B>,
         E,
     > ToOwnedPacket for RepeatedView<B, T>
 where
     T: for<'a> HasView<&'a [u8]>,
-    for<'a> <T as HasView<&'a [u8]>>::ViewType: ParseChoice<&'a [u8]>
-        + NextLayer<Denom = T::Denom>
-        + NextLayerChoice<Hint = T::Hint>,
+    for<'a> <T as HasView<&'a [u8]>>::ViewType:
+        ParseChoice<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
     for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType: TryInto<T, Error = E>,
     // Bound needed to account for `Infallible` errors via pure `From`/`Into`.
     ParseError: From<E>,
@@ -271,10 +260,8 @@ where
     }
 }
 
-impl<
-        B: ByteSlice,
-        T: for<'a> HasView<&'a [u8]> + HasView<B> + NextLayerChoice,
-    > RepeatedView<B, T>
+impl<B: ByteSlice, T: for<'a> HasView<&'a [u8]> + HasView<B> + NextLayer>
+    RepeatedView<B, T>
 {
     /// Iterates over all sub-parsed elements.
     ///
@@ -287,21 +274,16 @@ impl<
 /// An iterator over all parsable values contained within a [`RepeatedView`].
 ///
 /// Offsets are not stored, so individual elements are re-parsed one by one.
-pub struct RepeatedViewIter<'a, T: HasView<&'a [u8]> + NextLayerChoice> {
+pub struct RepeatedViewIter<'a, T: HasView<&'a [u8]> + NextLayer> {
     slice: &'a [u8],
     hint: Option<T::Hint>,
 }
 
-impl<
-        'a,
-        T: HasView<&'a [u8]>
-            + NextLayer
-            + NextLayerChoice<Hint = <T as NextLayer>::Denom>,
-    > Iterator for RepeatedViewIter<'a, T>
+impl<'a, T: HasView<&'a [u8]> + NextLayer<Hint = <T as NextLayer>::Denom>>
+    Iterator for RepeatedViewIter<'a, T>
 where
-    <T as HasView<&'a [u8]>>::ViewType: ParseChoice<&'a [u8]>
-        + NextLayer<Denom = T::Denom>
-        + NextLayerChoice<Hint = T::Hint>,
+    <T as HasView<&'a [u8]>>::ViewType:
+        ParseChoice<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Item = ParseResult<<T as HasView<&'a [u8]>>::ViewType>;
 
@@ -329,35 +311,19 @@ impl<
         B: ByteSlice,
         T: for<'a> HasView<&'a [u8]>
             + HasView<B>
-            + NextLayer
-            + NextLayerChoice<Hint = <T as NextLayer>::Denom>,
+            + NextLayer<Hint = <T as NextLayer>::Denom>,
     > NextLayer for RepeatedView<B, T>
 where
-    for<'a> <T as HasView<&'a [u8]>>::ViewType: ParseChoice<&'a [u8]>
-        + NextLayer<Denom = T::Denom>
-        + NextLayerChoice<Hint = T::Hint>,
+    for<'a> <T as HasView<&'a [u8]>>::ViewType:
+        ParseChoice<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Denom = T::Denom;
-
-    fn next_layer(&self) -> Option<Self::Denom> {
-        self.next_layer_choice(None)
-    }
-}
-
-impl<
-        B: ByteSlice,
-        T: for<'a> HasView<&'a [u8]>
-            + HasView<B>
-            + NextLayerChoice<Hint = <T as NextLayer>::Denom>,
-    > NextLayerChoice for RepeatedView<B, T>
-where
-    for<'a> <T as HasView<&'a [u8]>>::ViewType: ParseChoice<&'a [u8]>
-        + NextLayer<Denom = T::Denom>
-        + NextLayerChoice<Hint = T::Hint>,
-{
     type Hint = T::Hint;
-    fn next_layer_choice(&self, hint: Option<T::Hint>) -> Option<Self::Denom> {
-        // This applies te same trick: parse through self as
+
+    fn next_layer_choice(
+        &self,
+        hint: Option<Self::Hint>,
+    ) -> Option<Self::Denom> {
         self.iter(hint).last().and_then(|v| v.ok()).and_then(|v| v.next_layer())
     }
 }

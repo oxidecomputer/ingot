@@ -854,7 +854,6 @@ impl StructParseDeriveCtx {
                 (
                     quote! {<#ref_ty as ::ingot::types::NextLayer>::Denom},
                     quote! {
-                        use ::ingot::types::NextLayerChoice;
                         use ::ingot::types::HeaderLen;
                         let h0 = ::core::option::Option::Some(self.#field_ident());
                         if self.#ref_ident().packet_length() == 0 {
@@ -888,20 +887,11 @@ impl StructParseDeriveCtx {
             quote! {
                 impl<#g> ::ingot::types::NextLayer for #ident<#g> {
                     type Denom = #denom;
-
-                    #[inline]
-                    fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
-                        #owned_body
-                    }
-                }
-
-                impl<#g> ::ingot::types::NextLayerChoice for #ident<#g> {
                     type Hint = ();
 
                     #[inline]
                     fn next_layer_choice(&self, _hint: ::core::option::Option<Self::Hint>) -> ::core::option::Option<Self::Denom> {
-                        use ::ingot::types::NextLayer;
-                        self.next_layer()
+                        #owned_body
                     }
                 }
             }
@@ -909,20 +899,11 @@ impl StructParseDeriveCtx {
             quote! {
                 impl ::ingot::types::NextLayer for #ident {
                     type Denom = #denom;
-
-                    #[inline]
-                    fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
-                        #owned_body
-                    }
-                }
-
-                impl ::ingot::types::NextLayerChoice for #ident {
                     type Hint = ();
 
                     #[inline]
                     fn next_layer_choice(&self, _hint: ::core::option::Option<Self::Hint>) -> ::core::option::Option<Self::Denom> {
-                        use ::ingot::types::NextLayer;
-                        self.next_layer()
+                        #owned_body
                     }
                 }
             }
@@ -931,20 +912,11 @@ impl StructParseDeriveCtx {
         quote! {
             impl<V: ::zerocopy::ByteSlice> ::ingot::types::NextLayer for #validated_ident<V> {
                 type Denom = #denom;
-
-                #[inline]
-                fn next_layer(&self) -> ::core::option::Option<Self::Denom> {
-                    #ref_body
-                }
-            }
-
-            impl<V: ::zerocopy::ByteSlice> ::ingot::types::NextLayerChoice for #validated_ident<V> {
                 type Hint = ();
 
                 #[inline]
                 fn next_layer_choice(&self, _hint: ::core::option::Option<Self::Hint>) -> ::core::option::Option<Self::Denom> {
-                    use ::ingot::types::NextLayer;
-                    self.next_layer()
+                    #ref_body
                 }
             }
 
