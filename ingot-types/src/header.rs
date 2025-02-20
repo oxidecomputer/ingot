@@ -209,13 +209,17 @@ where
 }
 
 #[cfg(feature = "alloc")]
-impl<D: Copy + Eq, O: NextLayerChoice<D> + NextLayer, B> NextLayerChoice<D>
-    for BoxedHeader<O, B>
+impl<O: NextLayerChoice + NextLayer, B> NextLayerChoice for BoxedHeader<O, B>
 where
-    B: NextLayerChoice<D> + NextLayer<Denom = O::Denom>,
+    B: NextLayerChoice<Hint = O::Hint> + NextLayer<Denom = O::Denom>,
 {
+    type Hint = O::Hint;
+
     #[inline]
-    fn next_layer_choice(&self, hint: Option<D>) -> Option<Self::Denom> {
+    fn next_layer_choice(
+        &self,
+        hint: Option<Self::Hint>,
+    ) -> Option<Self::Denom> {
         match self {
             Self::Repr(v) => v.next_layer_choice(hint),
             Self::Raw(v) => v.next_layer_choice(hint),
