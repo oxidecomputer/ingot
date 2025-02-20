@@ -217,7 +217,7 @@ pub type Success<T, B> = (T, Option<<T as NextLayer>::Denom>, B);
 /// next layer in a packet.
 pub trait NextLayer {
     /// The type of this header's next-layer hint.
-    type Denom: Copy;
+    type Denom: Copy + Eq;
 
     /// Retrieve this header's next-layer hint, if possible.
     #[inline]

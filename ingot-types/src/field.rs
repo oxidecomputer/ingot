@@ -55,13 +55,12 @@ impl<B: ByteSlice> FieldRef<'_, Vec<u8>, B> {
     }
 }
 
-impl<D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
+impl<T: HasView<V, ViewType = Q> + NextLayer, V, Q> NextLayer
     for FieldRef<'_, T, V>
 where
-    D: Copy + Eq,
-    HeaderOf<T, V>: NextLayer<Denom = D>,
+    HeaderOf<T, V>: NextLayer<Denom = T::Denom>,
 {
-    type Denom = D;
+    type Denom = T::Denom;
 
     fn next_layer(&self) -> Option<Self::Denom> {
         match self {
@@ -71,13 +70,11 @@ where
     }
 }
 
-impl<D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
+impl<D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
     NextLayerChoice<D2> for FieldRef<'_, T, V>
 where
-    D: Copy + Eq,
     D2: Copy + Eq,
-    HeaderOf<T, V>: NextLayer<Denom = D> + NextLayerChoice<D2>,
-    T: NextLayer<Denom = D>,
+    HeaderOf<T, V>: NextLayer<Denom = T::Denom> + NextLayerChoice<D2>,
 {
     fn next_layer_choice(&self, hint: Option<D2>) -> Option<Self::Denom> {
         match self {
@@ -138,13 +135,12 @@ impl<T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>> AsMut<[u8]>
     }
 }
 
-impl<D, T: HasView<V, ViewType = Q> + NextLayer<Denom = D>, V, Q> NextLayer
+impl<T: HasView<V, ViewType = Q> + NextLayer, V, Q> NextLayer
     for FieldMut<'_, T, V>
 where
-    D: Copy + Eq,
-    HeaderOf<T, V>: NextLayer<Denom = D>,
+    HeaderOf<T, V>: NextLayer<Denom = T::Denom>,
 {
-    type Denom = D;
+    type Denom = T::Denom;
 
     fn next_layer(&self) -> Option<Self::Denom> {
         match self {
@@ -154,13 +150,11 @@ where
     }
 }
 
-impl<D, D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
+impl<D2, T: HasView<V, ViewType = Q> + NextLayerChoice<D2>, V, Q>
     NextLayerChoice<D2> for FieldMut<'_, T, V>
 where
-    D: Copy + Eq,
     D2: Copy + Eq,
-    HeaderOf<T, V>: NextLayer<Denom = D> + NextLayerChoice<D2>,
-    T: NextLayer<Denom = D>,
+    HeaderOf<T, V>: NextLayer<Denom = T::Denom> + NextLayerChoice<D2>,
 {
     fn next_layer_choice(&self, hint: Option<D2>) -> Option<Self::Denom> {
         match self {
