@@ -184,13 +184,11 @@ where
 impl<
         B: SplitByteSlice,
         T: HasView<B> + NextLayer<Hint = <T as NextLayer>::Denom>,
-    > ParseChoice<B> for RepeatedView<B, T>
+    > HeaderParse<B> for RepeatedView<B, T>
 where
     T: for<'a> HasView<&'a [u8]>,
-    <T as HasView<B>>::ViewType:
-        ParseChoice<B, Hint = T::Hint> + NextLayer<Denom = T::Denom>,
     for<'a> <T as HasView<&'a [u8]>>::ViewType:
-        ParseChoice<&'a [u8], Hint = T::Hint> + NextLayer<Denom = T::Denom>,
+        HeaderParse<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     #[inline]
     fn parse_choice(
@@ -236,7 +234,7 @@ impl<
 where
     T: for<'a> HasView<&'a [u8]>,
     for<'a> <T as HasView<&'a [u8]>>::ViewType:
-        ParseChoice<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
+        HeaderParse<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
     for<'a, 'b> &'b <T as HasView<&'a [u8]>>::ViewType: TryInto<T, Error = E>,
     // Bound needed to account for `Infallible` errors via pure `From`/`Into`.
     ParseError: From<E>,
@@ -283,7 +281,7 @@ impl<'a, T: HasView<&'a [u8]> + NextLayer<Hint = <T as NextLayer>::Denom>>
     Iterator for RepeatedViewIter<'a, T>
 where
     <T as HasView<&'a [u8]>>::ViewType:
-        ParseChoice<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
+        HeaderParse<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Item = ParseResult<<T as HasView<&'a [u8]>>::ViewType>;
 
@@ -315,7 +313,7 @@ impl<
     > NextLayer for RepeatedView<B, T>
 where
     for<'a> <T as HasView<&'a [u8]>>::ViewType:
-        ParseChoice<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
+        HeaderParse<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Denom = T::Denom;
     type Hint = T::Hint;

@@ -450,7 +450,6 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
     let imports = quote! {
         use ::ingot::types::HasView;
         use ::ingot::types::NextLayer;
-        use ::ingot::types::ParseChoice;
         use ::ingot::types::HeaderParse;
     };
 
@@ -475,7 +474,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #ident<V> {
             #[inline]
-            fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+            fn parse_choice(from: V, _hint: ::core::option::Option<Self::Hint>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                 Self::parse_slice(from)
                     .map_err(|e| e.into())
             }
@@ -488,7 +487,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
 
         impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
             #[inline]
-            fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+            fn parse_choice(from: V, _hint: ::core::option::Option<Self::Hint>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                 Self::parse_slice(from)
                     .map_err(|e| e.into())
             }

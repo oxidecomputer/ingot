@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use ingot::{ethernet::Ethertype, types::ParseChoice};
+use ingot::{ethernet::Ethertype, types::HeaderParse};
 use ingot_examples::choices::ValidL3;
 use std::hint::black_box;
 

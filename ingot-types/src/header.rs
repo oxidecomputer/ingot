@@ -186,8 +186,11 @@ where
     B::ReprType: NextLayer<Denom = B::Denom, Hint = B::Hint>,
 {
     #[inline]
-    fn parse(from: V) -> ParseResult<Success<Self, V>> {
-        <B as HeaderParse<V>>::parse(from)
+    fn parse_choice(
+        from: V,
+        hint: Option<Self::Hint>,
+    ) -> ParseResult<Success<Self, V>> {
+        <B as HeaderParse<V>>::parse_choice(from, hint)
             .map(|(val, hint, remainder)| (val.into(), hint, remainder))
     }
 }
@@ -329,8 +332,11 @@ where
     B::ReprType: NextLayer<Denom = B::Denom, Hint = B::Hint>,
 {
     #[inline]
-    fn parse(from: V) -> ParseResult<Success<Self, V>> {
-        <B as HeaderParse<V>>::parse(from)
+    fn parse_choice(
+        from: V,
+        hint: Option<Self::Hint>,
+    ) -> ParseResult<Success<Self, V>> {
+        <B as HeaderParse<V>>::parse_choice(from, hint)
             .map(|(val, hint, remainder)| (val.into(), hint, remainder))
     }
 }

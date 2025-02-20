@@ -228,7 +228,7 @@ pub fn attr_impl(attr: TokenStream, item: syn::ItemEnum) -> TokenStream {
             #( #repr_vars ),*
         }
 
-        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::ParseChoice<V> for #validated_ident<V> {
+        impl<'a, V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a> ::ingot::types::HeaderParse<V> for #validated_ident<V> {
             #[inline]
             fn parse_choice(data: V, hint: ::core::option::Option<Self::Hint>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                 use ::ingot::types::HeaderParse;

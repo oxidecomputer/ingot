@@ -162,7 +162,7 @@ pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///
 /// Ingot will define three `enum`s from this definition: `L4` (owned/borrowed),
 /// `ValidL4` (borrowed), and `L4Repr` (owned).
-/// All implement `Emit`, while `ValidL4`will implement `ParseChoice`.
+/// All implement `Emit`, while `ValidL4`will implement `HeaderParse`.
 ///
 /// ## Top-level attributes
 /// * `#[choice(on = <type>)]` – The input type of hint used for selection

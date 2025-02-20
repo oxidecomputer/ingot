@@ -136,14 +136,10 @@ impl<T: HasRepr> HasRepr for Option<T> {
 /// buffer `B`.
 pub trait HeaderParse<B: SplitByteSlice>: NextLayer + Sized {
     /// Parse a view-type from a given buffer.
-    fn parse(from: B) -> ParseResult<Success<Self, B>>;
-}
-
-/// A header/packet type which may require a hint to be parsed from
-/// any buffer `B`.
-pub trait ParseChoice<B: SplitByteSlice>: Sized + NextLayer {
-    /// Parse a view-type from a given buffer, using an optional
-    /// hint of type.
+    fn parse(from: B) -> ParseResult<Success<Self, B>> {
+        Self::parse_choice(from, None)
+    }
+    /// Parse a view-type from a given buffer, using a hint
     fn parse_choice(
         data: B,
         hint: Option<Self::Hint>,

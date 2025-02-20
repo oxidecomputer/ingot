@@ -1938,11 +1938,10 @@ impl StructParseDeriveCtx {
                 V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a
             > ::ingot::types::HeaderParse<V> for #validated_ident<V> {
                 #[inline]
-                fn parse(from: V) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
+                fn parse_choice(from: V, _hint: ::core::option::Option<Self::Hint>) -> ::ingot::types::ParseResult<::ingot::types::Success<Self, V>> {
                     use ::ingot::types::HeaderLen;
                     use ::ingot::types::HasView;
                     use ::ingot::types::NextLayer;
-                    use ::ingot::types::ParseChoice;
                     use ::ingot::types::HeaderParse;
 
                     let mut hint: ::core::option::Option<<Self as NextLayer>::Denom> = None;
@@ -1956,20 +1955,6 @@ impl StructParseDeriveCtx {
                     ::core::result::Result::Ok(
                         (val, hint, from)
                     )
-                }
-            }
-
-            impl<
-                'a,
-                V: ::ingot::types::SplitByteSlice + ::ingot::types::IntoBufPointer<'a> + 'a,
-            > ::ingot::types::ParseChoice<V> for #validated_ident<V>
-            {
-                #[inline]
-                fn parse_choice(from: V, hint: ::core::option::Option<Self::Hint>) ->
-                    ::ingot::types::ParseResult<::ingot::types::Success<Self, V>>
-                {
-                    use ::ingot::types::HeaderParse;
-                    Self::parse(from)
                 }
             }
         }
