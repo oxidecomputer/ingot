@@ -13,7 +13,7 @@ pub enum FieldRef<'a, T: HasView<V>, V> {
     Repr(&'a T),
     /// Reference to a field in a borrowed header, which may be owned
     /// or borrowed depdendent on past modifications.
-    Raw(&'a HeaderOf<T, V>),
+    Raw(&'a <T as HasView<V>>::ViewType),
 }
 
 impl<Z, T: HasView<V, ViewType = Q> + AsRef<[Z]>, V, Q: AsRef<[Z]>> AsRef<[Z]>
@@ -23,8 +23,7 @@ impl<Z, T: HasView<V, ViewType = Q> + AsRef<[Z]>, V, Q: AsRef<[Z]>> AsRef<[Z]>
     fn as_ref(&self) -> &[Z] {
         match self {
             FieldRef::Repr(t) => t.as_ref(),
-            FieldRef::Raw(Header::Repr(a)) => a.deref().as_ref(),
-            FieldRef::Raw(Header::Raw(a)) => a.as_ref(),
+            FieldRef::Raw(a) => a.as_ref(),
         }
     }
 }
@@ -49,8 +48,7 @@ impl<B: ByteSlice> FieldRef<'_, Vec<u8>, B> {
     pub fn to_owned(&self) -> Vec<u8> {
         match self {
             FieldRef::Repr(a) => a.to_vec(),
-            FieldRef::Raw(Header::Repr(a)) => a.to_vec(),
-            FieldRef::Raw(Header::Raw(a)) => a.to_vec(),
+            FieldRef::Raw(a) => a.to_vec(),
         }
     }
 }
@@ -58,7 +56,7 @@ impl<B: ByteSlice> FieldRef<'_, Vec<u8>, B> {
 impl<T: HasView<V, ViewType = Q> + NextLayer, V, Q> NextLayer
     for FieldRef<'_, T, V>
 where
-    HeaderOf<T, V>: NextLayer<Denom = T::Denom, Hint = T::Hint>,
+    <T as HasView<V>>::ViewType: NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Denom = T::Denom;
     type Hint = T::Hint;
@@ -140,6 +138,30 @@ where
         match self {
             FieldMut::Repr(r) => r.next_layer_choice(hint),
             FieldMut::Raw(r) => r.next_layer_choice(hint),
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'a, T: HasView<V>, V> From<&'a BoxedHeader<T, <T as HasView<V>>::ViewType>>
+    for FieldRef<'a, T, V>
+{
+    fn from(value: &'a BoxedHeader<T, <T as HasView<V>>::ViewType>) -> Self {
+        match value {
+            BoxedHeader::Raw(r) => Self::Raw(r),
+            BoxedHeader::Repr(r) => Self::Repr(r),
+        }
+    }
+}
+
+impl<'a, T: HasView<V>, V>
+    From<&'a InlineHeader<T, <T as HasView<V>>::ViewType>>
+    for FieldRef<'a, T, V>
+{
+    fn from(value: &'a InlineHeader<T, <T as HasView<V>>::ViewType>) -> Self {
+        match value {
+            InlineHeader::Raw(r) => Self::Raw(r),
+            InlineHeader::Repr(r) => Self::Repr(r),
         }
     }
 }

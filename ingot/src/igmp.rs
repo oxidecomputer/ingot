@@ -195,8 +195,7 @@ mod test {
 
         match igmp.source_addrs_ref() {
             ingot_types::FieldRef::Repr(_a) => todo!("owned"),
-            ingot_types::FieldRef::Raw(Header::Repr(_a)) => todo!("also owned"),
-            ingot_types::FieldRef::Raw(Header::Raw(ips)) => {
+            ingot_types::FieldRef::Raw(ips) => {
                 assert_eq!(ips.len(), 5);
                 assert_eq!(ips[0], Ipv4Addr::from_octets([2, 2, 2, 2]));
                 assert_eq!(ips[1], Ipv4Addr::from_octets([2, 2, 2, 3]));
