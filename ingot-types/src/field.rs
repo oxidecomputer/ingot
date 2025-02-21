@@ -79,7 +79,7 @@ pub enum FieldMut<'a, T: HasView<V>, V> {
     Repr(&'a mut T),
     /// Mutable reference to a field in a borrowed header, which may
     /// be owned or borrowed depdendent on past modifications.
-    Raw(&'a mut HeaderOf<T, V>),
+    Raw(&'a mut <T as HasView<V>>::ViewType),
 }
 
 impl<T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>> AsRef<[u8]>
@@ -89,8 +89,7 @@ impl<T: HasView<V, ViewType = Q> + AsRef<[u8]>, V, Q: AsRef<[u8]>> AsRef<[u8]>
     fn as_ref(&self) -> &[u8] {
         match self {
             FieldMut::Repr(t) => t.as_ref(),
-            FieldMut::Raw(Header::Repr(a)) => a.deref().as_ref(),
-            FieldMut::Raw(Header::Raw(a)) => a.as_ref(),
+            FieldMut::Raw(a) => a.as_ref(),
         }
     }
 }
@@ -117,8 +116,7 @@ impl<T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>> AsMut<[u8]>
     fn as_mut(&mut self) -> &mut [u8] {
         match self {
             FieldMut::Repr(t) => t.as_mut(),
-            FieldMut::Raw(Header::Repr(a)) => a.deref_mut().as_mut(),
-            FieldMut::Raw(Header::Raw(a)) => a.as_mut(),
+            FieldMut::Raw(a) => a.as_mut(),
         }
     }
 }
@@ -126,7 +124,7 @@ impl<T: HasView<V, ViewType = Q> + AsMut<[u8]>, V, Q: AsMut<[u8]>> AsMut<[u8]>
 impl<T: HasView<V, ViewType = Q> + NextLayer, V, Q> NextLayer
     for FieldMut<'_, T, V>
 where
-    HeaderOf<T, V>: NextLayer<Denom = T::Denom, Hint = T::Hint>,
+    <T as HasView<V>>::ViewType: NextLayer<Denom = T::Denom, Hint = T::Hint>,
 {
     type Denom = T::Denom;
     type Hint = T::Hint;
@@ -159,6 +157,35 @@ impl<'a, T: HasView<V>, V>
     for FieldRef<'a, T, V>
 {
     fn from(value: &'a InlineHeader<T, <T as HasView<V>>::ViewType>) -> Self {
+        match value {
+            InlineHeader::Raw(r) => Self::Raw(r),
+            InlineHeader::Repr(r) => Self::Repr(r),
+        }
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'a, T: HasView<V>, V>
+    From<&'a mut BoxedHeader<T, <T as HasView<V>>::ViewType>>
+    for FieldMut<'a, T, V>
+{
+    fn from(
+        value: &'a mut BoxedHeader<T, <T as HasView<V>>::ViewType>,
+    ) -> Self {
+        match value {
+            BoxedHeader::Raw(r) => Self::Raw(r),
+            BoxedHeader::Repr(r) => Self::Repr(r),
+        }
+    }
+}
+
+impl<'a, T: HasView<V>, V>
+    From<&'a mut InlineHeader<T, <T as HasView<V>>::ViewType>>
+    for FieldMut<'a, T, V>
+{
+    fn from(
+        value: &'a mut InlineHeader<T, <T as HasView<V>>::ViewType>,
+    ) -> Self {
         match value {
             InlineHeader::Raw(r) => Self::Raw(r),
             InlineHeader::Repr(r) => Self::Repr(r),

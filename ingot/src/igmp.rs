@@ -136,7 +136,7 @@ pub struct IgmpV2LeaveGroup {
 #[allow(clippy::unusual_byte_groupings)]
 mod test {
     use super::*;
-    use crate::types::{Emit, Header, HeaderParse};
+    use crate::types::{Emit, HeaderParse};
     use ingot_types::HeaderLen;
 
     impl IgmpV3GroupRecord {
@@ -228,8 +228,7 @@ mod test {
 
         match igmp.source_addrs_mut() {
             ingot_types::FieldMut::Repr(_a) => todo!("owned"),
-            ingot_types::FieldMut::Raw(Header::Repr(_a)) => todo!("also owned"),
-            ingot_types::FieldMut::Raw(Header::Raw(ips)) => {
+            ingot_types::FieldMut::Raw(ips) => {
                 assert_eq!(ips.len(), 5);
                 assert_eq!(ips[0], Ipv4Addr::from_octets([2, 2, 2, 2]));
                 assert_eq!(ips[1], Ipv4Addr::from_octets([2, 2, 2, 3]));
