@@ -98,16 +98,21 @@ impl<T: Emit> Emit for Repeated<T> {
     }
 }
 
-impl<T: NextLayer> NextLayer for Repeated<T> {
+impl<T> NextLayer for Repeated<T>
+where
+    T: NextLayer<Hint = <T as NextLayer>::Denom>,
+{
     type Denom = T::Denom;
     type Hint = T::Hint;
 
     fn next_layer_choice(
         &self,
-        _hint: Option<Self::Hint>,
+        hint: Option<Self::Hint>,
     ) -> Option<Self::Denom> {
         // Choose the hint attached to the last item contained herein.
-        self.inner.last().and_then(|v| v.next_layer())
+        //
+        // If the inner Vec is empty, then return the outer hint
+        self.inner.last().and_then(|v| v.next_layer()).or(hint)
     }
 }
 
@@ -322,7 +327,11 @@ where
         &self,
         hint: Option<Self::Hint>,
     ) -> Option<Self::Denom> {
-        self.iter(hint).last().and_then(|v| v.ok()).and_then(|v| v.next_layer())
+        self.iter(hint)
+            .last()
+            .and_then(|v| v.ok())
+            .and_then(|v| v.next_layer())
+            .or(hint)
     }
 }
 
