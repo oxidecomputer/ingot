@@ -15,8 +15,7 @@ use crate::{
     },
     types::{
         primitives::*, util::RepeatedView, Accessor, Emit, HeaderLen,
-        HeaderParse, Ipv6Addr, NextLayer, ParseChoice, ParseError,
-        ToOwnedPacket,
+        HeaderParse, Ipv6Addr, NextLayer, ParseError, ToOwnedPacket,
     },
     udp::{Udp, UdpRef, ValidUdp, _Udp_ingot_impl::UdpPart0},
     Ingot,
