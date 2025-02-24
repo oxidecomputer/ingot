@@ -2025,7 +2025,7 @@ impl StructParseDeriveCtx {
                 type Target = #self_ty;
 
                 #[inline]
-                fn to_owned(&self, _hint: ::core::option::Option<Self::Denom>) -> ::ingot::types::ParseResult<Self::Target> {
+                fn to_owned(&self, _hint: ::core::option::Option<Self::Hint>) -> ::ingot::types::ParseResult<Self::Target> {
                     #self_ty::try_from(self).map_err(::ingot::types::ParseError::from)
                 }
             }

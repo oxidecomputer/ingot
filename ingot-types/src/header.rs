@@ -123,7 +123,7 @@ impl<
 {
     type Target = O;
 
-    fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target> {
+    fn to_owned(&self, hint: Option<Self::Hint>) -> ParseResult<Self::Target> {
         match self {
             Header::Repr(o) => Ok(*o.clone()),
             Header::Raw(v) => v.to_owned(hint),
@@ -285,7 +285,7 @@ impl<
 {
     type Target = O;
 
-    fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target> {
+    fn to_owned(&self, hint: Option<Self::Hint>) -> ParseResult<Self::Target> {
         match self {
             Self::Repr(o) => Ok(o.clone()),
             Self::Raw(v) => v.to_owned(hint),

@@ -59,7 +59,7 @@ pub trait ToOwnedPacket: NextLayer {
 
     /// Converts a borrowed view of a header into an owned version, possibly
     /// reparsing to do so with the aid of `hint`.
-    fn to_owned(&self, hint: Option<Self::Denom>) -> ParseResult<Self::Target>;
+    fn to_owned(&self, hint: Option<Self::Hint>) -> ParseResult<Self::Target>;
 }
 
 /// Base trait for header/packet types.
