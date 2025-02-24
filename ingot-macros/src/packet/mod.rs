@@ -970,7 +970,7 @@ impl StructParseDeriveCtx {
         };
 
         quote! {
-            hint = ::core::option::Option::Some(#access);
+            let hint = ::core::option::Option::Some(#access);
         }
     }
 
@@ -1796,7 +1796,7 @@ impl StructParseDeriveCtx {
 
         let mut segment_fragments = vec![];
         let mut els = vec![];
-        let mut hint_could_be_altered = false;
+        let mut got_hint = false;
         for (i, chunk) in self.chunk_layout.iter().enumerate() {
             let val_ident = Ident::new(&format!("v{i}"), Span::call_site());
             match chunk {
@@ -1882,13 +1882,15 @@ impl StructParseDeriveCtx {
                         .map(|(a, b)| (Some(a), Some(b)))
                         .unwrap_or_default();
 
-                    if *on_next_layer {
-                        hint_could_be_altered = true;
+                    let hint = if *on_next_layer {
                         let hint_lkup = self.gen_private_hint_lookup(i);
                         segment_fragments.push(quote! {
                             #hint_lkup
                         });
-                    }
+                        quote! { hint }
+                    } else {
+                        quote! { None }
+                    };
 
                     if let Some(len_expr) = len_expr {
                         segment_fragments.push(quote! {
@@ -1899,38 +1901,34 @@ impl StructParseDeriveCtx {
                             let (varlen, from) = from.split_at(chunk_len)
                                 .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
 
-                            let (#val_ident, mut hint, _) =
+                            let (#val_ident, hint, _) =
                                 <#genless_user_ty as HasView<_>>::ViewType::parse_choice(
-                                    varlen, hint
+                                    varlen, #hint
                                 )?;
                             let #val_ident = ::ingot::types::Header::Raw(#val_ident.into());
                         });
                     } else {
                         segment_fragments.push(quote! {
-                            let (#val_ident, mut hint, from) =
+                            let (#val_ident, hint, from) =
                                 <#genless_user_ty as HasView<_>>::ViewType::parse_choice(
-                                    from, hint
+                                    from, #hint
                                 )?;
                             let #val_ident = ::ingot::types::Header::Raw(#val_ident.into());
                         });
                     }
+                    got_hint = true;
                 }
             }
             els.push(val_ident);
         }
 
-        let hint_recheck =
-            match (&self.nominated_next_header, hint_could_be_altered) {
-                (Some(_), true) => quote! {
-                    hint = hint.or_else(|| val.next_layer());
-                },
-                (Some(_), false) => quote! {
-                    hint = val.next_layer();
-                },
-                _ => quote! {
-                    hint = None;
-                },
-            };
+        let get_returned_hint = if got_hint {
+            quote! {}
+        } else {
+            quote! {
+                let hint = val.next_layer();
+            }
+        };
 
         quote! {
             impl<
@@ -1944,13 +1942,11 @@ impl StructParseDeriveCtx {
                     use ::ingot::types::NextLayer;
                     use ::ingot::types::HeaderParse;
 
-                    let mut hint: ::core::option::Option<<Self as NextLayer>::Denom> = None;
-
                     #( #segment_fragments )*
 
                     let val = #validated_ident(#( #els ),*);
 
-                    #hint_recheck
+                    #get_returned_hint
 
                     ::core::result::Result::Ok(
                         (val, hint, from)
