@@ -1336,7 +1336,7 @@ impl StructParseDeriveCtx {
                     trait_impls.push(quote! {
                         #[inline]
                         fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
-                            ::ingot::types::FieldRef::Raw(&self.#sub_field_idx)
+                            (&self.#sub_field_idx).into()
                         }
                     });
                     direct_trait_mut_impls.push(quote! {
@@ -1348,7 +1348,7 @@ impl StructParseDeriveCtx {
                     trait_mut_impls.push(quote! {
                         #[inline]
                         fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, ::ingot::types::primitives::ObjectSlice::<V, #ty>> {
-                            ::ingot::types::FieldMut::Raw(&mut self.#sub_field_idx)
+                            (&mut self.#sub_field_idx).into()
                         }
                     });
                 }
@@ -1363,7 +1363,7 @@ impl StructParseDeriveCtx {
                     trait_impls.push(quote! {
                         #[inline]
                         fn #field_ref(&self) -> ::ingot::types::FieldRef<#user_ty, V> {
-                            ::ingot::types::FieldRef::Raw(&self.#sub_field_idx)
+                            (&self.#sub_field_idx).into()
                         }
                     });
                     direct_trait_mut_impls.push(quote! {
@@ -1375,7 +1375,7 @@ impl StructParseDeriveCtx {
                     trait_mut_impls.push(quote! {
                         #[inline]
                         fn #field_mut(&mut self) -> ::ingot::types::FieldMut<#user_ty, V> {
-                            ::ingot::types::FieldMut::Raw(&mut self.#sub_field_idx)
+                            (&mut self.#sub_field_idx).into()
                         }
                     });
                 }
