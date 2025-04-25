@@ -51,6 +51,41 @@ pub struct SubparseSpec {
     on_next_layer: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+enum VarlenType {
+    #[default]
+    None,
+    Expr(Expr),
+    Remainder,
+}
+
+impl FromMeta for VarlenType {
+    fn from_word() -> darling::Result<Self> {
+        Ok(Self::Remainder)
+    }
+
+    fn from_value(value: &Lit) -> darling::Result<Self> {
+        Expr::from_value(value).map(Self::Expr)
+    }
+
+    fn from_expr(expr: &Expr) -> darling::Result<Self> {
+        Expr::from_expr(expr).map(Self::Expr)
+    }
+
+    fn from_string(value: &str) -> darling::Result<Self> {
+        Expr::from_string(value).map(Self::Expr)
+    }
+}
+
+impl VarlenType {
+    fn expr(&self) -> Option<Expr> {
+        match self {
+            Self::Expr(e) => Some(e.clone()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, FromField)]
 #[darling(attributes(ingot))]
 pub struct FieldArgs {
@@ -59,7 +94,8 @@ pub struct FieldArgs {
     zerocopy: bool,
     #[darling(default)]
     next_layer: bool,
-    var_len: Option<Expr>,
+    #[darling(default)]
+    var_len: VarlenType,
     #[darling(default)]
     subparse: Option<SubparseSpec>,
     #[darling(default)]
@@ -115,7 +151,7 @@ impl ValidField {
     fn length_fn(&self) -> Option<&Expr> {
         match &self.state {
             FieldState::FixedWidth { .. } | FieldState::Zerocopy => None,
-            FieldState::VarWidth { length_fn, .. } => Some(length_fn),
+            FieldState::VarWidth { length_fn, .. } => length_fn.as_ref(),
             FieldState::Parsable { length_fn, .. } => length_fn.as_ref(),
         }
     }
@@ -198,7 +234,7 @@ enum FieldState {
     Zerocopy,
     /// Byte-aligned (sz + offset) variable-width fields.
     /// (Under the hood, either a byte array or an array of `zerocopy` types)
-    VarWidth { length_fn: Expr, inner_ty: Option<Type> },
+    VarWidth { length_fn: Option<Expr>, inner_ty: Option<Type> },
     /// Byte-aligned (sz + offset) var-width fields which may have a
     /// capped length assigned.
     Parsable {
@@ -520,7 +556,7 @@ impl StructParseDeriveCtx {
                 &field.var_len,
                 field.next_layer,
             ) {
-                (true, None, None, next_layer) => {
+                (true, None, VarlenType::None, next_layer) => {
                     let mut ccs_ref = curr_chunk_size.borrow_mut();
                     let (curr_chunk_size, curr_chunk_fields) = ccs_ref
                         .get_or_insert((ChunkSizeBits::default(), vec![]));
@@ -554,7 +590,7 @@ impl StructParseDeriveCtx {
 
                     FieldState::Zerocopy
                 }
-                (true, _, None, _) => {
+                (true, _, VarlenType::None, _) => {
                     return Err(syn::Error::new(
                         field.ty.span(),
                         "cannot combine zerocopy field with subparse or next_layer"
@@ -563,11 +599,11 @@ impl StructParseDeriveCtx {
                 (_, Some(SubparseSpec { on_next_layer }), length_fn, false) => {
                     finalize_chunk()?;
                     FieldState::Parsable {
-                        length_fn: length_fn.clone(),
+                        length_fn: length_fn.expr(),
                         on_next_layer: *on_next_layer,
                     }
                 }
-                (zc, _, Some(length_fn), false) => {
+                (zc, _, length_fn @ (VarlenType::Remainder | VarlenType::Expr(_)), false) => {
                     finalize_chunk()?;
 
                     // Unpack a Vec<T> from the user type, laboriously
@@ -639,11 +675,11 @@ impl StructParseDeriveCtx {
                     };
 
                     FieldState::VarWidth {
-                        length_fn: length_fn.clone(),
+                        length_fn: length_fn.expr(),
                         inner_ty,
                     }
                 }
-                (_, None, None, next_layer) => {
+                (_, None, VarlenType::None, next_layer) => {
                     let underlying_ty =
                         if let Some(ty) = &field.is { ty } else { &field.ty }
                             .clone();
@@ -741,10 +777,8 @@ impl StructParseDeriveCtx {
             }
             let first_bit = *first_bit_in_chunk;
 
-            let ty_ident = Ident::new(
-                &format!("bitfield_{}", bitfield_count),
-                ident.span(),
-            );
+            let ty_ident =
+                Ident::new(&format!("bitfield_{bitfield_count}"), ident.span());
 
             let curr_bitfield_state =
                 bitfield_state.get_or_insert_with(|| BfState {
@@ -1809,26 +1843,37 @@ impl StructParseDeriveCtx {
                 ChunkState::VarWidth(id, ty) => {
                     let field = self.validated[id].borrow();
 
-                    // Fetch all needed variables from existing chunks,
-                    // and compute the length of the byteslice.
-                    let (preamble, len_expr) =
-                        field.resolved_length_fn(self).unwrap();
+                    if let Some((preamble, len_expr)) =
+                        field.resolved_length_fn(self)
+                    {
+                        // Fetch all needed variables from existing chunks,
+                        // and compute the length of the byteslice.
+                        let len_expr = match ty {
+                            Some(ty) => quote! {
+                                ((#len_expr) as usize) * ::core::mem::size_of::<#ty>()
+                            },
+                            None => quote! { (#len_expr) as usize },
+                        };
+                        segment_fragments.push(quote! {
+                            #preamble
 
-                    let len_expr = match ty {
-                        Some(ty) => quote! {
-                            ((#len_expr) as usize) * ::core::mem::size_of::<#ty>()
-                        },
-                        None => quote! { (#len_expr) as usize },
-                    };
-                    segment_fragments.push(quote! {
-                        #preamble
+                            let chunk_len = #len_expr;
 
-                        let chunk_len = #len_expr;
-
-                        let (varlen, from) = from.split_at(chunk_len)
-                            .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
-                        let #val_ident = ::ingot::types::Header::Raw(varlen.into());
-                    });
+                            let (varlen, from) = from.split_at(chunk_len)
+                                .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
+                            let #val_ident = ::ingot::types::Header::Raw(varlen.into());
+                        });
+                    } else {
+                        // Use the remainder of the byteslice.
+                        segment_fragments.push(quote! {
+                            let end_len = from.len();
+                            let ::core::result::Result::Ok((varlen, from)) =
+                                    from.split_at(end_len) else {
+                                ::core::unreachable!();
+                            };
+                            let #val_ident = ::ingot::types::Header::Raw(varlen.into());
+                        });
+                    }
                 }
                 ChunkState::Parsable(id) => {
                     let field = self.validated[id].borrow();
@@ -2517,7 +2562,7 @@ impl FixedWidthAnalysis {
                     }
 
                     let tail =
-                        Ident::new(&format!("U{}", bits), base_ident.span());
+                        Ident::new(&format!("U{bits}"), base_ident.span());
 
                     let repr = syn::parse(
                         match end {
