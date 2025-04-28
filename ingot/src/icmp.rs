@@ -185,7 +185,7 @@ pub mod ndisc {
     pub struct OptionRedirect {
         rsvd: [u8; 6],
         #[ingot(var_len)]
-        pub data: Vec<u8>,
+        pub original_packet: Vec<u8>,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq, Ingot)]

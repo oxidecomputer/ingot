@@ -546,9 +546,19 @@ impl StructParseDeriveCtx {
 
         // first pass: split struct into discrete chunks, ensure byte
         // alignment in the right spots.
+        let n_fields = field_data.fields.len();
         for (idx, field) in field_data.fields.iter().enumerate() {
             let field_ident = field.ident.as_ref().unwrap().clone();
             let user_ty = field.ty.clone();
+            let is_last = idx == n_fields - 1;
+
+            if !is_last && matches!(field.var_len, VarlenType::Remainder) {
+                return Err(Error::new(
+                    field_ident.span(),
+                    "only the last field in a header may be `var_len` without a \
+                    limit expression",
+                ));
+            }
 
             let state = match (
                 &field.zerocopy,
