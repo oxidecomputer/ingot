@@ -15,7 +15,7 @@ impl IcmpV4Type {
     pub const DESTINATION_UNREACHABLE: Self = Self(3);
     pub const SOURCE_QUENCH: Self = Self(4);
     pub const REDIRECT: Self = Self(5);
-    pub const ECHO: Self = Self(8);
+    pub const ECHO_REQUEST: Self = Self(8);
     pub const ROUTER_ADVERTISEMENT: Self = Self(9);
     pub const ROUTER_SOLICITATION: Self = Self(10);
     pub const TIME_EXCEEDED: Self = Self(11);
@@ -23,7 +23,10 @@ impl IcmpV4Type {
     pub const TIMESTAMP: Self = Self(13);
     pub const TIMESTAMP_REPLY: Self = Self(14);
 
-    /// This packet's payload
+    /// This ICMP packet's payload contains a portion of the packet it was
+    /// generated in response to.
+    ///
+    /// This consists of the IPv4 header and 8 bytes of the upper protocol.
     pub const fn payload_is_packet(self) -> bool {
         matches!(
             self,
@@ -72,7 +75,11 @@ impl IcmpV6Type {
     pub const ROUTER_RENUMBER: Self = Self(138);
     pub const RESERVED_INFO: Self = Self(255);
 
-    /// This packet's payload
+    /// This ICMPv6 packet's payload contains a portion of the packet it was
+    /// generated in response to.
+    ///
+    /// This consists of at least the IPv6 header, and as many bytes as can
+    /// be fit using the currently known MTU.
     pub const fn payload_is_packet(self) -> bool {
         matches!(
             self,
@@ -83,14 +90,22 @@ impl IcmpV6Type {
         )
     }
 
+    /// This ICMPv6 message is sent in response to a problematic packet.
     pub const fn is_error(self) -> bool {
         self.0 < 128
     }
 
+    /// This ICMPv6 message is informational, used in active/passive network
+    /// monitoring/diagnostics.
     pub const fn is_informational(self) -> bool {
         self.0 >= 128
     }
 
+    /// This ICMPv6 message is part of the Neighbor Discovery Protocol ([rfc4861]).
+    /// Its payload consists of a set of [`Option`] TLV messages.
+    ///
+    /// [rfc4861]: https://datatracker.ietf.org/doc/html/rfc4861
+    /// [`Option`]: ndisc::Option
     pub const fn is_neighbor_discovery(self) -> bool {
         self.0 >= Self::ROUTER_SOLICITATION.0 && self.0 <= Self::REDIRECT.0
     }
