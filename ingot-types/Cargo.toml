@@ -1,6 +1,10 @@
 [package]
 name = "ingot-types"
 version = "0.1.0"
+description = "Traits and types used by ingot"
+readme = "README.md"
+categories.workspace = true
+keywords.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

@@ -12,12 +12,14 @@ edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/oxidecomputer/ingot"
 rust-version = "1.81"
+keywords = ["raw", "packet", "networking", "parser"]
+categories = ["network-programming", "no-std", "parsing"]
 
 [workspace.dependencies]
 # Internal
 ingot = { path = "ingot", default-features = true }
-ingot-macros = { path = "ingot-macros", default-features = false }
-ingot-types = { path = "ingot-types", default-features = false }
+ingot-macros = { version = "=0.1.0", path = "ingot-macros", default-features = false }
+ingot-types = { version = "=0.1.0", path = "ingot-types", default-features = false }
 
 # External
 bitflags = "2"
