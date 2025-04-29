@@ -185,7 +185,7 @@ impl core::fmt::Display for Vni {
 // it in a human-friendly manner.
 impl core::fmt::Debug for Vni {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(f, "Vni {{ inner: {} }}", self)
+        write!(f, "Vni {{ inner: {self} }}")
     }
 }
 

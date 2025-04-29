@@ -123,6 +123,7 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///   with the `is` attribute.
 ///   - `#[ingot(subparse(on_next_layer))]` – parses this field using the `next_layer`
 ///     field to make a choice. This field will be used as the source of the next header.
+/// * `#[ingot(var_len)]` – Consumes the remainder of the provided slice as a `Vec<u8>`.
 /// * `#[ingot(var_len = "<expr>")]` – Determines the length of a `Vec<u8>` field,
 ///   or provides an exact length for a variable-length subparse. This expression
 ///   can access any prior fixed-width field.
