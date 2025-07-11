@@ -1,6 +1,6 @@
 [package]
 name = "ingot"
-version = "0.1.0"
+version = "0.1.1"
 description = "Bare metal packet parsing"
 readme = "README.md"
 categories.workspace = true

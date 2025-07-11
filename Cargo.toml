@@ -18,8 +18,8 @@ categories = ["network-programming", "no-std", "parsing"]
 [workspace.dependencies]
 # Internal
 ingot = { path = "ingot", default-features = true }
-ingot-macros = { version = "=0.1.0", path = "ingot-macros", default-features = false }
-ingot-types = { version = "=0.1.0", path = "ingot-types", default-features = false }
+ingot-macros = { version = "=0.1.1", path = "ingot-macros", default-features = false }
+ingot-types = { version = "=0.1.2", path = "ingot-types", default-features = false }
 
 # External
 bitflags = "2"
