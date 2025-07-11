@@ -23,8 +23,8 @@ ingot-types = { version = "=0.1.0", path = "ingot-types", default-features = fal
 
 # External
 bitflags = "2"
-darling = "0.20"
-itertools = "0.13"
+darling = "0.21"
+itertools = "0.14"
 macaddr = { version = "1", default-features = false }
 proc-macro2 = { version = "1" }
 quote = "1.0"
@@ -34,7 +34,7 @@ syn = { version = "2", features = ["visit"] }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 # External dev-deps
-criterion = "0.5"
+criterion = "0.6"
 
 [profile.release]
 debug = 2
