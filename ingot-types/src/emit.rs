@@ -140,6 +140,17 @@ impl<T: Emit> Emit for Vec<T> {
     }
 }
 
+impl<T: Emit> Emit for Option<T> {
+    #[inline]
+    fn emit_raw<V: ByteSliceMut>(&self, buf: V) -> usize {
+        self.as_ref().map(|e| e.emit_raw(buf)).unwrap_or(0)
+    }
+
+    fn needs_emit(&self) -> bool {
+        self.as_ref().map(T::needs_emit).unwrap_or(false)
+    }
+}
+
 impl Emit for &[u8] {
     #[inline]
     fn emit_raw<V: ByteSliceMut>(&self, mut buf: V) -> usize {
@@ -197,5 +208,9 @@ unsafe impl EmitDoesNotRelyOnBufContents for &[u8] {}
 unsafe impl EmitDoesNotRelyOnBufContents for Vec<u8> {}
 unsafe impl<T: EmitDoesNotRelyOnBufContents> EmitDoesNotRelyOnBufContents
     for Vec<T>
+{
+}
+unsafe impl<T: EmitDoesNotRelyOnBufContents> EmitDoesNotRelyOnBufContents
+    for Option<T>
 {
 }

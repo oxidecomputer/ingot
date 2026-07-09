@@ -17,7 +17,7 @@ use crate::{
         primitives::*, util::RepeatedView, Accessor, Emit, HeaderLen,
         HeaderParse, Ipv6Addr, NextLayer, ParseError, ToOwnedPacket,
     },
-    udp::{Udp, UdpRef, ValidUdp, _Udp_ingot_impl::UdpPart0},
+    udp::{_Udp_ingot_impl::UdpPart0, Udp, UdpRef, ValidUdp},
     Ingot,
 };
 use core::mem;

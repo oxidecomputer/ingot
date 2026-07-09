@@ -269,7 +269,7 @@ impl<B: ByteSlice, T: for<'a> HasView<&'a [u8]> + HasView<B> + NextLayer>
     /// Iterates over all sub-parsed elements.
     ///
     /// Offsets are not stored, so individual elements are re-parsed one by one.
-    pub fn iter(&self, hint: Option<T::Hint>) -> RepeatedViewIter<T> {
+    pub fn iter(&self, hint: Option<T::Hint>) -> RepeatedViewIter<'_, T> {
         RepeatedViewIter { slice: &self.inner[..], hint }
     }
 }
