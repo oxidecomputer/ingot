@@ -15,7 +15,8 @@ use crate::{
     },
     types::{
         primitives::*, util::RepeatedView, Accessor, Emit, HeaderLen,
-        HeaderParse, Ipv6Addr, NextLayer, ParseError, ToOwnedPacket,
+        HeaderParse, Ipv6Addr, NetworkRepr, NextLayer, ParseError,
+        ToOwnedPacket,
     },
     udp::{_Udp_ingot_impl::UdpPart0, Udp, UdpRef, ValidUdp},
     Ingot,
@@ -660,4 +661,20 @@ fn choice_packet() {
     assert_eq!(next, Some(ChoiceType::A));
     let p2 = p_ref.to_owned(None).unwrap();
     assert_eq!(p, p2);
+}
+
+#[test]
+fn ecn_round_trips_all_codepoints() {
+    let cases = [
+        (0u8, Ecn::NotCapable),
+        (1u8, Ecn::Capable0),
+        (2u8, Ecn::Capable1),
+        (3u8, Ecn::CongestionExperienced),
+    ];
+
+    for (wire, variant) in cases {
+        assert_eq!(Ecn::from_network(wire), variant);
+        assert_eq!(Ecn::try_from(wire).unwrap(), variant);
+        assert_eq!(variant.to_network(), wire);
+    }
 }

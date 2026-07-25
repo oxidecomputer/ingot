@@ -113,7 +113,7 @@ impl NetworkRepr<u2> for Ecn {
             0 => Ecn::NotCapable,
             1 => Ecn::Capable0,
             2 => Ecn::Capable1,
-            3 => Ecn::Capable0,
+            3 => Ecn::CongestionExperienced,
             _ => panic!("outside bounds of u2"),
         }
     }
@@ -128,7 +128,7 @@ impl TryFrom<u2> for Ecn {
             0 => Ok(Ecn::NotCapable),
             1 => Ok(Ecn::Capable0),
             2 => Ok(Ecn::Capable1),
-            3 => Ok(Ecn::Capable0),
+            3 => Ok(Ecn::CongestionExperienced),
             _ => Err(ParseError::IllegalValue),
         }
     }
