@@ -2167,7 +2167,7 @@ impl StructParseDeriveCtx {
 
                     owned_emit_blocks.push(quote! {
                         let (g, rest) = #zc_ty_name::mut_from_prefix(rest)
-                            .expect(&::alloc::format!("provided buf had insufficient bytes"));
+                            .expect("provided buf had insufficient bytes");
                         #( #zerofills )*
                         #( #per_field_sets )*
                     });

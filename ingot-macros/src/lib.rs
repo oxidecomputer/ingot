@@ -133,6 +133,21 @@ pub fn derive_parse(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///   automatically implement those traits, see the
 ///   `ingot::types::zerocopy_type!` macro.) The `var_len` expression can access
 ///   any prior fixed-width field, and is a length in _items_ (not bytes).
+///
+/// # Length and count fields
+///
+/// The `var_len` relationship is one-directional: parsing sizes the payload
+/// from the scalar, while emitting writes the scalar verbatim and sizes the
+/// payload from its own contents. Nothing reconciles them, so a `num_sources`
+/// of 5 alongside two addresses emits a header that disagrees with its own
+/// payload.
+///
+/// This is deliberate. `Emit` is a serializer, not a builder; the scalar is
+/// part of `PartialEq` and `Hash`. Deriving it on emit would let values
+/// emitting identical bytes compare unequal, hiding a mistake a capture would
+/// show, and making malformed packets inexpressible when testing a receiver.
+///
+/// Keeping the two consistent is the caller's responsibility.
 #[proc_macro_derive(Ingot, attributes(ingot))]
 pub fn derive_ingot(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let d_input = parse_macro_input!(input);
