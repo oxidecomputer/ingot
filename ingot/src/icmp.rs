@@ -65,14 +65,19 @@ impl IcmpV6Type {
     pub const ECHO_REQUEST: Self = Self(128);
     pub const ECHO_REPLY: Self = Self(129);
     pub const MULTICAST_LISTENER_QUERY: Self = Self(130);
-    pub const MULTICAST_LISTENER_REPORT: Self = Self(131);
-    pub const MULTICAST_LISTENER_DONE: Self = Self(132);
+    pub const V1_MULTICAST_LISTENER_REPORT: Self = Self(131);
+    pub const V1_MULTICAST_LISTENER_DONE: Self = Self(132);
     pub const ROUTER_SOLICITATION: Self = Self(133);
     pub const ROUTER_ADVERTISEMENT: Self = Self(134);
     pub const NEIGHBOR_SOLICITATION: Self = Self(135);
     pub const NEIGHBOR_ADVERTISEMENT: Self = Self(136);
     pub const REDIRECT: Self = Self(137);
     pub const ROUTER_RENUMBER: Self = Self(138);
+    /// The MLDv2 Report, the only ICMPv6 type RFC3810 assigns. MLDv2
+    /// Queries reuse [`Self::MULTICAST_LISTENER_QUERY`], which is unversioned
+    /// for that reason, matching `IgmpMessageType`'s treatment of its shared
+    /// query.
+    pub const V2_MULTICAST_LISTENER_REPORT: Self = Self(143);
     pub const RESERVED_INFO: Self = Self(255);
 
     /// This ICMPv6 packet's payload contains a portion of the packet it was
