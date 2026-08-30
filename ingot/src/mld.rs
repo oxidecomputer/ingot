@@ -12,13 +12,12 @@
 //! Queries both use type 130 and are separated by message length instead.
 //! See [`MldV1`] for that rule.
 //!
-//! MLDv2 Queries and Reports may carry data beyond the fields defined here
-//! ([RFC3810], §5.1.12 and §5.2.11). Callers must fold those bytes into the
-//! ICMPv6 checksum but otherwise ignore them; this module computes no
-//! checksums itself. The two messages differ in how parsing surfaces them: a
-//! Query returns them as the parse remainder, whereas a Report's `records`
-//! are read to buffer exhaustion, so a caller must trim the input to the
-//! ICMPv6 payload length before parsing one.
+//! MLDv2 Queries and Reports may carry data beyond the fields listed here
+//! ([RFC3810], §5.1.12 and §5.2.11). Callers must fold those bytes into
+//! the ICMPv6 checksum but otherwise ignore them, as this module computes no
+//! checksums itself. Both messages return them as the parse remainder, since
+//! a Report's `records` are bounded by `num_records` rather than read to
+//! buffer exhaustion.
 //!
 //! [RFC2710]: https://datatracker.ietf.org/doc/html/rfc2710
 //! [RFC3810]: https://datatracker.ietf.org/doc/html/rfc3810
@@ -199,10 +198,9 @@ pub struct MldV2MulticastListenerReport {
     pub code: u8,
     pub checksum: u16be,
     resv: u16be,
-    /// The number of entries in `records`. Not consulted on parse, which
-    /// reads `records` to buffer exhaustion instead.
+    /// The number of entries in `records`.
     pub num_records: u16be,
-    #[ingot(subparse())]
+    #[ingot(subparse(count = "num_records.get()"))]
     pub records: Repeated<MldV2AddressRecord>,
 }
 
@@ -748,6 +746,55 @@ mod tests {
             ValidMldV2MulticastListenerReport::parse(&bytes[..]).unwrap();
         assert_eq!(parsed.records_ref().packet_length(), 1040 + 36);
         assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn report_count_bounds_records_and_preserves_trailing_data() {
+        let record = MldV2AddressRecord {
+            record_type: MldV2RecordType::MODE_IS_INCLUDE,
+            aux_data_len: 0,
+            num_sources: 0,
+            multicast_addr: ALL_NODES,
+            source_addrs: Vec::new(),
+            auxiliary_data: Vec::new(),
+        };
+        let report = MldV2MulticastListenerReport {
+            num_records: 1,
+            records: Repeated::new(vec![record.clone()]),
+            ..Default::default()
+        };
+        let mut bytes = report.emit_vec();
+        bytes.extend_from_slice(&[1, 2, 3]);
+
+        let (parsed, _, rest) =
+            ValidMldV2MulticastListenerReport::parse(&bytes[..]).unwrap();
+        assert_eq!(parsed.records_ref().packet_length(), 20);
+        assert_eq!(rest, &[1, 2, 3]);
+
+        let overcounted = MldV2MulticastListenerReport {
+            num_records: 1,
+            records: Repeated::new(vec![record.clone(), record]),
+            ..Default::default()
+        };
+        let bytes = overcounted.emit_vec();
+        let (parsed, _, rest) =
+            ValidMldV2MulticastListenerReport::parse(&bytes[..]).unwrap();
+        assert_eq!(parsed.records_ref().packet_length(), 20);
+        assert_eq!(rest.len(), 20);
+    }
+
+    #[test]
+    fn report_count_rejects_missing_records() {
+        let report = MldV2MulticastListenerReport {
+            num_records: 1,
+            records: Repeated::new(vec![]),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            ValidMldV2MulticastListenerReport::parse(&report.emit_vec()[..]),
+            Err(ingot_types::ParseError::TooSmall)
+        ));
     }
 
     #[test]
