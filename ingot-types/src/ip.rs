@@ -307,6 +307,95 @@ impl From<Ipv6Addr> for core::net::Ipv6Addr {
     }
 }
 
+/// The error returned when refining an address which is not multicast.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NotMulticastError;
+
+impl core::error::Error for NotMulticastError {}
+
+impl core::fmt::Display for NotMulticastError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("address is not multicast")
+    }
+}
+
+/// An [`Ipv6Addr`] known to be multicast.
+///
+/// Protocols such as MLD constrain particular fields to multicast addresses.
+/// Carrying that in the type keeps a unicast address from reaching a
+/// constructor which requires one.
+///
+/// Parsing deliberately does not produce this type. A received address is
+/// untrusted and stays an [`Ipv6Addr`] until refined through
+/// [`MulticastIpv6Addr::new`], so a zero-copy view never asserts an invariant
+/// its bytes have not been checked against.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct MulticastIpv6Addr(Ipv6Addr);
+
+impl MulticastIpv6Addr {
+    /// Refine an [`Ipv6Addr`] which is multicast.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NotMulticastError`] if the address lies outside `ff00::/8`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use ingot_types::ip::{Ipv6Addr, MulticastIpv6Addr};
+    /// let all_nodes = Ipv6Addr::from_segments([0xff02, 0, 0, 0, 0, 0, 0, 1]);
+    /// assert!(MulticastIpv6Addr::new(all_nodes).is_ok());
+    /// assert!(MulticastIpv6Addr::new(Ipv6Addr::UNSPECIFIED).is_err());
+    /// ```
+    pub const fn new(addr: Ipv6Addr) -> Result<Self, NotMulticastError> {
+        if addr.is_multicast() {
+            Ok(Self(addr))
+        } else {
+            Err(NotMulticastError)
+        }
+    }
+
+    /// [`MulticastIpv6Addr::new`] (which panics on a non-multicast input).
+    ///
+    /// Intended for `static`/`const` definitions, where the panic is a
+    /// compile-time error.
+    ///
+    /// ```rust
+    /// # use ingot_types::ip::{Ipv6Addr, MulticastIpv6Addr};
+    /// const ALL_NODES: MulticastIpv6Addr = MulticastIpv6Addr::new_unchecked(
+    ///     Ipv6Addr::from_segments([0xff02, 0, 0, 0, 0, 0, 0, 1]),
+    /// );
+    /// assert!(ALL_NODES.addr().is_multicast());
+    /// ```
+    pub const fn new_unchecked(addr: Ipv6Addr) -> Self {
+        match Self::new(addr) {
+            Ok(v) => v,
+            Err(_) => panic!("address is not an IPv6 multicast address"),
+        }
+    }
+
+    /// Return the wrapped address.
+    pub const fn addr(&self) -> Ipv6Addr {
+        self.0
+    }
+}
+
+impl From<MulticastIpv6Addr> for Ipv6Addr {
+    #[inline]
+    fn from(addr: MulticastIpv6Addr) -> Self {
+        addr.0
+    }
+}
+
+impl TryFrom<Ipv6Addr> for MulticastIpv6Addr {
+    type Error = NotMulticastError;
+
+    #[inline]
+    fn try_from(addr: Ipv6Addr) -> Result<Self, Self::Error> {
+        Self::new(addr)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
