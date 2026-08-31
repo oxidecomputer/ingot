@@ -14,9 +14,10 @@ use crate::{
         Ipv6Mut, Ipv6Ref, LowRentV6EhRepr, ValidIpv6, ValidLowRentV6Eh,
     },
     types::{
-        primitives::*, util::RepeatedView, Accessor, Emit, HeaderLen,
-        HeaderParse, Ipv6Addr, NetworkRepr, NextLayer, ParseError,
-        ToOwnedPacket,
+        primitives::*,
+        util::{Repeated, RepeatedView},
+        Accessor, Emit, HeaderLen, HeaderParse, Ipv6Addr, NetworkRepr,
+        NextLayer, ParseError, ToOwnedPacket,
     },
     udp::{_Udp_ingot_impl::UdpPart0, Udp, UdpRef, ValidUdp},
     Ingot,
@@ -378,6 +379,14 @@ fn repeated_on_standard_header() {
     assert!(matches!(
         RepeatedView::<&[u8], Udp>::parse_choice(&bytes[..20], Some(())),
         Err(ParseError::TooSmall)
+    ));
+}
+
+#[test]
+fn counted_repeated_rejects_zero_width_elements() {
+    assert!(matches!(
+        RepeatedView::<&[u8], Repeated<Udp>>::parse_counted(&[], 1, None),
+        Err(ParseError::IllegalValue)
     ));
 }
 

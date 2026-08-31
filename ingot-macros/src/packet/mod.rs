@@ -49,6 +49,8 @@ pub struct IngotArgs {
 pub struct SubparseSpec {
     #[darling(default)]
     on_next_layer: bool,
+    #[darling(default)]
+    count: Option<Expr>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -160,6 +162,25 @@ impl ValidField {
         &self,
         ctx: &StructParseDeriveCtx,
     ) -> Option<(TokenStream, &Expr)> {
+        self.resolved_expr_fn(ctx, self.length_fn())
+    }
+
+    fn resolved_count_fn(
+        &self,
+        ctx: &StructParseDeriveCtx,
+    ) -> Option<(TokenStream, &Expr)> {
+        let count_fn = match &self.state {
+            FieldState::Parsable { count_fn, .. } => count_fn.as_ref(),
+            _ => None,
+        };
+        self.resolved_expr_fn(ctx, count_fn)
+    }
+
+    fn resolved_expr_fn<'a>(
+        &self,
+        ctx: &StructParseDeriveCtx,
+        expr: Option<&'a Expr>,
+    ) -> Option<(TokenStream, &'a Expr)> {
         // basic idea:
         //  * If no length fn is specified, exit.
         //  * Identify all variables used in `length_fn` matching field idents
@@ -167,7 +188,7 @@ impl ValidField {
         //  * generate a preamble which defines local variables with those
         //    names within the body of the `parse` method, taking their values
         //    from the packet parts parsed so far.
-        let length_fn = self.length_fn()?;
+        let expr = expr?;
 
         #[derive(Default)]
         struct IdentVisitor<'ast>(HashSet<&'ast Ident>);
@@ -179,7 +200,7 @@ impl ValidField {
         }
 
         let mut vis = IdentVisitor::default();
-        vis.visit_expr(length_fn);
+        vis.visit_expr(expr);
 
         let defns = vis
             .0
@@ -208,7 +229,7 @@ impl ValidField {
             #( #defns )*
         };
 
-        Some((preamble, length_fn))
+        Some((preamble, expr))
     }
 }
 
@@ -241,6 +262,9 @@ enum FieldState {
         /// Parsable blocks don't *need* to be length delimited,
         /// but we can occasionally make the guarantee.
         length_fn: Option<Expr>,
+
+        /// An optional number of values to parse from the block.
+        count_fn: Option<Expr>,
 
         /// Parsable blocks can consume the existing  ext layer hint,
         /// and emit their own in place of the rest of the block.
@@ -606,10 +630,11 @@ impl StructParseDeriveCtx {
                         "cannot combine zerocopy field with subparse or next_layer"
                     ))
                 }
-                (_, Some(SubparseSpec { on_next_layer }), length_fn, false) => {
+                (_, Some(SubparseSpec { on_next_layer, count }), length_fn, false) => {
                     finalize_chunk()?;
                     FieldState::Parsable {
                         length_fn: length_fn.expr(),
+                        count_fn: count.clone(),
                         on_next_layer: *on_next_layer,
                     }
                 }
@@ -1929,6 +1954,10 @@ impl StructParseDeriveCtx {
                         .resolved_length_fn(self)
                         .map(|(a, b)| (Some(a), Some(b)))
                         .unwrap_or_default();
+                    let (count_preamble, count_expr) = field
+                        .resolved_count_fn(self)
+                        .map(|(a, b)| (Some(a), Some(b)))
+                        .unwrap_or_default();
 
                     let hint = if *on_next_layer {
                         let hint_lkup = self.gen_private_hint_lookup(i);
@@ -1940,27 +1969,41 @@ impl StructParseDeriveCtx {
                         quote! { None }
                     };
 
+                    let parse_expr = |parse_input: TokenStream| {
+                        if let Some(count_expr) = count_expr.as_ref() {
+                            quote! {
+                                <#genless_user_ty as HasView<_>>::ViewType::parse_counted(
+                                    #parse_input, (#count_expr) as usize, #hint
+                                )?
+                            }
+                        } else {
+                            quote! {
+                                <#genless_user_ty as HasView<_>>::ViewType::parse_choice(
+                                    #parse_input, #hint
+                                )?
+                            }
+                        }
+                    };
+
                     if let Some(len_expr) = len_expr {
+                        let parse_varlen_expr = parse_expr(quote! { varlen });
                         segment_fragments.push(quote! {
                             #preamble;
+                            #count_preamble;
 
                             let chunk_len = (#len_expr) as usize;
 
                             let (varlen, from) = from.split_at(chunk_len)
                                 .map_err(|_| ::ingot::types::ParseError::TooSmall)?;
 
-                            let (#val_ident, hint, _) =
-                                <#genless_user_ty as HasView<_>>::ViewType::parse_choice(
-                                    varlen, #hint
-                                )?;
+                            let (#val_ident, hint, _) = #parse_varlen_expr;
                             let #val_ident = ::ingot::types::Header::Raw(#val_ident.into());
                         });
                     } else {
+                        let parse_from_expr = parse_expr(quote! { from });
                         segment_fragments.push(quote! {
-                            let (#val_ident, hint, from) =
-                                <#genless_user_ty as HasView<_>>::ViewType::parse_choice(
-                                    from, #hint
-                                )?;
+                            #count_preamble;
+                            let (#val_ident, hint, from) = #parse_from_expr;
                             let #val_ident = ::ingot::types::Header::Raw(#val_ident.into());
                         });
                     }
@@ -2167,7 +2210,7 @@ impl StructParseDeriveCtx {
 
                     owned_emit_blocks.push(quote! {
                         let (g, rest) = #zc_ty_name::mut_from_prefix(rest)
-                            .expect(&::alloc::format!("provided buf had insufficient bytes"));
+                            .expect("provided buf had insufficient bytes");
                         #( #zerofills )*
                         #( #per_field_sets )*
                     });
