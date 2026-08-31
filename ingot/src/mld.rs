@@ -117,6 +117,33 @@ impl MldV1 {
             group_addr: group_addr.addr(),
         }
     }
+
+    /// Check the address-class constraints of [RFC2710, §3].
+    ///
+    /// A Query carries the unspecified address (General) or the queried
+    /// group.
+    ///
+    /// A Report or Done always names a group.
+    ///
+    /// Reserved fields are ignored by receivers per the RFC and
+    /// deliberately not checked.
+    ///
+    /// [RFC2710, §3]: https://datatracker.ietf.org/doc/html/rfc2710#section-3
+    pub fn validate(&self) -> Result<(), MldValidationError> {
+        let group_ok = match self.ty {
+            IcmpV6Type::MULTICAST_LISTENER_QUERY => {
+                self.group_addr == Ipv6Addr::UNSPECIFIED
+                    || self.group_addr.is_multicast()
+            }
+            IcmpV6Type::V1_MULTICAST_LISTENER_REPORT
+            | IcmpV6Type::V1_MULTICAST_LISTENER_DONE => {
+                self.group_addr.is_multicast()
+            }
+            _ => return Err(MldValidationError::WrongType),
+        };
+
+        ensure(group_ok, MldValidationError::GroupNotMulticast)
+    }
 }
 
 /// See [RFC3810, §5.1].
@@ -182,6 +209,92 @@ pub fn querier_query_interval_secs(qqic: u8) -> u32 {
     }
 }
 
+/// A source address must be unicast (RFC3810, §5.1.11 and §5.2.9), which
+/// excludes the unspecified address: RFC4291, §2.5.2 defines `::` as marking
+/// the absence of an address rather than naming one. Loopback is a unicast
+/// address and deliberately passes and rejecting it is forwarding policy (not
+/// message validity).
+fn is_unicast_source(addr: &Ipv6Addr) -> bool {
+    *addr != Ipv6Addr::UNSPECIFIED && addr.is_unicast()
+}
+
+/// The error returned when an MLD message violates the class constraints of
+/// its RFC.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum MldValidationError {
+    /// The ICMPv6 type is not the expected MLD message type.
+    WrongType,
+    /// A group or record address is required to be multicast and is not.
+    GroupNotMulticast,
+    /// A General Query contains one or more source addresses.
+    GeneralQueryHasSources,
+    /// A source address is required to be unicast and is not.
+    SourceNotUnicast,
+}
+
+impl core::error::Error for MldValidationError {}
+
+impl core::fmt::Display for MldValidationError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::WrongType => "ICMPv6 type is not the expected MLD type",
+            Self::GroupNotMulticast => "group address is not multicast",
+            Self::GeneralQueryHasSources => {
+                "General Query contains source addresses"
+            }
+            Self::SourceNotUnicast => "source address is not unicast",
+        })
+    }
+}
+
+/// Lift a checked condition into the validation error monad: `Ok(())` when
+/// `cond` holds, `err` otherwise. Sequenced with `?`.
+const fn ensure(
+    cond: bool,
+    err: MldValidationError,
+) -> Result<(), MldValidationError> {
+    if cond {
+        Ok(())
+    } else {
+        Err(err)
+    }
+}
+
+impl MldV2MulticastListenerQuery {
+    /// Check the class constraints of [RFC3810, §5.1].
+    ///
+    /// The group is the unspecified address for a General Query or a
+    /// multicast address otherwise ([§5.1.5]), and every source is unicast
+    /// ([§5.1.11]). Reserved fields are ignored by receivers per [§5.1.4] and
+    /// deliberately not checked.
+    ///
+    /// [RFC3810, §5.1]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.1
+    /// [§5.1.5]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.1.5
+    /// [§5.1.11]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.1.11
+    /// [§5.1.4]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.1.4
+    pub fn validate(&self) -> Result<(), MldValidationError> {
+        ensure(
+            matches!(self.ty, IcmpV6Type::MULTICAST_LISTENER_QUERY),
+            MldValidationError::WrongType,
+        )?;
+        if self.group_addr == Ipv6Addr::UNSPECIFIED {
+            ensure(
+                self.source_addrs.is_empty(),
+                MldValidationError::GeneralQueryHasSources,
+            )
+        } else {
+            ensure(
+                self.group_addr.is_multicast(),
+                MldValidationError::GroupNotMulticast,
+            )
+        }?;
+        ensure(
+            self.source_addrs.iter().all(is_unicast_source),
+            MldValidationError::SourceNotUnicast,
+        )
+    }
+}
+
 /// See [RFC3810, §5.2].
 ///
 /// An MLDv2 Report is carried by ICMPv6 type 143, which is assigned by
@@ -242,6 +355,42 @@ pub struct MldV2AddressRecord {
     pub source_addrs: Vec<Ipv6Addr>,
     #[ingot(var_len = "(aux_data_len as usize) * 4")]
     pub auxiliary_data: Vec<u8>,
+}
+
+impl MldV2AddressRecord {
+    /// Check the class constraints of [RFC3810, §5.2.4].
+    ///
+    /// The record names a multicast group ([§5.2.8]) with unicast sources
+    /// ([§5.2.9]). Unrecognised record types must be silently ignored per
+    /// [§5.2.12], so `record_type` is deliberately not checked.
+    ///
+    /// [RFC3810, §5.2.4]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.2.4
+    /// [§5.2.8]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.2.8
+    /// [§5.2.9]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.2.9
+    /// [§5.2.12]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.2.12
+    pub fn validate(&self) -> Result<(), MldValidationError> {
+        ensure(
+            self.multicast_addr.is_multicast(),
+            MldValidationError::GroupNotMulticast,
+        )?;
+        ensure(
+            self.source_addrs.iter().all(is_unicast_source),
+            MldValidationError::SourceNotUnicast,
+        )
+    }
+}
+
+impl MldV2MulticastListenerReport {
+    /// Check the class constraints of [RFC3810, §5.2], across every record.
+    ///
+    /// [RFC3810, §5.2]: https://datatracker.ietf.org/doc/html/rfc3810#section-5.2
+    pub fn validate(&self) -> Result<(), MldValidationError> {
+        ensure(
+            matches!(self.ty, IcmpV6Type::V2_MULTICAST_LISTENER_REPORT),
+            MldValidationError::WrongType,
+        )?;
+        self.records.iter().try_for_each(MldV2AddressRecord::validate)
+    }
 }
 
 #[cfg(test)]
@@ -865,8 +1014,8 @@ mod tests {
         let r = ValidMldV2MulticastListenerQuery::parse(bytes);
         assert!(matches!(r, Err(ingot::types::ParseError::TooSmall)));
 
-        // Boundary form of the same failure: two sources claimed, one
-        // supplied.
+        // Boundary form of the same failure, where two sources claimed,
+        // but one is supplied.
         #[rustfmt::skip]
         let bytes: &[u8] = &[
             0x82,
@@ -950,8 +1099,100 @@ mod tests {
         let bytes = report.emit_vec();
         assert_eq!(icmpv6_checksum(LINK_LOCAL, ALL_MLDV2_ROUTERS, &bytes), 0);
 
-        // The pseudo-header participates, so the same bytes under a
+        // The pseudo-header participates, meaning that the same bytes under a
         // different source address must not verify.
         assert_ne!(icmpv6_checksum(ALL_NODES, ALL_MLDV2_ROUTERS, &bytes), 0);
+    }
+
+    #[test]
+    fn validate_checks_address_classes() {
+        assert_eq!(MldV1::general_query(1000).validate(), Ok(()));
+        assert_eq!(
+            MldV1::address_specific_query(1000, ALL_NODES_GROUP).validate(),
+            Ok(())
+        );
+        assert_eq!(MldV1::report(ALL_NODES_GROUP).validate(), Ok(()));
+        assert_eq!(MldV1::done(ALL_NODES_GROUP).validate(), Ok(()));
+
+        let mut bad = MldV1::report(ALL_NODES_GROUP);
+        bad.ty = IcmpV6Type::RESERVED_INFO;
+        assert_eq!(bad.validate(), Err(MldValidationError::WrongType));
+
+        // A Report must name a group (the unspecified address only passes
+        // for a Query).
+        let mut bad = MldV1::report(ALL_NODES_GROUP);
+        bad.group_addr = Ipv6Addr::UNSPECIFIED;
+        assert_eq!(bad.validate(), Err(MldValidationError::GroupNotMulticast));
+
+        // The v2 Query default is a General Query and passes, while a multicast
+        // source does not.
+        assert_eq!(MldV2MulticastListenerQuery::default().validate(), Ok(()));
+        let bad = MldV2MulticastListenerQuery {
+            group_addr: ALL_NODES,
+            num_sources: 1,
+            source_addrs: vec![ALL_NODES],
+            ..Default::default()
+        };
+        assert_eq!(bad.validate(), Err(MldValidationError::SourceNotUnicast));
+
+        // `::` is not a unicast address (RFC4291, §2.5.2), so it cannot be
+        // a source. Loopback is unicast and passes, since rejecting it is
+        // forwarding policy rather than message validity.
+        let bad = MldV2MulticastListenerQuery {
+            group_addr: ALL_NODES,
+            num_sources: 1,
+            source_addrs: vec![Ipv6Addr::UNSPECIFIED],
+            ..Default::default()
+        };
+        assert_eq!(bad.validate(), Err(MldValidationError::SourceNotUnicast));
+
+        let bad = MldV2MulticastListenerQuery {
+            num_sources: 1,
+            source_addrs: vec![source(0x0a)],
+            ..Default::default()
+        };
+        assert_eq!(
+            bad.validate(),
+            Err(MldValidationError::GeneralQueryHasSources)
+        );
+
+        let lo = MldV2MulticastListenerQuery {
+            group_addr: ALL_NODES,
+            num_sources: 1,
+            source_addrs: vec![Ipv6Addr::LOCALHOST],
+            ..Default::default()
+        };
+        assert_eq!(lo.validate(), Ok(()));
+
+        // An unknown record type is not an error: receivers must silently
+        // ignore it, so rejecting one here would violate the RFC.
+        let odd_record = MldV2AddressRecord {
+            record_type: MldV2RecordType(200),
+            aux_data_len: 0,
+            num_sources: 0,
+            multicast_addr: ALL_NODES,
+            source_addrs: Vec::new(),
+            auxiliary_data: Vec::new(),
+        };
+        assert_eq!(odd_record.validate(), Ok(()));
+
+        // A record pointed at a unicast group fails, and the failure
+        // surfaces through the enclosing Report.
+        let bad_report = MldV2MulticastListenerReport {
+            num_records: 1,
+            records: Repeated::new(vec![MldV2AddressRecord {
+                record_type: MldV2RecordType::MODE_IS_INCLUDE,
+                aux_data_len: 0,
+                num_sources: 0,
+                multicast_addr: source(0x0a),
+                source_addrs: Vec::new(),
+                auxiliary_data: Vec::new(),
+            }]),
+            ..Default::default()
+        };
+        assert_eq!(
+            bad_report.validate(),
+            Err(MldValidationError::GroupNotMulticast)
+        );
     }
 }
