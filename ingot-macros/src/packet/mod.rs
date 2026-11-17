@@ -1915,6 +1915,7 @@ impl StructParseDeriveCtx {
                                                 underscore_token: Token![_](
                                                     t.span(),
                                                 ),
+                                                attrs: vec![],
                                             })
                                         }
                                     }
