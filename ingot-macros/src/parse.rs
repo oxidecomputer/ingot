@@ -96,7 +96,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
         let Type::Path(ref ty) = field.ty else { panic!() };
 
         let first_ty = if let Some(a) = &args.from {
-            TypePath { qself: None, path: a.clone() }
+            TypePath { qself: None, path: a.clone(), attrs: vec![] }
         } else {
             ty.clone()
         };
@@ -270,6 +270,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                             if let GenericArgument::Type(t) = arg {
                                 *t = Type::Infer(TypeInfer {
                                     underscore_token: Token![_](t.span()),
+                                    attrs: vec![],
                                 })
                             }
                         }
@@ -389,6 +390,7 @@ pub fn derive(input: DeriveInput, _args: ParserArgs) -> TokenStream {
                                 if let GenericArgument::Type(t) = arg {
                                     *t = Type::Infer(TypeInfer {
                                         underscore_token: Token![_](t.span()),
+                                        attrs: vec![],
                                     })
                                 }
                             }
