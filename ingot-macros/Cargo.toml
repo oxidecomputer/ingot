@@ -1,6 +1,6 @@
 [package]
 name = "ingot-macros"
-version = "0.2.0"
+version = "0.2.1"
 description = "Support macros for ingot"
 readme = "README.md"
 categories.workspace = true
