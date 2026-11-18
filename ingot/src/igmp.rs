@@ -31,6 +31,11 @@ impl IgmpMessageType {
 }
 
 /// See RFC3376, §4.1
+///
+/// A Query may carry data beyond the fields listed here (RFC3376, §4.1.10),
+/// returned as the parse remainder. Callers must fold those bytes into the
+/// IGMP checksum but otherwise ignore them, as this module computes no
+/// checksums itself.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct IgmpMembershipQuery {
@@ -45,15 +50,22 @@ pub struct IgmpMembershipQuery {
     pub s: u1,
     pub qrv: u3,
     pub qqic: u8,
+    /// The number of entries in `source_addrs`.
     pub num_sources: u16be,
 
     #[ingot(zerocopy, var_len = "num_sources.get()")]
     pub source_addrs: Vec<Ipv4Addr>,
-    // There may be additional trailing data in the packet, which should be used
-    // when computing the checksum.
 }
 
 /// See RFC3376, §4.2
+///
+/// `group_records` is bounded by `num_group_records`, so trailing bytes come
+/// back as the parse remainder rather than being consumed. That matters on
+/// the wire because a Report carrying no records is 46 octets (14 Ethernet,
+/// 24 IPv4 with the Router Alert option, 8 here), under the 60-octet Ethernet
+/// minimum, so frame padding would otherwise be read as records. The
+/// remainder must still be folded into the IGMP checksum (RFC3376, §4.2.11),
+/// which this module does not compute.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Ingot)]
 #[ingot(impl_default)]
 pub struct IgmpV3MembershipReport {
@@ -62,11 +74,10 @@ pub struct IgmpV3MembershipReport {
     resv1: u8,
     pub checksum: u16be,
     resv2: u16be,
-    pub num_group_records: u16be, // not used, we just read the remaining data
-    #[ingot(subparse())]
+    /// The number of entries in `group_records`.
+    pub num_group_records: u16be,
+    #[ingot(subparse(count = "num_group_records.get()"))]
     pub group_records: Repeated<IgmpV3GroupRecord>,
-    // There may be additional trailing data in the packet, which should be used
-    // when computing the checksum.
 }
 
 /// See RFC3376, §4.2.12
@@ -90,6 +101,8 @@ impl IgmpV3RecordType {
     pub const MODE_IS_EXCLUDE: Self = Self(2);
     pub const CHANGE_TO_INCLUDE_MODE: Self = Self(3);
     pub const CHANGE_TO_EXCLUDE_MODE: Self = Self(4);
+    pub const ALLOW_NEW_SOURCES: Self = Self(5);
+    pub const BLOCK_OLD_SOURCES: Self = Self(6);
 }
 
 /// See RFC3376, §4.2
@@ -97,14 +110,19 @@ impl IgmpV3RecordType {
 pub struct IgmpV3GroupRecord {
     #[ingot(zerocopy)]
     pub record_type: IgmpV3RecordType,
+    /// Length of `auxiliary_data` in units of 32-bit words, per
+    /// [RFC3376, §4.2.6].
+    ///
+    /// [RFC3376, §4.2.6]: https://datatracker.ietf.org/doc/html/rfc3376#section-4.2.6
     pub aux_data_len: u8,
+    /// The number of entries in `source_addrs`.
     pub num_sources: u16be,
     #[ingot(zerocopy)]
     pub multicast_addr: Ipv4Addr,
 
     #[ingot(zerocopy, var_len = "num_sources.get()")]
     pub source_addrs: Vec<Ipv4Addr>,
-    #[ingot(var_len = "aux_data_len")]
+    #[ingot(var_len = "(aux_data_len as usize) * 4")]
     pub auxiliary_data: Vec<u8>,
 }
 
@@ -134,7 +152,7 @@ pub struct IgmpV2LeaveGroup {
 
 #[cfg(test)]
 #[allow(clippy::unusual_byte_groupings)]
-mod test {
+mod tests {
     use super::*;
     use crate::types::{Emit, HeaderParse};
     use ingot_types::HeaderLen;
@@ -536,5 +554,61 @@ mod test {
         // Re-emit with correct checksum
         bytes = query.emit_vec();
         assert_eq!(compute_checksum(&bytes), 0);
+    }
+
+    #[test]
+    fn ethernet_padding_is_returned_as_remainder() {
+        // An empty V3 Report, as it would sit in a 60-octet minimum frame:
+        // 14 Ethernet and 24 IPv4 precede it, so 14 octets of padding follow.
+        #[rustfmt::skip]
+        let report: &[u8] = &[
+            0x22,
+            0x00,
+            0x00, 0x00,
+            0x00, 0x00,
+            0x00, 0x00,
+        ][..];
+        let padded = [report, &[0u8; 14][..]].concat();
+
+        let (trimmed, _, rest) =
+            ValidIgmpV3MembershipReport::parse(report).unwrap();
+        assert_eq!(trimmed.group_records_ref().packet_length(), 0);
+        assert!(rest.is_empty());
+
+        // `num_group_records` bounds the parse, so the padding comes back as
+        // remainder instead of being read as a record.
+        let (parsed, _, rest) =
+            ValidIgmpV3MembershipReport::parse(&padded[..]).unwrap();
+        assert_eq!(parsed.group_records_ref().packet_length(), 0);
+        assert_eq!(rest.len(), 14);
+    }
+
+    #[test]
+    fn group_record_aux_data_is_counted_in_words() {
+        #[rustfmt::skip]
+        let bytes: &[u8] = &[
+            0x01,
+            0x02, // two 32-bit words of auxiliary data
+            0x00, 0x00,
+
+            224, 0, 0, 1,
+
+            1, 2, 3, 4,
+            5, 6, 7, 8,
+        ][..];
+        let (record, _, rest) = ValidIgmpV3GroupRecord::parse(bytes).unwrap();
+        assert_eq!(record.record_type(), IgmpV3RecordType::MODE_IS_INCLUDE);
+        assert_eq!(record.aux_data_len(), 2);
+        assert_eq!(record.num_sources(), 0);
+        assert_eq!(
+            record.multicast_addr(),
+            Ipv4Addr::from_octets([224, 0, 0, 1])
+        );
+        assert_eq!(record.packet_length(), 16);
+        assert!(rest.is_empty());
+
+        // One word short of the advertised auxiliary data.
+        let r = ValidIgmpV3GroupRecord::parse(&bytes[..12]);
+        assert!(matches!(r, Err(ingot::types::ParseError::TooSmall)));
     }
 }

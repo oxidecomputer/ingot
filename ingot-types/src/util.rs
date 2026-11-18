@@ -218,7 +218,67 @@ where
         // SAFETY:
         // We have read exactly bytes_read from data already, and
         // ByteSlice requires the base ptr + len on derived byteslices
-        // to be identical/stable.
+        // to be identical and stable.
+        let (inner, remainder) = unsafe { data.split_at_unchecked(bytes_read) };
+
+        let val = Self { inner, marker: PhantomData };
+
+        Ok((val, hint, remainder))
+    }
+}
+
+impl<
+        B: SplitByteSlice,
+        T: HasView<B> + NextLayer<Hint = <T as NextLayer>::Denom>,
+    > RepeatedView<B, T>
+where
+    T: for<'a> HasView<&'a [u8]>,
+    for<'a> <T as HasView<&'a [u8]>>::ViewType:
+        HeaderParse<&'a [u8]> + NextLayer<Denom = T::Denom, Hint = T::Hint>,
+{
+    /// Parse exactly `count` repeated values and return the remaining input.
+    ///
+    /// Unlike the exhaustion parse, which treats [`ParseError::Unwanted`] as a
+    /// clean stop, a short count is a fault here: the caller took `count` from
+    /// a header field
+    /// advertising exactly that count, so yielding fewer while
+    /// reporting success would hand back a silently truncated list.
+    ///
+    /// Each counted element must consume at least one byte. A zero-width `T`
+    /// cannot be represented as a counted wire value and is rejected.
+    #[inline]
+    pub fn parse_counted(
+        data: B,
+        count: usize,
+        mut hint: Option<T::Hint>,
+    ) -> ParseResult<Success<Self, B>> {
+        let original_len = data.deref().len();
+        let mut bytes_read = 0;
+
+        for _ in 0..count {
+            let previous_bytes_read = bytes_read;
+            let slice = &data[bytes_read..];
+            let (_, l_hint, remainder) =
+                <T as HasView<&[u8]>>::ViewType::parse_choice(slice, hint)
+                    // `Unwanted` is a control signal, not a fault, so it must
+                    // not escape: an enclosing choice would read it as "this
+                    // header is unwanted" and stop, turning a malformed count
+                    // into a silent truncation further out.
+                    .map_err(|e| match e {
+                        ParseError::Unwanted => ParseError::IllegalValue,
+                        e => e,
+                    })?;
+            bytes_read = original_len - remainder.len();
+            if bytes_read == previous_bytes_read {
+                return Err(ParseError::IllegalValue);
+            }
+            hint = l_hint;
+        }
+
+        // SAFETY:
+        // We have read exactly bytes_read from data already, and
+        // ByteSlice requires the base ptr + len on derived byteslices
+        // to be identical and stable.
         let (inner, remainder) = unsafe { data.split_at_unchecked(bytes_read) };
 
         let val = Self { inner, marker: PhantomData };

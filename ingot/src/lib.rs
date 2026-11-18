@@ -158,6 +158,7 @@ pub mod geneve;
 pub mod icmp;
 pub mod igmp;
 pub mod ip;
+pub mod mld;
 pub mod tcp;
 pub mod udp;
 
